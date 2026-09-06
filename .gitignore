@@ -1,0 +1,26 @@
+# Secrets never enter this repo.
+.env
+.env.*
+
+# Build and test artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+__pycache__/
+*.pyc
+
+# Virtualenvs
+.venv/
+venv/
+
+# Editor / OS
+*.bak
+*.orig
+*.swp
+*~
+.DS_Store

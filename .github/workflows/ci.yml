@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # hatch-vcs derives the version from tags
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      - run: python -m ruff format --check .
+      - run: python -m ruff check .
+      - run: python -m mypy
+      - run: python -m pytest
+      - run: python scripts/budgets.py
+
+  # Python's failure mode is not a compile error, it is a wheel that will not
+  # install. Build it, check it, install it clean, and run the binary.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/ripdoctor --version
+      - name: the base install must pull in nothing
+        run: |
+          n=$(/tmp/clean/bin/pip list --not-required --format=freeze \
+              | grep -vc -E '^(ripdoctor|pip|setuptools|wheel)=' || true)
+          test "$n" -eq 0 || { /tmp/clean/bin/pip list; \
+            echo "base install gained dependencies"; exit 1; }

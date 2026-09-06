@@ -1,0 +1,244 @@
+# Decisions
+
+Architecture decision records. One entry per decision that would otherwise be
+re-argued. Add one whenever a stated principle is bent, and say why.
+
+Superseded entries stay in place with a note. They are not deleted.
+
+---
+
+## ADR-001 — The project is called RipDoctor
+
+**Status:** accepted.
+
+The tool was called cutAssist while it ran on one machine. The published name is
+RipDoctor, used everywhere: repository, package, command, and UI. `ripdoctor`
+was unregistered on PyPI, GitHub search returned no repositories, and no
+existing product uses the name.
+
+**What it costs.** A rename pass across roughly 11,000 lines, and the loss of
+the connection to the older documents, which say cutAssist throughout. Those
+documents are being rewritten anyway.
+
+**Note.** An older, superseded script named `ripdoctor.py` exists in the
+predecessor's toolchain. It is not this, and it is not ported. Do not let the
+names collide when reading history.
+
+---
+
+## ADR-002 — MIT
+
+**Status:** accepted.
+
+Maximum adoption, minimum friction, and conventional for a tool of this kind.
+The predecessor project in this space is also MIT.
+
+---
+
+## ADR-003 — The assistant is not part of 1.0
+
+**Status:** accepted.
+
+cutAssist included a chat assistant backed by a hosted model, with the method
+handbook injected as its system prompt and fifteen tools that acted on the plan.
+It is not in 1.0.
+
+**Why.** It required every user to supply and pay for an API key, which puts a
+third-party billing relationship in front of a tool that otherwise runs entirely
+offline. It was also the only non-stdlib dependency in the entire application.
+Removing it deletes about 617 lines and takes the dependency count to zero.
+
+**What is lost.** The assistant was genuinely useful on difficult sides, and it
+is the most distinctive thing the predecessor did. This defers it, it does not
+reject it.
+
+**What would reverse this.** A 1.x release, once the deterministic pipeline is
+covered by tests and the handbook has been separated from one person's records.
+
+---
+
+## ADR-004 — Python 3.11, and zero runtime dependencies
+
+**Status:** accepted.
+
+`requires-python = ">=3.11"`, and `dependencies = []` for the base install,
+enforced by `scripts/budgets.py`.
+
+**Why.** `tomllib` entered the standard library in 3.11, so TOML configuration
+costs nothing. The algorithm needs no numerical library: the predecessor's
+toolchain was written against `array`, `math` and `cmath` alone, and the heavy
+work is done by ffmpeg, which is a system dependency rather than a Python one.
+An audio tool that installs with no transitive dependencies is worth more than
+the convenience of numpy.
+
+**What it costs.** Debian 11 ships Python 3.9 and is excluded. Some pure-Python
+paths are slower than a numpy equivalent would be; where speed matters the work
+is already delegated to ffmpeg.
+
+---
+
+## ADR-005 — The core operates on envelopes, not sample buffers
+
+**Status:** accepted.
+
+`ripdoctor/core` takes a dB envelope on a uniform grid. It does not take PCM,
+except in the live meter, which is a separate entry point.
+
+**Why.** Decoding is the expensive part and ffmpeg already does it: an `astats`
+pass over a 22-minute side takes about 5.2 seconds, where the equivalent
+pure-Python loop is not usable interactively. A core defined over sample buffers
+would have pulled that loop back into the hot path. It is also the natural unit
+of the algorithm — the predecessor's two gap-detection functions both took
+levels rather than samples, and had already drifted into two signatures for one
+behaviour.
+
+**What it costs.** The core cannot be handed a file. Callers decode first, which
+means the seam has to be explicit — which is the point.
+
+**Consequence worth stating.** The pure-Python decoder is kept, in `audio/`, as
+a test oracle. It proves the fast path agrees with a slow, obvious
+implementation. It is never a production path.
+
+---
+
+## ADR-006 — Live capture and file import are equal inputs
+
+**Status:** accepted.
+
+A side may be recorded by RipDoctor or handed to it as an existing WAV or FLAC.
+Neither is the primary path.
+
+**Why.** The turntable may not be attached to the machine that holds the
+library, and some people already record in an editor they trust. Treating import
+as a second-class path would exclude them for no benefit. Equal support also
+means the whole cutting pipeline is exercisable without hardware, which is what
+makes it testable.
+
+**What it costs.** Two ingest paths to maintain and document rather than one.
+
+---
+
+## ADR-007 — beets is one importer, not the importer
+
+**Status:** accepted.
+
+The base install tags with `metaflac` and places files under a configured
+library root. `ripdoctor[beets]` adds beets as an alternative importer behind
+the same interface.
+
+**Why.** beets accounts for roughly 1,280 lines of host coupling in the
+predecessor and is the second-largest source of machine-specific assumptions
+after paths. More importantly, the archive step is gated on the album being
+present in the beets library, so an install without beets could never complete
+the workflow — raw sides would accumulate with no way to clear them. The gate is
+correct and stays; what changes is that "the destination holds N verified
+tracks" can be established without beets.
+
+**What beets still earns.** Acoustic fingerprint matching, path formatting,
+album-mode ReplayGain, duplicate resolution, and a real library database. Those
+are reasons to install the extra. They are not reasons to require it.
+
+---
+
+## ADR-008 — Thresholds are configuration with measured defaults; automatic calibration is deferred
+
+**Status:** accepted.
+
+Every detection constant becomes a documented field on a `Thresholds` value,
+defaulting to the number in use today. `ripdoctor measure` records reference
+levels on the user's own chain and prints them beside the defaults, emitting a
+configuration snippet. It does not rewrite configuration itself.
+
+**Why.** The shipped numbers were derived by replaying fifteen archived sides on
+one signal chain, calibrated at a peak of −12.3 dBFS. They are real
+measurements, not preferences, but they are one chain's measurements. Deriving
+new thresholds automatically requires knowing how they generalise, and that is
+not yet known — there is one turntable to learn it from. A command that computed
+new values would be shipping a guess with the authority of a measurement.
+
+**What it costs.** A user on a different chain has manual work to do. The
+documentation has to explain what each number means rather than hiding it.
+
+**What would reverse this.** Measurements from several different signal chains
+showing how the numbers move.
+
+---
+
+## ADR-009 — The device-name heuristic is deleted; the signal guard is kept
+
+**Status:** accepted.
+
+The predecessor decided whether an input was the turntable by testing whether
+the card name contained `USB` or was called `CODEC`, and refused to record
+otherwise. The heuristic is removed. The refusal is not.
+
+**Why.** The heuristic makes the application unusable on any machine that is not
+the one it was written on. The guard behind it is sound and was added for a
+specific reason: an interface lost its USB connection and 162 seconds of
+mic-jack bleed were captured instead of a record. The general form of that check
+already exists in the code — no music-like signal after 30 seconds of recording,
+with the band level reported — and it catches the same failure on any machine
+with no knowledge of device names.
+
+**What it costs.** Nothing on the original machine. Elsewhere it converts a
+refusal into a warning plus an early abort, which is the correct trade.
+
+---
+
+## ADR-010 — Routes are values
+
+**Status:** accepted.
+
+HTTP handlers are pure functions from a request value to a response value. The
+server is a thin adapter over them. The standard library's `http.server` is
+kept.
+
+**Why.** The predecessor's 1,051-line handler could not be tested without
+opening a socket, which would have left roughly a fifth of the codebase outside
+the test suite. Separating the routing from the transport is about sixty lines
+of work. A framework would solve the same problem by adding three dependencies
+and an async model, for a single-user application on a local network.
+
+**What it costs.** Some hand-written plumbing that a framework would supply.
+
+---
+
+## ADR-011 — The integration contract is a directory
+
+**Status:** accepted.
+
+RipDoctor writes tagged files into a library layout and stops. It does not
+serve, index, stream, or synchronise them.
+
+**Why.** The predecessor ran alongside a music server, a file browser and a
+synchronisation daemon, and called none of them. That was not an accident of
+implementation; it is what makes the tool portable. Anything that watches a
+directory can consume its output, and nothing has to be installed to try it.
+
+**What it costs.** No integration conveniences. A user wanting their player to
+notice a new album waits for that player's own scan.
+
+---
+
+## ADR-012 — Ratio budgets are not enforced below 500 lines of code
+
+**Status:** accepted.
+
+`scripts/budgets.py` enforces absolute line counts from the first commit, but
+the comment-ratio and documentation-ratio budgets are printed and not enforced
+until the package reaches 500 lines of code.
+
+**Why.** A ratio needs a denominator worth dividing by. At the end of Phase 0
+the package was 23 lines of code against a full set of decision records, giving
+a documentation ratio of 1535 per cent. Enforcing the cap there would have
+meant either raising it to a number that means nothing later, or deleting
+documentation written deliberately and in advance. Neither is the behaviour the
+budget exists to produce.
+
+**What it costs.** There is a window early in the project where prose can grow
+unchecked. It is bounded: the floor is a stated number, the ratios are printed
+at every run so the trend is visible, and they begin to bite on their own.
+
+**What this is not.** It is not permission to raise a ceiling that has started
+to bite. Once a ratio is enforced, exceeding it means retiring something or
+writing a record explaining why the number moved.
