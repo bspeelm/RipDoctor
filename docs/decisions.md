@@ -242,3 +242,108 @@ at every run so the trend is visible, and they begin to bite on their own.
 **What this is not.** It is not permission to raise a ceiling that has started
 to bite. Once a ratio is enforced, exceeding it means retiring something or
 writing a record explaining why the number moved.
+
+---
+
+## ADR-013 — Python, not Rust or Go
+
+**Status:** accepted.
+
+The implementation language is Python. This was reconsidered deliberately at the
+end of Phase 0, when the switching cost was still close to zero.
+
+**Why.** The numeric work is not where the time goes. Measured at production
+sizes on Python 3.14:
+
+| Operation | Size | Time |
+|---|---|---|
+| `gaps()` over a 22-minute side | 26,400 windows | 2.5 ms |
+| Alignment, coarse pass | needle 150, hay 600 | 1.7 ms |
+| Alignment, fine pass | needle 100, hay 1,250 | 3.0 ms |
+| **All production numeric work, per side** | | **≈ 7 ms** |
+| ffmpeg `astats` over the same side | | 5,200 ms |
+
+Python accounts for roughly 0.13 per cent of the analysis time. A compiled
+language would take 7 milliseconds down to a fraction of one, on a workflow
+whose next step is a person listening to a record. The design already delegates
+every expensive operation — decode, windowed RMS, the tick filtergraph,
+sample-accurate cutting, the Opus proxies — to ffmpeg, which is C.
+
+**The strongest argument against this decision** is distribution rather than
+speed: a single static binary needs no interpreter, no virtual environment, and
+does not meet a PEP 668 externally-managed environment on Debian. That argument
+does not survive the ffmpeg dependency. ffmpeg cannot be removed — replacing it
+means writing a FLAC encoder, an Opus encoder, a resampler and a filter graph,
+and the result would be worse than ffmpeg. Since the user installs system
+packages either way, a static binary saves the interpreter and nothing else.
+Zero runtime dependencies (ADR-004) removes the failure mode that makes Python
+packaging unpleasant, and `pipx install` handles the rest.
+
+**What it costs.** An interpreter on the target machine, and a slower path if
+a genuinely hot loop ever appears. The likeliest candidate is the live meter's
+FFT, which currently runs about once a second.
+
+**What would reverse this.** A measured hot path that matters. The remedy then
+is a compiled extension for that one function, not a rewrite.
+
+**Not a factor either way.** beets is driven by subprocess, never as a library,
+so it argues for neither language. The browser front-end is JavaScript
+regardless.
+
+---
+
+## ADR-014 — The envelope window-count tolerance is two per cent, not ten
+
+**Status:** accepted. Amends the behaviour ported from the predecessor.
+
+An envelope is cached only if its window count matches the audio's duration.
+The predecessor allowed a ratio between 0.9 and 1.1. RipDoctor allows 0.98 to
+1.02.
+
+**Why.** The wide tolerance had already let a real fault through: an envelope
+measured at 44.1 kHz matched against audio at 48 kHz gives a ratio of 0.919,
+which sits inside ten per cent and is wrong by an amount that grows along the
+side. Every cut taken from such an envelope is confidently misplaced.
+
+The replacement is measured rather than chosen. Across the 29 real sides in the
+fixture set the worst honest deviation between declared windows and computed
+duration is **0.072 per cent**. Two per cent is a 28-fold margin over anything
+real, and rejects every sample-rate confusion: 44.1 against 48 kHz is 8.1 per
+cent out, 48 against 96 is 50 per cent out.
+
+**What it costs.** An envelope produced by some future measuring path with a
+genuinely different windowing convention would be rejected rather than cached.
+That is the intended behaviour; the alternative is silently misaligned cuts.
+
+**How it is held.** `test_the_tolerance_clears_every_real_side` fails if real
+captures ever drift close to the tolerance, before anyone's envelope is
+rejected by it.
+
+---
+
+## ADR-015 — Isolated corrupt windows are tolerated and measured, not repaired in the core
+
+**Status:** accepted.
+
+Peak level cannot be lower than RMS level over the same window; it is
+arithmetic. Four of the 29 real fixture sides violate it, in exactly one window
+each, at magnitudes from 1 to 49 dB.
+
+**Why it is not a reader bug.** A swapped lane order or a broken parser would
+fail on every window of every side. One isolated window per side is the
+signature of interleaved `astats` output, which the predecessor already handles
+when parsing: two concurrent ffmpeg passes writing to one stream merge a line
+and a value is misread.
+
+**The decision.** `core` does not repair these. It computes over what it is
+given, and the test suite asserts the *rate* of the anomaly rather than its
+absence - currently under one in ten thousand readings. If the lanes were ever
+swapped or the parser regressed, the proportion jumps and the test fails.
+Detecting and re-measuring a corrupt window needs the audio, so it belongs to
+the layer that has it.
+
+**What it costs.** A single bad window can still perturb a threshold. At one
+window in twenty-five thousand, against detection that requires a run of at
+least twenty-four consecutive quiet windows to call a gap, the exposure is
+negligible - but it is exposure, and it is written down rather than assumed
+away.
