@@ -19,12 +19,50 @@ from ripdoctor.work.capture import Busy
 PARTIAL = ".capturing.wav"
 
 
-def _format(service: Service) -> C.Format:
+def _format(service: Service, body: dict[str, Any] | None = None) -> C.Format:
+    """The configured format, or what was asked for if it is one this records in.
+
+    A format the card cannot take fails inside arecord, seconds after somebody
+    has put the needle down.
+    """
+    asked = body or {}
+    wanted = str(asked.get("format") or service.settings.capture_format)
+    if wanted not in C.SAMPLE_FORMATS:
+        raise H.HttpError(400, f"{wanted} is not a sample format this records in")
+    try:
+        rate = int(asked.get("rate") or service.settings.capture_rate)
+    except (TypeError, ValueError) as e:
+        raise H.HttpError(400, "the rate must be a number") from e
     return C.Format(
-        rate=service.settings.capture_rate,
+        rate=rate,
         channels=service.settings.capture_channels,
-        sample_format=service.settings.capture_format,
+        sample_format=wanted,
     )
+
+
+def _agreed_device(service: Service, body: dict[str, Any]) -> str:
+    """The configured device, or another one somebody meant on purpose.
+
+    The configured device is the one the thresholds were measured on and the
+    one the turntable is plugged into. Recording from a different one is almost
+    always a mistake rather than a decision: on 2026-08-23 a rip ran for 162
+    seconds against an onboard codec whose input was set to Rear Mic, and
+    everything needed to catch it was already known and used only to sort a
+    dropdown.
+
+    So a different device is refused unless it is asked for twice.
+    """
+    configured = service.settings.capture_device
+    asked = str(body.get("device") or configured)
+    if not asked:
+        raise H.HttpError(400, "no capture device is set - run `ripdoctor devices`")
+    if configured and asked != configured and not body.get("force_device"):
+        raise H.HttpError(
+            409,
+            f"{asked} is not the configured capture device ({configured}). "
+            "If the turntable really is on that one, tick the override.",
+        )
+    return asked
 
 
 def _named(body: dict[str, Any], key: str) -> str:
@@ -61,10 +99,13 @@ def add(app: App, service: Service) -> None:
                         "name": d.name,
                         "rates": list(d.rates),
                         "formats": list(d.formats),
+                        "configured": d.id == service.settings.capture_device,
                     }
                     for d in found
                 ],
                 "configured": service.settings.capture_device,
+                "rate": service.settings.capture_rate,
+                "format": service.settings.capture_format,
             }
         )
 
@@ -78,7 +119,7 @@ def add(app: App, service: Service) -> None:
         slug, side = _named(body, "slug"), _named(body, "side")
         if not slug or not side:
             raise H.HttpError(400, "a record and a side are needed")
-        device = str(body.get("device") or service.settings.capture_device)
+        device = _agreed_device(service, body)
         # A punch is a capture of one track, recorded to replace a dirty take.
         # It is written under a stem no side scan matches.
         stem = str(body.get("kind", "side"))
@@ -90,7 +131,7 @@ def add(app: App, service: Service) -> None:
                 album,
                 slug,
                 side,
-                _format(service),
+                _format(service, body),
                 autostop=bool(body.get("autostop", True)),
                 stem=stem,
             )

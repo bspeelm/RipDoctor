@@ -118,6 +118,13 @@ the boundary by counting seconds does not work, and is not their job.
 
 ## Traps that are not about detection
 
+**A capture device is chosen, never defaulted to.** The first device a machine
+lists is whatever the motherboard calls its own audio, and its input is
+whatever some other program last selected. Recording from it produces a file
+that looks like a quiet record: signal present, nothing musical in it. Name the
+device, check the name against what the machine can currently see, and refuse a
+different one unless it is asked for twice.
+
 **The side's loudest moment is often the needle drop**, not music — a brief
 impulse in the lead-in that can reach full scale. Reading a peak measurement
 without checking *where* it falls will convince you a clean record is clipped.

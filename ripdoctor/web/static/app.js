@@ -1178,7 +1178,7 @@ function updateAutostopWarning(st, running) {
 
 let ripDevices = [];
 
-function fillRates() {
+function fillRates(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-rate");
   const prev = sel.value || localStorage.getItem("ripdoctor:rip:rate") || "48000";
@@ -1186,13 +1186,18 @@ function fillRates() {
   // what the device actually accepts — offering 96k on hardware that cannot do
   // it just moves the failure into the middle of a side
   const rates = (d && d.rates && d.rates.length) ? d.rates : [44100, 48000, 96000];
+  // The configured rate, when this machine has one - it is the rate the
+  // thresholds were measured at and the one the chain is actually running.
+  const want = info && info.rate ? String(info.rate) : prev;
   for (const r of rates) {
-    const o = el("option", "", `${r} Hz${r === 48000 ? "  (current setup)" : ""}`);
+    const o = el("option", "", `${r} Hz${String(r) === want ? "  (configured)" : ""}`);
     o.value = String(r);
     sel.appendChild(o);
   }
-  sel.value = rates.map(String).includes(prev) ? prev : String(rates.includes(48000) ? 48000 : rates[0]);
-  fillFormats();
+  sel.value = rates.map(String).includes(want)
+    ? want
+    : String(rates.includes(48000) ? 48000 : rates[0]);
+  fillFormats(info);
 }
 
 const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
@@ -1200,10 +1205,13 @@ const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
 // Default to the WIDEST the device offers, not the narrowest. The Waxwing sends
 // 24-bit and capturing it as 16 throws the low 8 bits away, which is most of
 // the reason for the optical path in the first place.
-function fillFormats() {
+function fillFormats(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-format");
-  const prev = sel.value || localStorage.getItem("ripdoctor:rip:format") || "";
+  const prev = (info && info.format)
+    || sel.value
+    || localStorage.getItem("ripdoctor:rip:format")
+    || "";
   sel.innerHTML = "";
   const formats = (d && d.formats && d.formats.length) ? d.formats : ["S16_LE"];
   for (const f of formats) {
@@ -1216,18 +1224,30 @@ function fillFormats() {
 
 async function loadDevices() {
   try {
-    const { devices } = await api("/api/rip/devices");
+    const info = await api("/api/rip/devices");
+    const devices = info.devices;
     ripDevices = devices;
     const sel = $("#rip-device"); sel.innerHTML = "";
     for (const d of devices) {
-      const o = el("option", "", `${d.id} — ${d.name}${d.likely_turntable ? "  (turntable)" : ""}`);
+      const o = el("option", "", `${d.id} — ${d.name}${d.configured ? "  (configured)" : ""}`);
       o.value = d.id;
       sel.appendChild(o);
     }
-    if (devices.length) sel.value = devices[0].id;
-    else $("#rip-err").textContent = "no capture device found — is the interface plugged in?";
-    fillRates();
-    sel.onchange = fillRates;
+    // The configured one, never simply the first. Sorted by card number, the
+    // first is whatever the motherboard calls its own audio - which is how a
+    // rip runs against an onboard codec with its input set to Rear Mic.
+    if (devices.some((d) => d.id === info.configured)) {
+      sel.value = info.configured;
+    } else if (!devices.length) {
+      $("#rip-err").textContent = "no capture device found — is the interface plugged in?";
+    } else {
+      sel.value = "";
+      $("#rip-err").textContent = info.configured
+        ? `${info.configured} is configured but this machine cannot see it — check the cable`
+        : "no capture device is configured — set capture_device, or pick one below";
+    }
+    fillRates(info);
+    sel.onchange = () => fillRates(info);
     const remember = () => {
       try {
         localStorage.setItem("ripdoctor:rip:rate", $("#rip-rate").value);
