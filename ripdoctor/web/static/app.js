@@ -121,7 +121,11 @@ async function ensurePrepared() {
 
 async function pollPrepare(box) {
   for (;;) {
-    const j = await api(`/api/prepare/${S.slug}`);
+    // The job, not the endpoint that starts one. The prepare endpoint takes a
+    // POST and nothing else, so polling it answered "no such route" every time
+    // and no prepare has ever reported its progress. It stayed invisible
+    // because the failure was swallowed and the work carried on regardless.
+    const j = await api(`/api/job/${S.slug}`);
     box.querySelector("span").textContent =
       j.error ? `failed: ${j.error}` : `preparing ${j.current || ""} — ${j.detail} (${j.finished}/${j.total})`;
     box.querySelector("i").style.width = `${(j.finished / j.total) * 100}%`;

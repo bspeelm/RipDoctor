@@ -188,3 +188,26 @@ def test_the_metadata_is_json_a_browser_can_read(tmp_path: Path) -> None:
     prepared, layout = built(tmp_path)
     data = json.loads(C.meta_path(layout, "album", "a").read_text())
     assert data["windows"] == prepared.windows and data["window_ms"] == 50
+
+
+def test_a_measurement_written_before_the_rate_was_recorded_still_counts(
+    tmp_path: Path,
+) -> None:
+    """The pool this adopted holds measurements from a version that did not
+    write a rate. Nothing reads it, and rebuilding an archive to add a number
+    would be hours of ffmpeg for nothing - so it read as a 500 instead."""
+    _prepared, layout = built(tmp_path)
+    meta = C.meta_path(layout, "album", "a")
+    without = {k: v for k, v in json.loads(meta.read_text()).items() if k != "rate"}
+    meta.write_text(json.dumps(without))
+    again = C.prepared(layout, "album", "a")
+    assert again is not None and again.rate == 0
+
+
+def test_metadata_missing_something_else_rebuilds_rather_than_raising(
+    tmp_path: Path,
+) -> None:
+    _prepared, layout = built(tmp_path)
+    meta = C.meta_path(layout, "album", "a")
+    meta.write_text(json.dumps({"slug": "album", "side": "a"}))
+    assert C.prepared(layout, "album", "a") is None

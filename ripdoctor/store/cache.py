@@ -137,7 +137,9 @@ def prepared(layout: Layout, slug: str, side: str) -> Prepared | None:
         source = layout.side_file(slug, side)
         if data.get("stamp") != stamp_of(source):
             return None
-    except (OSError, ValueError, FileNotFoundError):
+    except (OSError, ValueError, KeyError, FileNotFoundError):
+        # A field that is not there at all reads as "not prepared" and rebuilds,
+        # rather than reaching a person as a 500 with a key name in it.
         return None
     if not (
         envelope_path(layout, slug, side).is_file()
@@ -152,7 +154,11 @@ def prepared(layout: Layout, slug: str, side: str) -> Prepared | None:
         duration=float(data["duration"]),
         windows=int(data["windows"]),
         window=float(data["window_ms"]) / 1000.0,
-        rate=int(data["rate"]),
+        # Measurements written before this field existed are still
+        # measurements. Nothing reads the rate, and rebuilding an archive to
+        # add a number would be hours of ffmpeg for nothing; zero says it was
+        # not recorded, which is the truth. ADR-043.
+        rate=int(data.get("rate", 0)),
         stamp=str(data["stamp"]),
         source=str(data.get("source", "")),
     )
