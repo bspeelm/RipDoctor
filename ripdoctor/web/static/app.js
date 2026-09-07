@@ -277,6 +277,10 @@ async function openAlbum(slug) {
   }
   loadReview();
   loadRipSides();               // per-album, so it follows the selection
+  // and so does the Rip panel: the record is open, so the side it has not got
+  // yet is the one you are about to record
+  await loadRerip();
+  pinRerip(slug, S.meta.sides);
   refreshAlignButton();
   refreshArchiveButton();
   renderPipeline();
@@ -1006,6 +1010,48 @@ async function checkExisting() {
 
 let ripAlbums = [];
 
+// The first letter this record has not got. Bumping the previous one by a
+// character gave `{` after side z, and offered to record over side a whenever
+// the panel was opened fresh on a record that already had one.
+function nextFreeSide(sides) {
+  const have = new Set(sides || []);
+  for (let c = 97; c <= 122; c++) {
+    const letter = String.fromCharCode(c);
+    if (!have.has(letter)) return letter;
+  }
+  return "";
+}
+
+// Pin the Rip panel to a record that is already on disk: its names fill the
+// fields and go read-only, and the side letter moves to the first one it has
+// not got. Selecting a record is a statement about which one you are ripping,
+// so opening one does this too - otherwise the panel sat on "new album" with
+// empty fields while the record was open at the top of the page, and the only
+// way to record its second side was to type the name in again.
+function pinRerip(slug, sides) {
+  ripPinned = slug || null;
+  ripPinnedSides = (sides || []).join(" ");
+  const sel = $("#rip-rerip");
+  // renderRerip keeps the pinned album selectable even when the filter would
+  // hide it, so re-render rather than assigning a value nothing matches.
+  if (!Array.from(sel.options).some((o) => o.value === (slug || ""))) renderRerip();
+  sel.value = slug || "";
+  const a = ripAlbums.find((x) => x.slug === slug);
+  if (ripPinned && a) {
+    $("#rip-artist").value = a.artist || "";
+    $("#rip-album").value = a.album || "";
+    $("#rip-side").value = nextFreeSide(sides);
+  } else if (!ripPinned) {           // "new album" is a deliberate fresh start
+    $("#rip-artist").value = ""; $("#rip-album").value = ""; $("#rip-side").value = "a";
+  }
+  // read-only rather than disabled: still selectable and copyable, and it
+  // makes the reason visible instead of the field just going dead
+  $("#rip-artist").readOnly = $("#rip-album").readOnly = !!ripPinned;
+  $("#rip-artist").title = $("#rip-album").title =
+    ripPinned ? "pinned to the existing album — pick “new album” to edit" : "";
+  ripSlug();
+}
+
 async function loadRerip() {
   try {
     const { albums } = await api("/api/albums?archive=1");
@@ -1682,11 +1728,10 @@ async function ripStop() {
     $("#rip-done").textContent =
       `wrote side-${r.side}.flac — ${fmt(r.duration)}, ${(r.bytes / 1e6).toFixed(0)} MB`
       + (r.overruns ? `   ·   ${r.overruns} overruns, ${r.overrun_ms} ms lost` : "");
-    // bump the side letter so the next one is ready to go
-    const sv = $("#rip-side").value.trim();
-    if (/^[a-z]$/.test(sv)) $("#rip-side").value = String.fromCharCode(sv.charCodeAt(0) + 1);
+    // refreshAlbums reopens the record, which reloads the re-rip list and
+    // moves the side letter to the one it has not got - worked out from what
+    // is on disk rather than by bumping the letter in the box
     await refreshAlbums(r.slug);
-    await loadRerip();          // a brand-new album is re-rippable from now on
     await loadOrphans();
   } catch (e) { $("#rip-err").textContent = e.message; }
 }
@@ -1783,22 +1828,8 @@ function wire() {
   $("#rip-rerip-q").oninput = renderRerip;
   $("#rip-rerip").onchange = (e) => {
     const o = e.target.selectedOptions[0];
-    ripPinned = e.target.value || null;
-    ripPinnedSides = ripPinned ? (o.dataset.sides || "") : "";
-    const lock = !!ripPinned;
-    if (lock) {
-      $("#rip-artist").value = o.dataset.artist;
-      $("#rip-album").value = o.dataset.album;
-    }
-    // read-only rather than disabled: still selectable and copyable, and it
-    // makes the reason visible instead of the field just going dead
-    if (!lock) {                       // "new album" is a deliberate fresh start
-      $("#rip-artist").value = ""; $("#rip-album").value = ""; $("#rip-side").value = "a";
-    }
-    $("#rip-artist").readOnly = $("#rip-album").readOnly = lock;
-    $("#rip-artist").title = $("#rip-album").title =
-      lock ? "pinned to the existing album — pick “new album” to edit" : "";
-    ripSlug();
+    const sides = (o.dataset.sides || "").split(" ").filter(Boolean);
+    pinRerip(e.target.value, sides);
   };
   $("#rip-vol").oninput = () => {
     const v = (parseInt($("#rip-vol").value, 10) || 0) / 100;
