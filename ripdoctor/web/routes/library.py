@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,7 @@ from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, valida
 from ripdoctor.core.sides import assign_sides, music_span
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
@@ -240,45 +240,51 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    @app.route("GET", "/api/archive/([^/]+)")
-    def archive_gate(r: H.Request) -> H.Response:
-        """Whether the raw sides are safe to move, and why not if they are not.
-
-        The gate is the whole point: it is what stops twenty minutes a side
-        being cleared before the record is provably somewhere else.
-        """
+    def _survey(r: H.Request, read: bool) -> dict[str, Any]:
         slug = slug_of(r)
         plan = _plan_of(service, slug)
-        where, count = T.locate(service.settings.library, plan.artist, plan.album)
-        expected = sum(len(s.tracks) for s in plan.sides)
-        return H.ok(
-            {
-                "ready": where is not None and count >= expected,
-                "found": count,
-                "expected": expected,
-                "where": None if where is None else str(where),
-            }
+        return AR.survey(
+            service.runner,
+            layout,
+            service.settings.library,
+            slug,
+            plan.artist,
+            plan.album,
+            sum(len(s.tracks) for s in plan.sides),
+            read=read,
         )
+
+    @app.route("GET", "/api/archive/([^/]+)")
+    def archive_gate(r: H.Request) -> H.Response:
+        """Whether the raw sides are safe to clear, and why not if they are not.
+
+        The gate is the whole point: it is what stops twenty minutes a side
+        being cleared before the record is provably somewhere else. `verify=1`
+        reads every side back, which takes seconds each - worth it before the
+        irreversible step, not worth it for a button's tooltip.
+        """
+        return H.ok(_survey(r, read=r.query.get("verify") == "1"))
 
     @app.route("POST", "/api/archive/([^/]+)")
     def archive(r: H.Request) -> H.Response:
         slug = slug_of(r)
-        plan = _plan_of(service, slug)
-        where, count = T.locate(service.settings.library, plan.artist, plan.album)
-        expected = sum(len(s.tracks) for s in plan.sides)
-        if where is None or count < expected:
-            raise H.HttpError(
-                409, f"only {count} of {expected} tracks are in the library"
-            )
-        source = layout.raw / slug
-        if not source.is_dir():
-            raise H.HttpError(404, f"nothing in raw for {slug}")
-        dest = layout.archive / slug
-        if dest.exists():
-            raise H.HttpError(409, f"{dest} already exists; move it first")
-        # Moved, never deleted. Nothing in this application removes a side.
-        shutil.move(str(source), str(dest))
-        return H.ok({"ok": True, "archived": str(dest)})
+        state = _survey(r, read=False)
+        if not state["ready"]:
+            raise H.HttpError(409, state["why"])
+
+        def work(job: Job) -> dict[str, Any]:
+            job.total = len(state["sides"])
+
+            def step(name: str, what: str) -> None:
+                job.step(name, what)
+                job.finished += 1
+
+            return AR.put_away(service.runner, layout, slug, progress=step)
+
+        try:
+            return H.ok(service.jobs.start(slug, "archive", work).as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
 
 
 def _file(where: Path, slug: str) -> Path:

@@ -236,7 +236,8 @@ def test_the_gate_says_what_is_missing(tmp_path: Path) -> None:
     is provably somewhere else."""
     service, _library = with_library(tmp_path)
     body = get(build(service), "/api/archive/album", service).json()
-    assert not body["ready"] and body["expected"] == 1 and body["found"] == 0
+    assert not body["ready"] and body["expected"] == 1
+    assert body["library_tracks"] == 0 and "not in the library" in body["why"]
 
 
 def test_archiving_before_the_record_arrived_is_refused(tmp_path: Path) -> None:
@@ -246,35 +247,80 @@ def test_archiving_before_the_record_arrived_is_refused(tmp_path: Path) -> None:
     assert (service.layout.raw / "album").is_dir(), "raw was cleared anyway"
 
 
-def test_a_record_that_arrived_can_be_archived(tmp_path: Path) -> None:
+class Archiving(FakeRunner):
+    """Sides that decode, and an ffmpeg that leaves what it re-encodes."""
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if args[0] == "ffmpeg" and "-progress" in args:
+            from ripdoctor.audio.runner import Result
+
+            return Result(tuple(args), 0, b"out_time_us=1200000000\n", b"")
+        if args[0] == "ffmpeg" and args[-1].endswith(".flac"):
+            Path(args[-1]).write_bytes(b"fLaC" + b"\x00" * 4000)
+        return super().run(argv, stdin=stdin, timeout=timeout)
+
+
+def arrived(tmp_path: Path):  # type: ignore[no-untyped-def]
     service, library = with_library(tmp_path)
     placed = library / "A Band" / "A Record"
     placed.mkdir(parents=True)
     (placed / "01 One.flac").write_bytes(b"fLaC")
+    service.runner = Archiving()
+    return service, library
+
+
+def test_a_record_that_arrived_is_archived_and_read_back(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
     r = post(build(service), "/api/archive/album", service)
-    assert r.status == 200
-    assert (service.layout.archive / "album").is_dir()
+    assert r.status == 202 and not r.json()["error"], r.json()["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").is_file()
     assert not (service.layout.raw / "album").exists()
 
 
-def test_a_side_is_moved_and_never_deleted(tmp_path: Path) -> None:
-    """Nothing in this application removes a finished side."""
-    service, library = with_library(tmp_path)
-    placed = library / "A Band" / "A Record"
-    placed.mkdir(parents=True)
-    (placed / "01 One.flac").write_bytes(b"fLaC")
-    post(build(service), "/api/archive/album", service)
-    assert (service.layout.archive / "album" / "side-a.flac").is_file()
+def test_what_is_cleared_is_only_what_can_be_made_again(tmp_path: Path) -> None:
+    """The cut tracks, the tick clips and the measurements. All derived, all
+    large, and all of them fill the disk if nothing clears them."""
+    service, _library = arrived(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    body = post(build(service), "/api/archive/album", service).json()
+    assert not review.exists()
+    assert len(body["result"]["removed"]) >= 2
+
+
+def test_a_truncated_side_is_re_encoded_rather_than_copied(tmp_path: Path) -> None:
+    """A stream ended with a signal has no length in its header, and archiving
+    it as-is preserves that for as long as the file exists."""
+    service, _library = arrived(tmp_path)
+    service.runner = Archiving().expect(
+        lambda a: a[0] == "flac" and "raw" in a[-1], returncode=1
+    )
+    body = post(build(service), "/api/archive/album", service).json()
+    assert not body["error"], body["error"]
+    assert "re-encoded" in body["result"]["notes"][0]
+
+
+def test_a_side_that_does_not_read_back_stops_everything(tmp_path: Path) -> None:
+    """Nothing is removed until every side has been read from where it will
+    live."""
+    service, _library = arrived(tmp_path)
+    service.runner = Archiving().expect(
+        lambda a: a[0] == "flac" and "archive" in a[-1], returncode=1
+    )
+    body = post(build(service), "/api/archive/album", service).json()
+    assert "did not read back" in body["error"]
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
 
 
 def test_archiving_twice_is_refused_rather_than_overwriting(tmp_path: Path) -> None:
-    service, library = with_library(tmp_path)
-    placed = library / "A Band" / "A Record"
-    placed.mkdir(parents=True)
-    (placed / "01 One.flac").write_bytes(b"fLaC")
+    service, _library = arrived(tmp_path)
     post(build(service), "/api/archive/album", service)
     (service.layout.raw / "album").mkdir()
-    assert post(build(service), "/api/archive/album", service).status == 409
+    (service.layout.raw / "album" / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 99)
+    body = post(build(service), "/api/archive/album", service).json()
+    assert "already exists" in body["error"]
 
 
 # --------------------------------------------------------------- artwork

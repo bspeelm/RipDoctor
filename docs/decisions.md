@@ -990,3 +990,37 @@ it. That invisibility is the whole reason for the separate name.
 
 **What did not move.** The comment ratio, still hard, still 25%. Nothing has been
 trimmed to fit any of these numbers.
+
+---
+
+## ADR-036 — The ceiling moves to 7,000, and this is the last move before the trim
+
+**Status:** accepted. Set by the author, 2026-09-07. Amends ADR-035.
+
+**What changed.** Porting the front end whole turned out to mean more than
+artwork and punch. The page reaches for two things this project had simplified
+away, and both were worth having rather than cutting:
+
+- **Listening to the input, live.** The only way to hear what the stylus is
+  doing while you cue it, and one of the things this does that a
+  digitise-an-upload tool cannot. It needed a streaming response, which the
+  adapter did not have.
+- **A real archive step.** What existed moved `raw/` into `archive/` and left
+  the cut tracks, the tick clips and the measurements behind - a second copy of
+  every track plus an envelope and a proxy per side, all of it derived, all of
+  it large. Archiving now reads every side back from where it will live,
+  re-encodes the truncated ones so the archive copy has a length in its header,
+  and only then clears what can be made again.
+
+Re-labelling and the early duplicate warning came back for the same reason: the
+page asks for them, and both are useful without beets.
+
+**Why 7,000, and why this is the last one.** What remains is the beets importer
+behind the interface the base tagger already implements - a couple of hundred
+lines - and then Phase 6, which is a revision pass that removes rather than
+adds. A ceiling that has moved three times is a ceiling that is being followed
+rather than set, so the next number to change should be a smaller one, chosen
+during the trim, with something retired to fit it.
+
+**What has not moved, through all three.** The comment ratio. Nothing has been
+trimmed, no guard dropped and no case skipped to fit any of these numbers.
