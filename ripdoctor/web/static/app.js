@@ -1009,7 +1009,11 @@ let ripAlbums = [];
 async function loadRerip() {
   try {
     const { albums } = await api("/api/albums?archive=1");
-    ripAlbums = albums.filter((a) => a.artist || a.album);   // nothing to pre-fill from otherwise
+    // Every record on disk, not only the ones with a saved cut. A side just
+    // captured has no plan yet and therefore no artist or album anywhere but
+    // in the form somebody typed them into - which a reload throws away. That
+    // is exactly the record you want to offer, because side b comes next.
+    ripAlbums = albums.map((a) => ({ ...a, ...named(a) }));
   } catch { ripAlbums = []; }
   renderRerip();
 }
@@ -1017,6 +1021,15 @@ async function loadRerip() {
 // A <select> cannot be typed into, and this list only grows. The filter narrows
 // the options rather than replacing the control, so the select stays the single
 // source of truth for what is pinned.
+// What to call a record. The plan when there is one, and otherwise the slug
+// read backwards - it was built from an artist and an album, so it gives them
+// back, give or take the punctuation. A guess offered for correction, in a
+// field that can be corrected.
+function named(a) {
+  if (a.artist || a.album) return { artist: a.artist, album: a.album };
+  return guessFromSlug(a.slug);
+}
+
 function renderRerip() {
   const sel = $("#rip-rerip");
   const q = $("#rip-rerip-q").value.trim().toLowerCase();
@@ -1025,13 +1038,14 @@ function renderRerip() {
   sel.appendChild(el("option", "", "— new album —"));
   let shown = 0;
   for (const a of ripAlbums) {
-    const label = `${a.artist} — ${a.album}  (${a.where}: ${a.sides.join(" ")})`;
+    const sides = (a.sides || []).join(" ") || "no sides yet";
+    const label = `${a.artist} — ${a.album}  (${a.where}: ${sides})`;
     if (q && !label.toLowerCase().includes(q) && !a.slug.toLowerCase().includes(q)) continue;
     const o = el("option", "", label);
     o.value = a.slug;
     o.dataset.artist = a.artist || "";
     o.dataset.album = a.album || "";
-    o.dataset.sides = a.sides.join(" ");
+    o.dataset.sides = (a.sides || []).join(" ");
     sel.appendChild(o);
     shown++;
   }
@@ -1041,7 +1055,7 @@ function renderRerip() {
     if (a) {
       const o = el("option", "", `${a.artist} — ${a.album}  (pinned)`);
       o.value = a.slug; o.dataset.artist = a.artist; o.dataset.album = a.album;
-      o.dataset.sides = a.sides.join(" ");
+      o.dataset.sides = (a.sides || []).join(" ");
       sel.appendChild(o); shown++;
     }
   }

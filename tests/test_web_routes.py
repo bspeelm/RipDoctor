@@ -177,6 +177,7 @@ def test_records_with_sides_are_listed(tmp_path: Path) -> None:
             "album": "",
             "artist": "",
             "date": "",
+            "sides": ["a"],
         }
     ]
 
@@ -200,6 +201,15 @@ def test_a_readable_plan_is_not_marked(tmp_path: Path) -> None:
     post(build(service), "/api/plan/album", service, a_plan_body())
     body = get(build(service), "/api/albums", service).json()
     assert body["albums"][0]["old_format"] is False
+
+
+def test_a_record_with_no_saved_cut_is_still_listed(tmp_path: Path) -> None:
+    """A side just captured has no plan yet, so no artist or album exists
+    anywhere but in the form somebody typed them into - and a reload throws
+    that away. It is exactly the record to offer, because side b comes next."""
+    service = a_service(tmp_path)
+    entry = get(build(service), "/api/albums", service).json()["albums"][0]
+    assert entry["sides"] == ["a"] and entry["artist"] == ""
 
 
 def test_a_record_carries_what_it_is_called(tmp_path: Path) -> None:

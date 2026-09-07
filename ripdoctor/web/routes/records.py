@@ -74,6 +74,9 @@ def add(app: App, service: Service) -> None:
                     "album": "" if named is None else named[0],
                     "artist": "" if named is None else named[1],
                     "date": "" if named is None else named[2],
+                    # Which sides exist, so re-ripping one can say what is
+                    # already there rather than making somebody look.
+                    "sides": layout.sides_on_disk(slug),
                 }
             )
         return H.ok({"albums": found})
