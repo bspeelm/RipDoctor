@@ -209,7 +209,7 @@ class Applied:
             "was_seconds": round(self.was, 2),
             "now_seconds": round(self.now, 2),
             "art_carried": self.art_carried,
-            "kept": str(self.kept),
+            "backup": str(self.kept),
         }
 
 

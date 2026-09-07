@@ -730,7 +730,6 @@ async function relabelRun() {
     const r = await postJSON(`/api/relabel/${S.slug}`, {
       mbid: relabelPick.id, artist: $("#imp-artist").value,
       album: $("#imp-album").value, date: relabelPick.date });
-    if (r.mismatch) { $("#imp-err").textContent = r.why; return; }
     $("#imp-relabel-wrap").hidden = true;
     S.sideData = {};
     await openAlbum(S.slug);

@@ -441,7 +441,7 @@ def test_the_best_cover_is_found_and_installed_in_one_step(tmp_path: Path) -> No
     service.fetcher = Catalogue(JPEG, JPEG)  # type: ignore[assignment]
     r = post(build(service), "/api/artwork/album/fetch", service, {})
     assert r.status == 200 and (album / "cover.jpg").is_file()
-    assert dict(r.headers)["X-Artwork-Source"] == "release"
+    assert r.json()["source"] == "release" and r.json()["embedded"] == 1
 
 
 def test_fetching_without_a_release_says_what_to_do(tmp_path: Path) -> None:

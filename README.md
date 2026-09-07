@@ -125,8 +125,8 @@ is refused with the reason, rather than written as an empty or duplicated file.
 | 1 — the detection and fitting core, and its tests | done |
 | 2 — audio seam, config, doctor; offline CLI | done |
 | 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
-| 4 — web interface | routes, auth and the server done; front end not started |
-| 5 — tagging and import | base tagger done; beets extra and artwork not started |
+| 4 — web interface | done, except listening while cueing (untested against hardware) |
+| 5 — tagging and import | done, except the `ripdoctor[beets]` extra |
 | 6 — documentation revision, then 1.0 | not started |
 
 ## Development

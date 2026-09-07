@@ -77,8 +77,8 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(404, f"nothing usable was found - {why}")
         best = max(usable, key=lambda c: c.image.edge if c.image else 0)
         data = service.fetcher.get(best.url, {"Accept": "image/*"})
-        response = _install(service, album, data)
-        return response.with_header("X-Artwork-Source", best.source)
+        installed = _install(service, album, data)
+        return H.ok({**installed.json(), "source": best.source})
 
     @app.route("POST", "/api/artwork/([^/]+)/install")
     def install(r: H.Request) -> H.Response:

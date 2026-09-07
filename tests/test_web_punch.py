@@ -123,7 +123,7 @@ def test_applying_replaces_the_library_file_and_keeps_the_old_one(
         {"number": 1, "start": 5.0, "end": 65.0},
     )
     assert r.status == 200 and r.json()["ok"]
-    assert Path(r.json()["kept"]).is_file(), "the replaced take was not kept"
+    assert Path(r.json()["backup"]).is_file(), "the replaced take was not kept"
 
 
 def test_a_refusal_leaves_the_library_untouched(tmp_path: Path) -> None:
