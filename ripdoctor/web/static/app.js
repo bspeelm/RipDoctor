@@ -15,7 +15,14 @@ async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: "same-origin", ...opts });
   const ct = r.headers.get("content-type") || "";
   const body = ct.includes("json") ? await r.json() : null;
-  if (!r.ok) throw new Error(body?.error || `${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    // The status comes with it: some refusals are a caller's business rather
+    // than a failure - "one of those is already running" being the one that
+    // matters, because it means the work asked for is happening.
+    const e = new Error(body?.error || `${r.status} ${r.statusText}`);
+    e.status = r.status;
+    throw e;
+  }
   return body;
 }
 const postJSON = (path, obj) =>
@@ -97,7 +104,14 @@ async function ensurePrepared() {
   if (!missing.length) return;
   const box = $("#prepare"); box.hidden = false;
   try {
-    await postJSON(`/api/prepare/${S.slug}`, {});
+    try {
+      await postJSON(`/api/prepare/${S.slug}`, {});
+    } catch (e) {
+      // Already running is not a refusal to do the work, it is the work. Two
+      // openAlbum calls overlap routinely - an auto-stop reopens the record
+      // while a click is reopening it too - and the second one used to throw.
+      if (e.status !== 409) throw e;
+    }
     await pollPrepare(box);
   } finally {
     box.hidden = true;                    // even when the poll throws
@@ -256,7 +270,17 @@ async function openAlbum(slug) {
   S.slug = slug;
   status("loading…", true);
   S.meta = await api(`/api/album/${slug}`);
-  await ensurePrepared();
+  // A record opens whether or not its waveform could be built. Letting this
+  // through left the header on "loading…" and every panel below it showing the
+  // previous record - the side tabs, the captures on disk, the re-rip picker -
+  // because none of the code after this point ran.
+  let unprepared = "";
+  try {
+    await ensurePrepared();
+  } catch (e) {
+    unprepared = e.message;
+    logline(`could not prepare ${slug}: ${e.message}`);
+  }
   S.bySide = {};
   for (const letter of S.meta.sides) {
     S.bySide[letter] = (S.meta.tracks_by_side[letter] || []).map((t) => ({ ...t }));
@@ -285,7 +309,8 @@ async function openAlbum(slug) {
   refreshArchiveButton();
   renderPipeline();
   markDirty(false);
-  status("");
+  status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
+         !!unprepared);
 }
 
 function renderSideTabs() {
