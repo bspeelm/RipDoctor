@@ -149,12 +149,13 @@ def streaming(source: Callable[[], Iterator[bytes]], content_type: str) -> Respo
     return Response(content_type=content_type, stream=source)
 
 
-def file_at(path: str, *, cache: str = "no-store") -> Response:
+def file_at(path: str, *, cache: str = "no-store", etag: str = "") -> Response:
     """A response the adapter streams, with range requests, from disk."""
     return Response(
         content_type=mimetypes.guess_type(path)[0] or OCTETS,
         cache=cache,
         path=path,
+        headers=(("ETag", etag),) if etag else (),
     )
 
 

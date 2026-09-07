@@ -125,6 +125,25 @@ def test_the_front_page_is_served_for_a_bare_path(server) -> None:  # type: igno
     assert headers["Cache-Control"] == "no-cache", "a stale app.js is unreproducible"
 
 
+def test_a_front_end_file_can_be_revalidated(server) -> None:  # type: ignore[no-untyped-def]
+    """`no-cache` says revalidate, and revalidating needs something to
+    revalidate against. Without a validator a browser decides for itself - and
+    one that decided to keep app.js served a page from before a deployment
+    against an API from after it, which is what the header exists to prevent."""
+    status, headers, _b = call(server, "GET", "/")
+    assert status == 200 and headers["ETag"]
+    again, _h, body = call(
+        server, "GET", "/", headers={"If-None-Match": headers["ETag"]}
+    )
+    assert again == 304 and not body
+
+
+def test_a_stale_validator_is_not_answered_304(server) -> None:  # type: ignore[no-untyped-def]
+    stale = '"0-0"'
+    status, _h, body = call(server, "GET", "/", headers={"If-None-Match": stale})
+    assert status == 200 and body, "a stale validator must not answer 304"
+
+
 @pytest.mark.parametrize("attempt", ["/../etc/passwd", "/%2e%2e/%2e%2e/etc/passwd"])
 def test_nothing_outside_the_front_end_is_reachable(server, attempt: str) -> None:  # type: ignore[no-untyped-def]
     status, _h, _b = call(server, "GET", attempt)
