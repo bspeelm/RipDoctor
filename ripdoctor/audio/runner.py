@@ -125,13 +125,9 @@ class RealRunner:
         """Begin a program and return while it runs.
 
         Used only for capture, which lasts a side. Everything else finishes
-        inside one call and goes through run().
-
-        Errors go to a file rather than a pipe. A capture runs for twenty
-        minutes and a driver reporting overruns writes the whole time; nobody
-        is reading a pipe during that, and a full pipe blocks the writer - so
-        the program recording the record would stall on a diagnostic about the
-        record. A file cannot block, and it can be read while the capture runs.
+        inside one call and goes through run(). Errors go to a file rather than
+        a pipe, which over twenty minutes would fill and block the writer.
+        ADR-032.
         """
         args = [str(a) for a in argv]
         if not args:

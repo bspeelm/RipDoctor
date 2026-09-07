@@ -1,13 +1,9 @@
-"""One capture, from needle down to FLAC.
+"""One capture, from needle down to FLAC. ADR-031, ADR-032, ADR-033.
 
-This is where the live meter meets the auto-stop reducer. The decision itself
-is pure and lives in core/autostop; everything here is the loop that feeds it -
-starting the recorder, reading the file it is writing, and stopping when the
-reducer says the side is over.
-
-The loop runs where the capture runs, not in a browser. A meter that stopped
-when somebody closed a laptop lid would be a meter that stopped in the middle
-of every side.
+Where the live meter meets the auto-stop reducer. The decision itself is pure
+and lives in core/autostop; this is only the loop that feeds it. It runs where
+the capture runs, not in a browser - a meter that stopped when somebody closed
+a laptop lid would stop in the middle of every side.
 """
 
 from __future__ import annotations
@@ -80,9 +76,8 @@ def record(
     """Record one side, watching it, and encode what was captured.
 
     Returns an Outcome whatever ends the capture - the reducer, the hard cap,
-    the recorder exiting, or a hand on Ctrl-C. A side that reached this point
-    is twenty minutes of somebody's evening, so every path that leaves this
-    function encodes what is on disk rather than discarding it.
+    the recorder exiting, or a hand on Ctrl-C. Every path out of here encodes
+    what is on disk rather than discarding it. ADR-033.
     """
     proc, wav = C.start(runner, device, album_dir, letter, fmt, log=True)
     log = C.log_path(album_dir, letter)

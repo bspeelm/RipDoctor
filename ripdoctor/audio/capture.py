@@ -19,9 +19,9 @@ _DEVICE = re.compile(r"^[A-Za-z0-9:,_./-]+$")
 TEST_SECONDS = 20.0
 MIN_TEST_SECONDS, MAX_TEST_SECONDS = 3.0, 60.0
 
-# A capture in progress is written under a name nothing else will pick up. The
-# predecessor's own tools scan for side-*.flac, and a partial file matching that
-# pattern is one an analysis pass will happily read as a whole side.
+# A capture in progress is written under a name nothing else will pick up: tools
+# scan for side-*.flac, and a partial file matching that pattern is one an
+# analysis pass will read as a whole side.
 PARTIAL = ".side-{letter}.capturing.wav"
 FINISHED = "side-{letter}.flac"
 
@@ -38,9 +38,8 @@ def check_device(device: str) -> str:
     return device
 
 
-# arecord's names for the sample formats worth capturing at, and how wide each
-# one is. A capture read at the wrong width is not slightly wrong: a 24-bit
-# file read as 16 is noise at the wrong speed.
+# arecord's names for the formats worth capturing at, and how wide each is. A
+# 24-bit file read as 16 is noise at the wrong speed, not slightly wrong.
 SAMPLE_FORMATS = {"S16_LE": 2, "S24_3LE": 3, "S32_LE": 4}
 _FORMATS = {16: "S16_LE", 24: "S24_3LE", 32: "S32_LE"}
 
@@ -60,14 +59,7 @@ class Format:
 def capture_argv(
     device: str, dest: str, fmt: Format, seconds: float | None = None
 ) -> list[str]:
-    """Record to WAV, not to a FLAC encoder.
-
-    Piping into an encoder and ending the capture with a signal leaves the
-    stream never closed: the header is never backfilled, so the file reports no
-    duration, fails verification, and every tool that reads it has to work
-    around it. WAV is written with a header that can be repaired, and the
-    encode happens once the length is known.
-    """
+    """Record to WAV, not into an encoder. ADR-031."""
     argv = [
         "arecord",
         "-D",
@@ -182,9 +174,8 @@ _STAT = r"{key}:\s*(-?[\d.]+|-?inf)"
 def read_stat(text: str, key: str) -> float | None:
     """One level, or nothing.
 
-    `-inf` is what a digitally silent file reports, and float() accepts it - the
-    same trap as ADR-027. A non-finite reading is no reading, and the caller
-    supplies the floor rather than carrying an infinity into a comparison.
+    `-inf` is what a digitally silent file reports and float() accepts it -
+    ADR-027. A non-finite reading is no reading.
     """
     hits = re.findall(_STAT.format(key=re.escape(key)), text)
     if not hits:
@@ -234,11 +225,8 @@ def log_path(album_dir: str | Path, letter: str) -> Path:
 def wav_format(path: str | Path, fallback: Format) -> Format:
     """Rate, channels and sample width read from the header, not assumed.
 
-    `wave.open` refuses a file that is still being written, so the fixed fields
-    are parsed directly - they are written up front and never change. Reading
-    them matters: the capture rate stopped being 48 kHz when the chain became a
-    Waxwing into a UR23, and metering a 96 kHz capture as 48 measures 2-6 kHz
-    and calls it 1-3.
+    `wave.open` refuses a file still being written, so the fixed fields are
+    parsed directly - they are written up front and never change. ADR-031.
     """
     try:
         with Path(path).open("rb") as f:
@@ -256,13 +244,7 @@ def wav_format(path: str | Path, fallback: Format) -> Format:
 
 
 def meter(path: str | Path, fallback: Format) -> tuple[Levels, Format] | None:
-    """Levels over the tail of a capture that is still being written.
-
-    Reading the file the recorder is already writing is what makes a live meter
-    possible without opening the device a second time. ALSA gives one program
-    the input; a meter that needed its own stream would be a meter that could
-    not run during a capture.
-    """
+    """Levels over the tail of a capture that is still being written. ADR-031."""
     fmt = wav_format(path, fallback)
     need = BLOCK * fmt.channels * fmt.width
     try:
@@ -294,11 +276,7 @@ def overruns(log: str | Path) -> tuple[int, float]:
 
 
 def stop(proc: Process, *, grace: float = 15.0) -> None:
-    """Ask the capture to stop, and only kill it if it will not.
-
-    Interrupted, arecord backfills the WAV header with the real length. Killed,
-    it does not, and the file then reports no duration.
-    """
+    """Ask the capture to stop, and kill it only if it will not. ADR-033."""
     if proc.poll() is not None:
         return
     proc.interrupt()
