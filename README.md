@@ -2,8 +2,11 @@
 
 Capture a vinyl side, find the track boundaries, cut them where you want them.
 
-**Status: early. Not yet usable.** The package installs and the architecture
-tests pass; the algorithm is being ported layer by layer. See
+**Status: early. Not yet usable as an application.** The detection core is
+complete and tested - gap detection, boundary fitting, side layout, run-out
+detection, re-rip alignment and the live meter all run as a library over
+envelopes you supply, with no ffmpeg and no hardware. What is missing is
+everything that reads a file or a sound card. See
 [docs/decisions.md](docs/decisions.md) for what has been decided and why, and
 the phase table below for what exists.
 
@@ -85,8 +88,8 @@ The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
 | Phase | State |
 |---|---|
 | 0 — scaffold, decisions, budgets, architecture tests | done |
-| 1 — the detection and fitting core, and its tests | in progress |
-| 2 — audio seam, config, doctor; offline CLI | not started |
+| 1 — the detection and fitting core, and its tests | done |
+| 2 — audio seam, config, doctor; offline CLI | next |
 | 3 — capture | not started |
 | 4 — web interface | not started |
 | 5 — tagging and import | not started |

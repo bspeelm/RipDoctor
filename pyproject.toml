@@ -55,6 +55,9 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]
 # assert is the point, and a seeded PRNG is how deterministic test signals are
 # built - neither is a security concern in a test.
 "tests/*" = ["S101", "S311"]
+# A transliteration table is definitionally a table of confusable characters;
+# flagging them is the rule working against the file's whole purpose.
+"ripdoctor/core/naming.py" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.11"
