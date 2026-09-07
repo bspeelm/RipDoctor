@@ -413,7 +413,7 @@ def test_an_uploaded_image_gets_the_same_verification(tmp_path: Path) -> None:
         H.Request.of(
             "POST",
             "/api/artwork/album/upload",
-            headers={"Cookie": f"{A.COOKIE}={service.sessions.issue('abbey')}"},
+            headers={"Cookie": f"{A.COOKIE}={service.sessions.issue('listener')}"},
             body=JPEG,
         )
     )

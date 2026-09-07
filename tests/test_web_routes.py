@@ -35,7 +35,7 @@ def a_service(
         settings=Settings(),
         thresholds=Thresholds(),
         runner=runner or a_runner(),
-        credentials=A.create("abbey", "secret", iterations=FAST),
+        credentials=A.create("listener", "secret", iterations=FAST),
         sessions=A.Sessions(secret=SECRET),
         jobs=Jobs(spawn=lambda work: work()),
         now=lambda: 1000.0,
@@ -55,7 +55,7 @@ def a_gappy_runner() -> FakeRunner:
 
 
 def signed_in(service: Service) -> dict[str, str]:
-    token = service.sessions.issue("abbey", now=service.now)
+    token = service.sessions.issue("listener", now=service.now)
     return {"Cookie": f"{A.COOKIE}={token}"}
 
 
@@ -90,7 +90,7 @@ def test_a_good_login_sets_a_session_cookie(tmp_path: Path) -> None:
     app = build(service)
     r = app.dispatch(
         H.Request.of(
-            "POST", "/api/login", body=b'{"user": "abbey", "password": "secret"}'
+            "POST", "/api/login", body=b'{"user": "listener", "password": "secret"}'
         )
     )
     assert r.status == 200
@@ -105,7 +105,9 @@ def test_a_bad_login_does_not_say_which_half_was_wrong(tmp_path: Path) -> None:
         H.Request.of("POST", "/api/login", body=b'{"user": "x", "password": "secret"}')
     )
     wrong_pass = app.dispatch(
-        H.Request.of("POST", "/api/login", body=b'{"user": "abbey", "password": "x"}')
+        H.Request.of(
+            "POST", "/api/login", body=b'{"user": "listener", "password": "x"}'
+        )
     )
     assert wrong_name.status == wrong_pass.status == 401
     assert wrong_name.json() == wrong_pass.json()
@@ -115,7 +117,10 @@ def test_a_run_of_bad_logins_is_throttled(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     app = build(service)
     attempt = H.Request.of(
-        "POST", "/api/login", body=b'{"user": "abbey", "password": "x"}', ip="10.0.0.5"
+        "POST",
+        "/api/login",
+        body=b'{"user": "listener", "password": "x"}',
+        ip="10.0.0.5",
     )
     codes = [app.dispatch(attempt).status for _ in range(8)]
     assert codes[0] == 401 and codes[-1] == 429
@@ -136,7 +141,7 @@ def test_a_good_login_clears_the_throttle(tmp_path: Path) -> None:
     good = H.Request.of(
         "POST",
         "/api/login",
-        body=b'{"user": "abbey", "password": "secret"}',
+        body=b'{"user": "listener", "password": "secret"}',
         ip="10.0.0.5",
     )
     assert app.dispatch(good).status == 200
@@ -152,7 +157,7 @@ def test_logging_out_works_without_a_session(tmp_path: Path) -> None:
 
 def test_who_am_i_answers_for_a_session(tmp_path: Path) -> None:
     service = a_service(tmp_path)
-    assert get(build(service), "/api/me", service).json()["user"] == "abbey"
+    assert get(build(service), "/api/me", service).json()["user"] == "listener"
 
 
 # ---------------------------------------------------------------- records

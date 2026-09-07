@@ -90,8 +90,10 @@ def test_a_record_goes_from_the_pool_to_cut_tracks(running) -> None:  # type: ig
     status, _body = call("GET", "/api/albums")
     assert status == 401
 
-    status, body = call("POST", "/api/login", {"user": "abbey", "password": "secret"})
-    assert status == 200 and body["user"] == "abbey"
+    status, body = call(
+        "POST", "/api/login", {"user": "listener", "password": "secret"}
+    )
+    assert status == 200 and body["user"] == "listener"
 
     status, body = call("GET", "/api/albums")
     assert status == 200 and body["albums"] == ["album"]
@@ -160,7 +162,7 @@ def test_a_record_goes_from_the_pool_to_cut_tracks(running) -> None:  # type: ig
 
 def test_the_session_cookie_is_what_carries_the_login(running) -> None:  # type: ignore[no-untyped-def]
     call, _tmp = running
-    call("POST", "/api/login", {"user": "abbey", "password": "secret"})
+    call("POST", "/api/login", {"user": "listener", "password": "secret"})
     assert call.cookie.startswith(A.COOKIE)
     call.cookie = f"{A.COOKIE}=forged"
     assert call("GET", "/api/albums")[0] == 401

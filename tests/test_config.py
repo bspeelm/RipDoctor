@@ -39,8 +39,8 @@ def test_the_two_directories_are_separate_and_named() -> None:
 
 
 def test_the_state_directory_can_be_pointed_elsewhere() -> None:
-    m = a_machine(RIPDOCTOR_DIR="/srv/pool/ripdoctor")
-    assert m.state_dir == Path("/srv/pool/ripdoctor")
+    m = a_machine(RIPDOCTOR_DIR="/mnt/pool/ripdoctor")
+    assert m.state_dir == Path("/mnt/pool/ripdoctor")
     assert m.config_dir == Path("/home/someone/.config/ripdoctor"), (
         "the user's directory does not move with the state directory"
     )

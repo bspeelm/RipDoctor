@@ -22,7 +22,7 @@ BASE = "https://musicbrainz.org/ws/2"
 # A real, identifying User-Agent is required rather than polite. Requests
 # without one are throttled hard, and the throttling looks like the service
 # being down.
-USER_AGENT = f"ripdoctor/{__version__} (https://github.com/bspeelm/ripdoctor)"
+USER_AGENT = f"ripdoctor/{__version__} (https://github.com/bspeelm/RipDoctor)"
 
 RETRY_STATUS = (429, 500, 502, 503, 504)
 RETRIES = 4

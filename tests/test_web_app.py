@@ -44,7 +44,7 @@ def an_app(*, static: bool = False) -> App:
 
 
 def signed_in(app: App, headers: dict[str, str] | None = None) -> dict[str, str]:
-    token = app.sessions.issue("abbey", now=lambda: 1000.0)
+    token = app.sessions.issue("listener", now=lambda: 1000.0)
     return {**(headers or {}), "Cookie": f"{COOKIE}={token}"}
 
 
@@ -96,7 +96,7 @@ def test_a_route_that_needs_a_session_refuses_without_one() -> None:
 def test_a_valid_session_names_the_user_to_the_handler() -> None:
     app = an_app()
     r = app.dispatch(H.Request.of("GET", "/api/album/x", headers=signed_in(app)))
-    assert r.json()["user"] == "abbey"
+    assert r.json()["user"] == "listener"
 
 
 def test_an_expired_session_is_no_session() -> None:
@@ -106,7 +106,7 @@ def test_an_expired_session_is_no_session() -> None:
     def thing(_r: H.Request) -> H.Response:
         return H.ok({})
 
-    token = app.sessions.issue("abbey", now=lambda: 1000.0)
+    token = app.sessions.issue("listener", now=lambda: 1000.0)
     r = app.dispatch(
         H.Request.of("GET", "/api/thing", headers={"Cookie": f"{COOKIE}={token}"})
     )

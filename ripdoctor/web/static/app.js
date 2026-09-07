@@ -837,7 +837,7 @@ function renderReleaseList(box, releases, onPick, { requireDurations = true } = 
     const dur = r.durations == null ? "?" : (r.durations === 0 ? "NO DURATIONS" :
       `${Math.round(r.total / 60)} min`);
     // MusicBrainz keeps pressing qualifiers here, not in the title — without it
-    // a search for ARIRANG returns 55 rows that all read "ARIRANG"
+    // a widely reissued record returns dozens of rows that all read the same
     const label = r.title + (r.disambiguation ? `  \u00b7 ${r.disambiguation}` : "");
     const dead = requireDurations && r.durations === 0;
     const b = el("button", dead ? "nodur" : (r.vinyl ? "vinyl" : ""),
@@ -919,7 +919,7 @@ function setMode(mode) {
 
 // A re-rip has to land on the SAME slug as the album it is replacing, or the
 // archived capture cannot be found and align has nothing to correlate against.
-// Deriving the slug from retyped text makes that hinge on spelling "Deafheaven"
+// Deriving the slug from retyped text makes that hinge on spelling the artist
 // identically twice, so when an existing album is picked the slug is pinned to
 // it and the name fields go read-only.
 let ripPinned = null;
