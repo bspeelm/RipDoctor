@@ -210,3 +210,23 @@ at all — which it answers very well:
 line, including two wrong ones. Fit on two probes, then predict a third the fit
 has never seen and measure where the music actually is. An internally consistent
 but wrong fit fails that and is refused.
+
+## The thresholds, and where each came from
+
+Every number the detectors use, with its provenance. All were measured on one
+signal chain; `ripdoctor measure` reports what yours does beside them.
+
+| name | default | what it is |
+|---|---:|---|
+| `gap_below` | 16.0 dB | Full lane: below the music level (85th percentile) counts as quiet. Anchoring on the floor instead finds no gaps at all. |
+| `gap_above` | 12.0 dB | Band lane: above that lane's own floor still counts as quiet. Using `gap_below` here found 57 gaps on a side with a handful. |
+| `gap_minimum` | 1.2 s | Shorter runs are pauses inside a song, not inter-track gaps. |
+| `refine_above` | 8.0 dB | Above a located gap's own floor when walking its edges out. Tighter than `gap_below` because the gap is already found; the question is only where the fade stops. |
+| `span_below` | 20.0 dB | Below the music level when looking for a side's first and last sustained run. Wider than `gap_below`: this separates music from run-in groove, not from a silence between tracks. |
+| `span_run` | 1.5 s | How long that run must last. A needle drop that skids into a groove makes about a second of real audio before the arm is lifted, and that accident is not the start of side one. |
+| `autostop_below` | 20.0 dB | Below the side's own music level that counts as run-out. The tightest value that never trips inside any of fifteen archived sides; one of them sits 17.5 dB down for two continuous minutes and is still the song. |
+| `autostop_dwell` | 120.0 s | How long that must hold. Long because the gate has only 2.5 dB of margin. |
+| `autostop_max_seconds` | 2100 s | The hard cap, for a needle that never reaches the run-out. This is the guard that always works. |
+| `arm_floor` | −60.0 dB | The detector does not arm below this. Cueing a needle would otherwise trip it immediately. |
+| `align_min_r` | 0.65 | Correlation below this is not the same music. Sits in the empty gap between 0.88–1.00 for a side against itself and 0.38–0.39 against a different record. |
+| `align_max_drift` | 0.02 | A platter differing by more than two per cent between sessions is not credible; the fit is likelier wrong than the turntable. |

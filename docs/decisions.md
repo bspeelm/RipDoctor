@@ -765,3 +765,42 @@ every reading after it shifted by 50 ms. Over a side that is a boundary in the
 wrong place, from one bad line. Every frame now contributes exactly one reading
 per lane, unreadable or not - and a corrupt line is not hypothetical here, since
 that is precisely what the interleaving defect produced.
+
+---
+
+## ADR-028 — Detection cannot fail and configuration cannot refuse
+
+**Status:** accepted.
+
+`config.machine.detect()` never raises. A field it cannot determine is left
+empty. `config.settings.load()` never refuses: a missing file means every
+default, an unrecognised key is a warning, a key of the wrong type is dropped
+and named, and a file that is not TOML at all still starts.
+
+**Why both.** If either can stop the program, a half-configured machine cannot
+run the command that would explain what is wrong with it, or the edit that would
+fix it. Every failure a person can actually act on has to survive long enough to
+be reported, and `doctor` is what turns an empty field into a visible problem.
+
+**Three directories, and the split is the portability story.** The state
+directory is this program's and is disposable - caches and generated files, and
+removing it must never lose anything that cannot be recomputed. The config
+directory is the user's and belongs in git. The library root is chosen and holds
+the audio. `RIPDOCTOR_DIR` moves the first without moving the second.
+
+**Defaults name no machine.** `capture_device` ships empty rather than holding
+one person's card, which is the same decision as ADR-009 seen from the
+configuration side.
+
+**A typo gets a suggestion, within a limit that scales.** The distance counts an
+adjacent swap as one change rather than two, because `prot` for `port` is a
+single slip and the most common typo there is; plain Levenshtein scores it 2 and
+a limit tight enough to be useful then rejects it. Nothing is suggested for a
+word that resembles no key - suggesting `port` for `xyzzy` is worse than
+silence.
+
+**Every threshold is documented and the documentation is tested.** A table in
+`docs/method.md` carries each name, its value and where the number came from,
+and a test asserts both that every threshold appears and that the documented
+value is the one the code uses. The numbers are the domain knowledge, so they
+are the thing that must not drift.
