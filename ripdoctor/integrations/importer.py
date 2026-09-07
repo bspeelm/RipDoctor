@@ -14,6 +14,7 @@ None of them are reasons to require it.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,15 +128,24 @@ _ACCEPT = b"A\n"
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
 # user's own configuration rather than replacing it - two of them do not layer,
-# the last simply wins - so this changes one thing and leaves the rest alone.
+# the last simply wins - so this changes as little as it can and leaves the rest
+# alone.
 #
-# The one thing matters. Under `quiet: yes`, which is what an unattended import
-# is configured with, beets never asks: it applies anything above the match
-# threshold and skips anything below it without a word. There is then no such
-# thing as a preview, because the command that was meant to show a candidate
-# has already moved the files. Turning the prompt back on is what makes the
-# preview a preview and the answer an answer.
-OVERRIDE = "import:\n  quiet: no\n  timid: no\n"
+# Under `quiet: yes`, which is what an unattended import is configured with,
+# beets never asks: it applies anything above the match threshold and skips
+# anything below it without a word. There is then no such thing as a preview,
+# because the command that was meant to show a candidate has already moved the
+# files. Turning the prompt back on is what makes the preview a preview and the
+# answer an answer.
+#
+# `move` is the other one, and it is not a preference being overridden. The
+# review directory belongs to this project rather than to the person running
+# it: tracks are cut into it so they can be looked at, and once they are in the
+# library there is nothing left for a copy to be for. beets copies by default,
+# which wrote every track twice and left the originals behind - and since what
+# is still in review is how this tells a refused import from a finished one, a
+# successful import reported itself as a failure.
+OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
 OVERRIDE_FILE = "beets-override.yaml"
 
 
@@ -162,6 +172,22 @@ class Beets:
 
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
+
+    def files_into(self, runner: Runner) -> str:
+        """Where beets says it will put a record, defaults included.
+
+        beets keeps its own configuration and this project uses whatever it
+        finds, which means the two can disagree without either being wrong in
+        itself. Asking is the only way to know: with no configuration at all
+        beets files into its own default, and a record then lands somewhere
+        nobody set and nothing afterwards can find.
+        """
+        result = runner.run(self._argv(["config", "-d"]), timeout=60)
+        for line in (result.text + result.err).splitlines():
+            key, _, value = line.partition(":")
+            if key.strip() == "directory":
+                return os.path.expanduser(value.strip())
+        return ""
 
     def _argv(self, args: list[str]) -> list[str]:
         head = ["beet"]

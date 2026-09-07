@@ -269,6 +269,38 @@ def test_beets_missing_is_a_broken_install_rather_than_a_silent_swap() -> None:
     assert "reinstall" in r.fix
 
 
+def configured(directory: str) -> FakeRunner:
+    """A beets that answers `config -d` the way the real one does."""
+    return FakeRunner(installed=set(D.REQUIRED) | set(D.OPTIONAL)).expect(
+        lambda a: "config" in a,
+        stdout=f"library: library.db\ndirectory: {directory}\n".encode(),
+    )
+
+
+def test_a_library_the_two_disagree_about_is_reported() -> None:
+    """Two settings name the library and nothing makes them agree. beets keeps
+    its own configuration and this project uses whatever it finds, so with no
+    beets configuration a record is filed into beets' default - and the archive
+    gate then refuses to clear the raw sides of a record that imported fine."""
+    s = replace(Settings(), importer="beets", library="/pool/music")
+    r = find(list(D.importing(s, configured("~/Music"))), "library")
+    assert r.level is D.Level.WARN
+    assert "/pool/music" in r.summary and "Music" in r.summary
+    assert "directory:" in r.fix
+
+
+def test_a_library_the_two_agree_about_is_not_a_finding() -> None:
+    s = replace(Settings(), importer="beets", library="/pool/music")
+    r = find(list(D.importing(s, configured("/pool/music"))), "library")
+    assert r.level is D.Level.OK
+
+
+def test_the_built_in_tagger_is_not_asked_what_beets_thinks() -> None:
+    """It files where this project says, so there is nothing to disagree with."""
+    s = replace(Settings(), importer="tagger", library="/pool/music")
+    assert not [x for x in D.importing(s, everything()) if x.check == "library"]
+
+
 def test_an_importer_nobody_has_heard_of_is_named() -> None:
     s = replace(Settings(), importer="picard")
     r = find(list(D.importing(s, everything())), "importer")

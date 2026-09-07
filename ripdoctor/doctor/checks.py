@@ -10,10 +10,11 @@ from pathlib import Path
 
 from ripdoctor.audio.capture import SAMPLE_FORMATS as CAPTURE_FORMATS
 from ripdoctor.audio.devices import enumerate_devices
-from ripdoctor.audio.runner import Runner
+from ripdoctor.audio.runner import Runner, ToolFailed, ToolMissing
 from ripdoctor.config.machine import Machine
 from ripdoctor.config.settings import Settings, nearest
 from ripdoctor.config.thresholds import Thresholds
+from ripdoctor.integrations.importer import Beets
 
 
 class Level(StrEnum):
@@ -151,6 +152,39 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
         )
         return
     yield Result("importer", Level.OK, f"importing with {settings.importer}")
+    if settings.importer == "beets":
+        yield from _agree(settings, runner)
+
+
+def _agree(settings: Settings, runner: Runner) -> Iterator[Result]:
+    """Whether beets files a record where this expects to find one.
+
+    Two settings name the library and nothing makes them agree. beets keeps its
+    own configuration and this project uses whatever it finds, so with no beets
+    configuration at all a record is filed into beets' default - and the archive
+    gate, which asks beets where the record went and compares that against the
+    configured library, then refuses to clear the raw sides of a record that
+    imported perfectly well.
+
+    It is a warning rather than a failure because either could be the one that
+    is wrong, and only the person who set them knows which.
+    """
+    try:
+        theirs = Beets().files_into(runner)
+    except (ToolMissing, ToolFailed):
+        return
+    if not theirs or not settings.library:
+        return
+    if Path(theirs).resolve() != Path(settings.library).resolve():
+        yield Result(
+            "library",
+            Level.WARN,
+            f"beets files records into {theirs}, not {settings.library}",
+            fix=f"set `directory: {settings.library}` in beets' own config "
+            "(`beet config -p` says where that is), or point library here",
+        )
+        return
+    yield Result("library", Level.OK, f"beets files records into {theirs}")
 
 
 def capture(settings: Settings, runner: Runner) -> Iterator[Result]:

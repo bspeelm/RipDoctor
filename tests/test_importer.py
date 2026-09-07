@@ -231,9 +231,26 @@ def test_the_prompt_is_turned_back_on(tmp_path: Path) -> None:
     assert beets.config.endswith(I.OVERRIDE_FILE)
 
 
-def test_the_override_changes_one_thing_and_leaves_the_rest(tmp_path: Path) -> None:
+def test_the_cut_tracks_are_moved_rather_than_copied(tmp_path: Path) -> None:
+    """beets copies by default, which wrote every track twice and left the
+    originals in review. Since what is still in review is how a refused import
+    is told from a finished one, a successful import reported itself failed.
+
+    Not a preference being overridden: the review directory belongs to this
+    project, and once a track is in the library there is nothing left for a
+    copy of it to be for."""
+    I.Beets.with_override(tmp_path)
+    assert "move: yes" in (tmp_path / I.OVERRIDE_FILE).read_text()
+
+
+def test_the_override_never_says_where_a_record_goes(tmp_path: Path) -> None:
     """A single `-c` adds to the user's configuration rather than replacing it.
-    Two do not layer - the last simply wins - so there is exactly one."""
+    Two do not layer - the last simply wins - so there is exactly one.
+
+    What it must never carry is the library. Where a record is filed is beets'
+    own business and the person's own decision, and a second place naming it
+    would be a second thing to keep in step. `ripdoctor doctor` reports when
+    the two disagree instead."""
     written = I.Beets.with_override(tmp_path)
     fake = beets_runner()
     written.preview(fake, a_plan(), str(tmp_path), "/music", mbid="aaa")
