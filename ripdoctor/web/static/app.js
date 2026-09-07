@@ -577,10 +577,6 @@ function buildDoc() {
     artist: $("#md-artist").value.trim() || S.meta.artist,
     date: $("#md-date").value.trim() || S.meta.date,
     mbid: S.meta.mbid || "",
-    // Aligning moves every boundary onto audio nobody has heard yet. The server
-    // carries ear_pass forward when we omit it, so it has to be overwritten
-    // here or the saved spec keeps claiming these cuts were checked by ear.
-    ...(S.earPassOverride ? { ear_pass: S.earPassOverride } : {}),
     sides: S.meta.sides.map((letter) => ({
       letter,
       tracks: (S.bySide[letter] || []).slice().sort((a, b) => a.start - b.start),

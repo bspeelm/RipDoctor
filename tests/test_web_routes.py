@@ -18,6 +18,7 @@ from ripdoctor.store import files as F
 from ripdoctor.web import auth as A
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
+from ripdoctor.web.routes import records as R
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Jobs
 from tests.pool import WINDOWS, a_layout, a_runner, quiet_then_loud
@@ -326,14 +327,15 @@ def test_each_lane_reports_the_levels_it_judged_against(tmp_path: Path) -> None:
 
 
 def a_plan_body() -> dict:
+    """What the editor holds: sides by letter, and no filenames."""
     return {
-        "slug": "album",
         "album": "A",
         "artist": "B",
         "date": "2022",
+        "mbid": "aaa",
         "sides": [
             {
-                "file": "side-a.flac",
+                "letter": "a",
                 "tracks": [
                     {"number": 1, "title": "One", "start": 1.0, "end": 9.0, "cat": 8.0}
                 ],
@@ -535,7 +537,6 @@ def test_an_archived_cut_is_carried_onto_a_re_rip(tmp_path: Path, monkeypatch) -
     """The boundaries were right; the capture was replaced. Fitting again from
     the catalogue would throw away work somebody did by listening."""
     from ripdoctor.core.xcorr import Transform
-    from ripdoctor.web.routes import records as R
 
     service = a_service(tmp_path)
     archived = service.layout.archive / "album"
@@ -544,8 +545,8 @@ def test_an_archived_cut_is_carried_onto_a_re_rip(tmp_path: Path, monkeypatch) -
     F.save(
         service.layout,
         "album",
-        F.spec_of(Plan.from_dict(a_plan_body())),
-        Plan.from_dict(a_plan_body()),
+        F.spec_of(R._plan_from("album", a_plan_body())),
+        R._plan_from("album", a_plan_body()),
     )
 
     monkeypatch.setattr(
@@ -564,8 +565,8 @@ def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:
     F.save(
         service.layout,
         "album",
-        F.spec_of(Plan.from_dict(a_plan_body())),
-        Plan.from_dict(a_plan_body()),
+        F.spec_of(R._plan_from("album", a_plan_body())),
+        R._plan_from("album", a_plan_body()),
     )
     body = post(build(service), "/api/align/album", service).json()
     assert body["result"]["problems"][0]["side"] == "a"
@@ -575,3 +576,44 @@ def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:
 def test_aligning_without_a_saved_cut_is_refused(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     assert post(build(service), "/api/align/album", service).status == 409
+
+
+def test_a_prepared_side_carries_a_version_that_changes_with_the_file(
+    tmp_path: Path,
+) -> None:
+    """A re-rip is a different URL rather than the same one with stale
+    contents behind it."""
+    service = a_service(tmp_path)
+    app = build(service)
+    C.build(service.runner, service.layout, "album", "a", dwell=0.0)
+    first = get(app, "/api/album/album", service).json()["ready"]["a"]["v"]
+
+    service.layout.side_file("album", "a").write_bytes(b"fLaC" + b"\x00" * 9000)
+    service.runner = a_runner()
+    C.build(service.runner, service.layout, "album", "a", dwell=0.0)
+    assert get(app, "/api/album/album", service).json()["ready"]["a"]["v"] != first
+
+
+def test_the_release_id_comes_back_with_the_record(tmp_path: Path) -> None:
+    """Everything that asks the catalogue again - cover art, most obviously -
+    has no other way to find the same entry."""
+    service = a_service(tmp_path)
+    post(build(service), "/api/plan/album", service, a_plan_body())
+    assert get(build(service), "/api/album/album", service).json()["mbid"] == "aaa"
+
+
+def test_a_side_being_recorded_is_named_rather_than_looking_unprepared(
+    tmp_path: Path,
+) -> None:
+    """The page shows "recording" instead of offering to prepare a file that is
+    still being written."""
+    from ripdoctor.audio import capture as CAP
+    from ripdoctor.work.capture import Recorder
+
+    service = a_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder.start(
+        FakeRunner(), "hw:Rx,0", tmp_path, "album", "a", CAP.Format()
+    )
+    body = get(build(service), "/api/album/album", service).json()
+    assert body["recording"] == ["a"]

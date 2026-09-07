@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
 from typing import Any
 
 from ripdoctor.audio.align import fit_side
@@ -9,10 +11,11 @@ from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
-from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec
+from ripdoctor.core.plan import BadPlan, OldFormat, Plan
 from ripdoctor.core.xcorr import AlignError
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
+from ripdoctor.store.files import SIDE
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.service import Service
@@ -66,12 +69,19 @@ def add(app: App, service: Service) -> None:
         for side in sides:
             built = C.prepared(layout, slug, side)
             if built:
-                ready[side] = built.as_dict()
+                # The stamp changes whenever the source does, so a re-rip is a
+                # different URL rather than the same one with stale contents.
+                ready[side] = {**built.as_dict(), "v": _version(built.stamp)}
 
+        live = service.recorder.live
+        recording = [live.side] if live and live.running and live.slug == slug else []
+        spec_file = layout.spec_file(slug)
         out: dict[str, Any] = {
             "slug": slug,
             "sides": sides,
             "ready": ready,
+            "recording": recording,
+            "mbid": F.read_spec(spec_file).mbid if spec_file.is_file() else "",
             "album": "",
             "artist": "",
             "date": "",
@@ -217,21 +227,42 @@ def add(app: App, service: Service) -> None:
         The plan is what the cutter reads; the spec is where the same edges
         become ear overrides that win on the next fit. Writing only the plan
         discards a decision somebody made by listening.
+
+        The editor sends sides by letter, which is what it has. The filename is
+        this layer's business, not the page's.
         """
         slug = slug_of(r)
         body = r.json()
         try:
-            plan = Plan.from_dict(body.get("plan") or body)
-            spec = Spec.from_dict(body["spec"]) if body.get("spec") else _spec_for(plan)
+            plan = _plan_from(slug, body)
         except (OldFormat, BadPlan, KeyError, TypeError, ValueError) as e:
             raise H.HttpError(400, str(e)) from e
+        spec = replace(F.spec_of(plan), mbid=str(body.get("mbid", "")))
         spec_path, plan_path = F.save(layout, slug, spec, plan)
         return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
 
 
-def _spec_for(plan: Plan) -> Spec:
-    """The spec this plan implies. Nothing else is sent by the editor."""
-    return F.spec_of(plan)
+def _version(stamp: str) -> str:
+    return hashlib.sha1(stamp.encode(), usedforsecurity=False).hexdigest()[:10]
+
+
+def _plan_from(slug: str, doc: dict[str, Any]) -> Plan:
+    """A plan from the document the editor holds."""
+    return Plan.from_dict(
+        {
+            "slug": slug,
+            "album": str(doc.get("album", "")),
+            "artist": str(doc.get("artist", "")),
+            "date": str(doc.get("date", "")),
+            "sides": [
+                {
+                    "file": s.get("file") or SIDE.format(letter=token(s["letter"])),
+                    "tracks": s.get("tracks", []),
+                }
+                for s in doc.get("sides", [])
+            ],
+        }
+    )
 
 
 def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
