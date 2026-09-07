@@ -120,6 +120,25 @@ def test_auto_stop_can_be_turned_off_for_a_quiet_record(tmp_path: Path) -> None:
     assert r.json()["autostop"] is False
 
 
+def test_abandoning_throws_the_capture_away(tmp_path: Path) -> None:
+    """For a take that went wrong from the start. Distinct from stop, which
+    keeps what was captured - the two are one button apart and one of them
+    cannot be undone."""
+    service, app = running_service(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    assert post(app, "/api/rip/abandon", service).status == 200
+    assert not partial.exists()
+    assert service.recorder.live is not None and service.recorder.live.control.stopping
+
+
+def test_abandoning_nothing_is_a_409(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    service.recorder = a_recorder()
+    assert post(build(service), "/api/rip/abandon", service).status == 409
+
+
 def test_a_control_with_nothing_running_is_a_409(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     service.recorder = a_recorder()

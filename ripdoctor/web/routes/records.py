@@ -132,8 +132,13 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    @app.route("GET", "/api/prepare/([^/]+)")
-    def prepare_status(r: H.Request) -> H.Response:
+    @app.route("GET", "/api/job/([^/]+)")
+    def job_status(r: H.Request) -> H.Response:
+        """Whatever is running for this record, whichever operation it is.
+
+        One endpoint rather than one per operation: there is one job per record
+        at a time, so a page that polls has one thing to poll.
+        """
         job = service.jobs.status(slug_of(r))
         if job is None:
             raise H.HttpError(404, "no job")

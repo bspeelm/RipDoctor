@@ -102,6 +102,23 @@ def add(app: App, service: Service) -> None:
     def stop(_r: H.Request) -> H.Response:
         return _control(service, "stop")
 
+    @app.route("POST", "/api/rip/abandon")
+    def abandon(_r: H.Request) -> H.Response:
+        """Stop, and throw the capture away rather than keeping it.
+
+        For a take that went wrong from the start - the wrong input, the wrong
+        side, the needle in the wrong place. Distinct from stop, which keeps
+        what was captured, because the two are one button apart and one of them
+        cannot be undone.
+        """
+        live = service.recorder.live
+        if live is None or not live.running:
+            raise H.HttpError(409, "nothing is recording")
+        service.recorder.stop()
+        partial = C.partial_path(layout.raw / live.slug, live.side, live.stem)
+        partial.unlink(missing_ok=True)
+        return H.ok({"ok": True, "abandoned": f"{live.slug} {live.stem} {live.side}"})
+
     @app.route("POST", "/api/rip/snooze")
     def snooze(_r: H.Request) -> H.Response:
         """Forgive the quiet stretch in progress without disarming anything."""

@@ -262,15 +262,17 @@ def test_a_second_prepare_while_one_runs_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_job_is_pollable_afterwards(tmp_path: Path) -> None:
+    """One endpoint for every operation: there is one job per record at a time,
+    so a page that polls has one thing to poll."""
     service = a_service(tmp_path)
     app = build(service)
     post(app, "/api/prepare/album", service)
-    assert get(app, "/api/prepare/album", service).json()["done"]
+    assert get(app, "/api/job/album", service).json()["done"]
 
 
 def test_polling_a_record_with_no_job_is_a_404(tmp_path: Path) -> None:
     service = a_service(tmp_path)
-    assert get(build(service), "/api/prepare/album", service).status == 404
+    assert get(build(service), "/api/job/album", service).status == 404
 
 
 # ------------------------------------------------------ envelopes and gaps
