@@ -118,6 +118,14 @@ the boundary by counting seconds does not work, and is not their job.
 
 ## Traps that are not about detection
 
+**Stopping a capture is not finishing it.** Asking a twenty-minute side to
+stop returns at once; encoding it takes most of a minute, during which the
+capture is still on disk as a WAV. A page that reports at the moment of asking
+shows a size for a file that does not exist yet, and - worse - looks for
+unfinished captures while the one just made is still lying there, so a
+completed rip is offered back as wreckage to salvage. Report when it has
+landed, not when it was asked for.
+
 **Listening to a capture means waiting for it, not racing it.** A monitor that
 hands the growing file to a decoder runs at the same speed as the writer, so it
 sits at the end of the file and every jitter in either direction is an

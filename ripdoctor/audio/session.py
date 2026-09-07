@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -67,6 +68,7 @@ class Outcome:
     """What the capture turned out to be."""
 
     path: Path | None = None
+    bytes: int = 0
     seconds: float = 0.0
     reason: str = ""
     error: str = ""
@@ -182,6 +184,11 @@ def record(
     outcome.overruns, outcome.overrun_ms = C.overruns(log)
     try:
         outcome.path = C.finish(runner, album_dir, letter, stem)
+        # Its size is worth reporting and is not worth losing the whole
+        # outcome over: a side that encoded and then could not be measured is
+        # still a side, and saying "0 MB" beats saying nothing at all.
+        with suppress(OSError):
+            outcome.bytes = outcome.path.stat().st_size
     except C.CaptureError as e:
         # Not raised. A capture that ended with nothing on disk still has a
         # reason it ended, and that reason is what the human needs to see.

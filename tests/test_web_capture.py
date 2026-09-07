@@ -406,3 +406,49 @@ def test_the_listing_says_which_one_is_configured(tmp_path: Path) -> None:
     assert [d["id"] for d in body["devices"]] == ["hw:PCH,0", "hw:Rx,0"]
     assert [d["configured"] for d in body["devices"]] == [False, True]
     assert body["rate"] and body["format"]
+
+
+# ------------------------------------------------ what the page reads after
+
+
+def test_a_finished_capture_reports_what_it_wrote(tmp_path: Path) -> None:
+    """Stopping is not finishing. Encoding a twenty-minute side takes most of a
+    minute, and the page has to be able to wait for it and then say what
+    landed - not report `NaN MB` for a file that does not exist yet."""
+    service, _tape = recording_service(tmp_path, "m" * 6)
+
+    class Encoding(FakeRunner):
+        """A fake ffmpeg that leaves the side it was told to write."""
+
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "ffmpeg" and args[-1].endswith(".flac"):
+                Path(args[-1]).write_bytes(b"fLaC" + b"\x00" * 5000)
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    service.runner = Encoding(exit_after=6)
+    app = build(service)
+    post(app, "/api/rip/start", service, {"slug": "album", "side": "b"})
+    st = get(app, "/api/rip/status", service).json()
+    assert st["stage"] == "done", st.get("error")
+    assert st["path"] and st["path"].endswith("side-b.flac")
+    assert st["bytes"] > 0 and st["duration"] > 0
+    assert "overruns" in st
+
+
+def test_the_stage_says_when_it_is_still_encoding(tmp_path: Path) -> None:
+    """What the page polls on. Without it, a stop looks finished the moment it
+    is asked for, and the capture is still on disk as a WAV - which is how a
+    completed rip gets offered back as wreckage to salvage."""
+    from ripdoctor.audio import session as S
+
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    live = service.recorder.start(
+        FakeRunner(), "hw:Rx,0", tmp_path, "album", "b", C.Format()
+    )
+    assert live.stage == "recording"
+    live.outcome = S.Outcome(path=None, reason="stopped by hand")
+    assert live.stage == "encoding"
+    live.outcome = S.Outcome(path=tmp_path / "side-b.flac", reason="stopped by hand")
+    assert live.stage == "done"

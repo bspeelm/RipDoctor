@@ -1618,11 +1618,30 @@ async function ripStart() {
   }
 }
 
+// Stopping is not finishing. The request only asks the capture to stop; the
+// side then has to be encoded, which for a twenty-minute WAV is most of a
+// minute. Reporting at the moment of asking showed `NaN MB` for a file that
+// did not exist yet, and - worse - looked for unfinished captures while the
+// one just made was still on disk, so a completed rip was offered back as
+// wreckage to salvage.
+async function whenCaptureSettles(limit = 600) {
+  for (let i = 0; i < limit; i++) {
+    const st = await api("/api/rip/status");
+    if (!st.running && st.stage !== "encoding") return st;
+    $("#rip-state").textContent = st.stage === "encoding" ? "encoding…" : "stopping…";
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new Error("the capture is taking longer than expected to finish");
+}
+
 async function ripStop() {
   $("#rip-err").textContent = "";
   $("#rip-state").textContent = "encoding…";
+  $("#rip-stop").disabled = true;
   try {
-    const r = await postJSON("/api/rip/stop", {});
+    await postJSON("/api/rip/stop", {});
+    const r = await whenCaptureSettles();
+    if (r.error) throw new Error(r.error);
     if (r.kind === "punch") {
       // Not a side: no letter to bump, and the next step is Find the track.
       $("#rip-done").textContent =
@@ -1632,7 +1651,8 @@ async function ripStop() {
       return;
     }
     $("#rip-done").textContent =
-      `wrote side-${r.side}.flac — ${fmt(r.duration)}, ${(r.bytes / 1e6).toFixed(0)} MB, valid FLAC`;
+      `wrote side-${r.side}.flac — ${fmt(r.duration)}, ${(r.bytes / 1e6).toFixed(0)} MB`
+      + (r.overruns ? `   ·   ${r.overruns} overruns, ${r.overrun_ms} ms lost` : "");
     // bump the side letter so the next one is ready to go
     const sv = $("#rip-side").value.trim();
     if (/^[a-z]$/.test(sv)) $("#rip-side").value = String.fromCharCode(sv.charCodeAt(0) + 1);
