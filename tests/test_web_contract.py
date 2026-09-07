@@ -16,12 +16,14 @@ scan that misses the case that matters.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from ripdoctor.audio import capture as CAP
 from ripdoctor.web.routes import build
+from tests.test_web_capture import a_stalled_recorder
 from tests.test_web_routes import a_plan_body, a_service, get, post
 
 # endpoint -> the fields the front end reads off each item of that list.
@@ -40,7 +42,7 @@ LISTS = {
         ),
     ),
     "/api/rip/sides/album": ("sides", ("slug", "side", "bytes", "recording")),
-    "/api/rip/orphans": ("orphans", ("slug", "side", "bytes", "seconds")),
+    "/api/rip/orphans": ("orphans", ("slug", "side", "kind", "bytes", "seconds")),
     "/api/review/album": ("tracks", ("index", "name")),
 }
 
@@ -73,6 +75,15 @@ OBJECTS = {
         "will_remove",
     ),
     "/api/punch/album": ("slug", "album", "artist", "tracks"),
+}
+
+# The back-outs. Each is a POST, and each one's answer is read straight into a
+# toast - which is where `abandoned side undefined after NaN` came from.
+BACKOUTS = {
+    "/api/rip/abandon": ("z", ("side", "kind", "seconds", "freed_bytes", "note")),
+    "/api/rip/salvage": ("z", ("side", "kind", "duration", "path")),
+    "/api/rip/discard": ("z", ("side", "kind", "freed_bytes", "note")),
+    "/api/rip/discard-side": ("a", ("side", "freed_bytes", "notes")),
 }
 
 
@@ -141,3 +152,21 @@ def test_the_lists_named_here_are_the_ones_the_page_actually_calls() -> None:
         stem = path.replace("/album", "/").rstrip("/")
         assert stem in source, f"nothing calls {path}"
     assert json.dumps(a_plan_body())
+
+
+@pytest.mark.parametrize(("path", "spec"), BACKOUTS.items(), ids=lambda v: str(v)[:40])
+def test_every_way_out_says_what_it_took(
+    tmp_path: Path, path: str, spec: tuple[str, tuple[str, ...]]
+) -> None:
+    side, fields = spec
+    service = a_pool(tmp_path)
+    if path == "/api/rip/abandon":
+        service.settings = replace(service.settings, capture_device="hw:Rx,0")
+        service.recorder = a_stalled_recorder()
+    app = build(service)
+    if path == "/api/rip/abandon":
+        post(app, "/api/rip/start", service, {"slug": "album", "side": side})
+    r = post(app, path, service, {"slug": "album", "side": side})
+    assert r.status == 200, r.json()
+    missing = [f for f in fields if f not in r.json()]
+    assert not missing, f"{path} is missing {missing}"
