@@ -164,6 +164,11 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, "a release is needed")
         spec = F.read_spec(_file(layout.spec_file(slug), slug))
         plan = F.read_plan(_file(layout.plan_file(slug), slug))
+        # A spec with no sides in it is a record that has only been named. The
+        # retitling walks its sides, so this would write a retitled plan beside
+        # a spec that kept none of it, and the two would stay that way.
+        if not spec.sides:
+            raise H.HttpError(409, f"no saved cut for {slug} to re-label")
         try:
             release = MB.fetch_tracks(
                 service.fetcher, MB.Release(mbid, "", "", "", "", [])
