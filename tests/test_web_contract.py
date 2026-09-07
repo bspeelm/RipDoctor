@@ -28,7 +28,16 @@ from tests.test_web_routes import a_plan_body, a_service, get, post
 LISTS = {
     "/api/albums": (
         "albums",
-        ("slug", "where", "old_format", "album", "artist", "date", "sides"),
+        (
+            "slug",
+            "where",
+            "old_format",
+            "album",
+            "artist",
+            "date",
+            "sides",
+            "archived_copy",
+        ),
     ),
     "/api/rip/sides/album": ("sides", ("slug", "side", "bytes", "recording")),
     "/api/rip/orphans": ("orphans", ("slug", "side", "bytes", "seconds")),

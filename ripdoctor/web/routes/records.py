@@ -11,7 +11,7 @@ from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
-from ripdoctor.core.plan import BadPlan, OldFormat, Plan
+from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec
 from ripdoctor.core.xcorr import AlignError
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
@@ -62,21 +62,24 @@ def add(app: App, service: Service) -> None:
         include = r.query.get("archive") == "1"
         found = []
         for slug in layout.albums(include_archive=include):
-            named = _named(layout, slug)
+            album, artist, date, old = named(layout, slug)
             found.append(
                 {
                     "slug": slug,
                     "where": "raw" if (layout.raw / slug).is_dir() else "archive",
-                    "old_format": named is None,
+                    "old_format": old,
                     # What a record is called, so re-ripping one can fill the
                     # fields in from what was decided last time rather than
                     # from somebody retyping it.
-                    "album": "" if named is None else named[0],
-                    "artist": "" if named is None else named[1],
-                    "date": "" if named is None else named[2],
+                    "album": album,
+                    "artist": artist,
+                    "date": date,
                     # Which sides exist, so re-ripping one can say what is
                     # already there rather than making somebody look.
                     "sides": layout.sides_on_disk(slug),
+                    # Whether the same record is also in archive, which is what
+                    # aligning a re-rip against the old cut needs.
+                    "archived_copy": (layout.archive / slug).is_dir(),
                 }
             )
         return H.ok({"albums": found})
@@ -101,16 +104,17 @@ def add(app: App, service: Service) -> None:
 
         live = service.recorder.live
         recording = [live.side] if live and live.running and live.slug == slug else []
-        spec_file = layout.spec_file(slug)
+        album, artist, date, _old = named(layout, slug)
+        spec = _saved_spec(layout, slug)
         out: dict[str, Any] = {
             "slug": slug,
             "sides": sides,
             "ready": ready,
             "recording": recording,
-            "mbid": F.read_spec(spec_file).mbid if spec_file.is_file() else "",
-            "album": "",
-            "artist": "",
-            "date": "",
+            "mbid": spec.mbid if spec else "",
+            "album": album,
+            "artist": artist,
+            "date": date,
             "tracks_by_side": {},
         }
         plan_file = layout.plan_file(slug)
@@ -190,9 +194,11 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         where = layout.spec_file(slug)
-        if not where.is_file():
+        # A record that has only been named has a spec with nothing in it, and
+        # walking no sides ends in a wrong diagnosis rather than this one.
+        spec = F.read_spec(where) if where.is_file() else None
+        if spec is None or not spec.sides:
             raise H.HttpError(409, f"no saved cut for {slug} to align from")
-        spec = F.read_spec(where)
 
         def work(job: Job) -> dict[str, Any]:
             job.total = len(spec.sides)
@@ -268,23 +274,43 @@ def add(app: App, service: Service) -> None:
         return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
 
 
-def _named(layout: F.Layout, slug: str) -> tuple[str, str, str] | None:
-    """What a record is called, or nothing if its plan cannot be read here.
+def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
+    """What a record is called, and whether its plan can be read here.
+
+    Two documents carry the names and both can be missing. A capture writes
+    the spec, so it is the only source before a first pass; a plan is written
+    from names confirmed against the catalogue, so where it has a value that
+    value wins. The spec fills in the rest.
 
     Refusing the superseded `cuts` format is deliberate - re-fit rather than
     convert - so a listing says which records that applies to rather than
-    letting each one fail when somebody opens it.
+    letting each one fail when somebody opens it. Such a record is still named
+    from its spec: knowing what it is called is what makes it findable.
     """
+    spec = _saved_spec(layout, slug)
+    album, artist, date = (spec.album, spec.artist, spec.date) if spec else ("", "", "")
     where = layout.plan_file(slug)
     if not where.is_file():
-        return "", "", ""
+        return album, artist, date, False
     try:
         plan = F.read_plan(where)
     except OldFormat:
-        return None
+        return album, artist, date, True
     except (BadPlan, OSError, ValueError):
-        return "", "", ""
-    return plan.album, plan.artist, plan.date
+        return album, artist, date, False
+    return plan.album or album, plan.artist or artist, plan.date or date, False
+
+
+def _saved_spec(layout: F.Layout, slug: str) -> Spec | None:
+    """The spec, or nothing at all if it is missing or will not parse.
+
+    Half of what this reads was written before the record was cut, so a spec
+    that is not there is the ordinary case rather than a fault.
+    """
+    try:
+        return F.read_spec(layout.spec_file(slug))
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def _version(stamp: str) -> str:

@@ -8,7 +8,7 @@ from ripdoctor.core.xcorr import AlignError
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
-from ripdoctor.web.routes.records import slug_of
+from ripdoctor.web.routes.records import named, slug_of
 from ripdoctor.web.service import Service
 from ripdoctor.work import punch as P
 from ripdoctor.work.jobs import Busy, Job
@@ -41,11 +41,12 @@ def add(app: App, service: Service) -> None:
         slug = slug_of(r)
         where = layout.plan_file(slug)
         if not where.is_file():
+            album, artist, _date, _old = named(layout, slug)
             return H.ok(
                 {
                     "slug": slug,
-                    "album": "",
-                    "artist": "",
+                    "album": album,
+                    "artist": artist,
                     "tracks": [],
                     "why": "no saved cut yet - nothing to punch into",
                 }

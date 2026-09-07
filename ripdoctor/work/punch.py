@@ -114,9 +114,12 @@ def kept_dir(layout: Layout, slug: str) -> Path:
 
 def _track(layout: Layout, slug: str, number: int) -> tuple[str, SpecTrack]:
     where = layout.spec_file(slug)
-    if not where.is_file():
+    # A record that has only been named has a spec with no sides in it, and
+    # saying "no track N" about one is a wrong answer rather than a blunt one.
+    sides = read_spec(where).sides if where.is_file() else ()
+    if not sides:
         raise PunchError(f"no saved cut for {slug}")
-    for side in read_spec(where).sides:
+    for side in sides:
         for track in side.tracks:
             if track.number == int(number):
                 return side.letter, track
