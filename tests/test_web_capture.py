@@ -44,7 +44,7 @@ def recording_service(tmp_path: Path, script: str = "m" * 8):  # type: ignore[no
 def test_nothing_recording_is_reported_as_a_state(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     body = get(build(service), "/api/rip/status", service).json()
-    assert body == {"running": False}
+    assert body == {"running": False, "stage": "idle"}
 
 
 def test_a_side_records_and_reports_how_it_ended(tmp_path: Path) -> None:
@@ -267,7 +267,16 @@ def test_the_sides_of_a_record_show_what_is_finished_and_what_is_not(
     service = a_service(tmp_path)
     a_partial(service)
     body = get(build(service), "/api/rip/sides/album", service).json()
-    assert body["sides"] == ["side-a.flac"] and body["capturing"] == ["b"]
+    by_side = {x["side"]: x for x in body["sides"]}
+    assert by_side["a"]["finished"] and by_side["a"]["bytes"] > 0
+    assert not by_side["b"]["finished"], "a capture in progress is not a side"
+    assert by_side["b"]["slug"] == "album"
+
+
+def test_a_record_with_nothing_captured_lists_nothing(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    body = get(build(service), "/api/rip/sides/missing", service).json()
+    assert body["sides"] == []
 
 
 def test_every_capture_route_needs_a_session(tmp_path: Path) -> None:

@@ -310,18 +310,30 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/rip/sides/([^/]+)")
     def sides(r: H.Request) -> H.Response:
-        album = layout.raw / token(r.params[0])
-        finished = (
-            sorted(p.name for p in album.glob("side-*.flac")) if album.is_dir() else []
-        )
-        return H.ok(
+        """Every capture on disk for this record, finished or not.
+
+        One list rather than two: what a person wants to know is what is there
+        and which of it can be thrown away - and a side still being written
+        cannot be.
+        """
+        slug = token(r.params[0])
+        album = layout.raw / slug
+        if not album.is_dir():
+            return H.ok({"sides": []})
+        found: list[dict[str, Any]] = [
             {
-                "sides": finished,
-                "capturing": [
-                    C.letter_of(p) for p in C.salvageable(album) if album.is_dir()
-                ],
+                "slug": slug,
+                "side": p.name[len("side-") : -len(".flac")],
+                "bytes": p.stat().st_size,
+                "recording": False,
+                "finished": True,
             }
+            for p in sorted(album.glob("side-*.flac"))
+        ]
+        found.extend(
+            {**_partial(album, p), "finished": False} for p in C.salvageable(album)
         )
+        return H.ok({"sides": found})
 
 
 def _control(service: Service, what: str) -> H.Response:
