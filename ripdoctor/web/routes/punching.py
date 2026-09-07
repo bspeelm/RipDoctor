@@ -33,7 +33,23 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/punch/([^/]+)")
     def state(r: H.Request) -> H.Response:
+        """Every track, or an empty list and the reason there are none.
+
+        Nothing can be punched before a record has been cut, and a record that
+        has not been cut is the ordinary state rather than a missing one.
+        """
         slug = slug_of(r)
+        where = layout.plan_file(slug)
+        if not where.is_file():
+            return H.ok(
+                {
+                    "slug": slug,
+                    "album": "",
+                    "artist": "",
+                    "tracks": [],
+                    "why": "no saved cut yet - nothing to punch into",
+                }
+            )
         return H.ok(
             P.state(
                 service.runner,

@@ -1035,7 +1035,12 @@ function renderRerip() {
   const q = $("#rip-rerip-q").value.trim().toLowerCase();
   const keep = ripPinned;
   sel.innerHTML = "";
-  sel.appendChild(el("option", "", "— new album —"));
+  // The value has to be set explicitly: an option without one takes its own
+  // label as its value, so `sel.value = ""` below matches nothing and the
+  // control renders blank rather than showing this.
+  const fresh = el("option", "", "— new album —");
+  fresh.value = "";
+  sel.appendChild(fresh);
   let shown = 0;
   for (const a of ripAlbums) {
     const sides = (a.sides || []).join(" ") || "no sides yet";
