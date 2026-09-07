@@ -9,8 +9,8 @@ from typing import Any
 from ripdoctor.core.fit import fit_plan, report
 from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, validate
 from ripdoctor.core.sides import assign_sides, music_span
+from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
-from ripdoctor.integrations import tagger as T
 from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
@@ -198,7 +198,10 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         plan = _plan_of(service, slug)
-        where, count = T.locate(service.settings.library, plan.artist, plan.album)
+        importer = IMP.choose(service.runner, service.settings.importer)
+        where, count = importer.locate(
+            service.runner, service.settings.library, plan.artist, plan.album
+        )
         return H.ok(
             {
                 "existing": None
@@ -220,20 +223,25 @@ def add(app: App, service: Service) -> None:
         if not root:
             raise H.HttpError(409, "no library directory is configured")
 
+        importer = IMP.choose(service.runner, service.settings.importer)
+        spec_file = layout.spec_file(slug)
+        mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+
         def work(job: Job) -> dict[str, Any]:
             review = str(layout.review_dir(slug))
-            job.total = len(T.placements(plan, review, root))
-            job.step(plan.album, "tagging and placing")
-            moved = T.apply(
+            job.total = sum(len(s.tracks) for s in plan.sides)
+            job.step(plan.album, f"importing with {importer.name}")
+            done = importer.apply(
                 service.runner,
                 plan,
                 review,
                 root,
+                mbid=mbid,
                 file_mode=service.settings.file_mode,
                 dir_mode=service.settings.dir_mode,
             )
-            job.finished = len(moved)
-            return {"tracks": len(moved), "library": root}
+            job.finished = done.tracks
+            return {**done.as_dict(), "importer": importer.name}
 
         try:
             return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)
@@ -246,6 +254,7 @@ def add(app: App, service: Service) -> None:
         return AR.survey(
             service.runner,
             layout,
+            IMP.choose(service.runner, service.settings.importer),
             service.settings.library,
             slug,
             plan.artist,

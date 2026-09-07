@@ -126,7 +126,7 @@ is refused with the reason, rather than written as an empty or duplicated file.
 | 2 — audio seam, config, doctor; offline CLI | done |
 | 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
 | 4 — web interface | done, except listening while cueing (untested against hardware) |
-| 5 — tagging and import | done, except the `ripdoctor[beets]` extra |
+| 5 — tagging and import | done |
 | 6 — documentation revision, then 1.0 | not started |
 
 ## Development

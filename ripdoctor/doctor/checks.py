@@ -109,6 +109,36 @@ def storage(settings: Settings) -> Iterator[Result]:
             yield Result(name, Level.OK, f"{name}: {path}")
 
 
+IMPORTERS = ("tagger", "beets")
+
+
+def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
+    """Which importer will actually be used, when that is not what was asked.
+
+    `choose` falls back rather than refusing, because being told to install
+    something at the last step of a twenty-minute job is not a useful answer.
+    A silent fallback is exactly what this exists to say out loud.
+    """
+    if settings.importer not in IMPORTERS:
+        yield Result(
+            "importer",
+            Level.FAIL,
+            f"{settings.importer} is not an importer this knows",
+            fix=f"set importer to one of {', '.join(sorted(IMPORTERS))}",
+        )
+        return
+    if settings.importer == "beets" and not runner.which("beet"):
+        yield Result(
+            "importer",
+            Level.WARN,
+            "importer is beets, but beet is not installed - the built-in "
+            "tagger will be used instead",
+            fix='install beets, or set importer = "tagger" to stop asking',
+        )
+        return
+    yield Result("importer", Level.OK, f"importing with {settings.importer}")
+
+
 def capture(settings: Settings, runner: Runner) -> Iterator[Result]:
     if not runner.which("arecord"):
         return
@@ -188,6 +218,7 @@ def run_all(
         *tools(runner),
         *storage(settings),
         *capture(settings, runner),
+        *importing(settings, runner),
         *configuration(settings, thresholds),
     ]
     out.append(

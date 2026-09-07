@@ -248,3 +248,26 @@ def test_the_doctor_never_raises_however_broken_the_machine(
         FakeRunner(installed=installed),
     )
     assert D.report(results)
+
+
+# ------------------------------------------------------------- importing
+
+
+def test_the_importer_in_use_is_reported() -> None:
+    r = find(list(D.importing(Settings(), everything())), "importer")
+    assert r.level is D.Level.OK and "tagger" in r.summary
+
+
+def test_asking_for_beets_without_it_is_a_warning_not_a_silent_swap() -> None:
+    """`choose` falls back rather than refusing, and a silent fallback is
+    exactly what this exists to say out loud."""
+    s = replace(Settings(), importer="beets")
+    r = find(list(D.importing(s, FakeRunner(installed={"ffmpeg"}))), "importer")
+    assert r.level is D.Level.WARN
+    assert "built-in tagger will be used" in r.summary
+
+
+def test_an_importer_nobody_has_heard_of_is_named() -> None:
+    s = replace(Settings(), importer="picard")
+    r = find(list(D.importing(s, everything())), "importer")
+    assert r.level is D.Level.FAIL and "tagger" in r.fix

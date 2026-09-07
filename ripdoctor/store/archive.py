@@ -21,7 +21,7 @@ from typing import Any
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
-from ripdoctor.integrations.tagger import locate
+from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
 from ripdoctor.store.files import Layout
 
@@ -55,6 +55,7 @@ def removable(layout: Layout, slug: str) -> list[Path]:
 def survey(
     runner: Runner,
     layout: Layout,
+    importer: Importer,
     library: str,
     slug: str,
     artist: str,
@@ -68,7 +69,10 @@ def survey(
     `read` decodes every side, which takes seconds each - worth it before the
     irreversible step, not worth it for a button's tooltip.
     """
-    where, count = locate(library, artist, album)
+    # Asked of the importer rather than derived: beets owns its own naming, and
+    # a gate that checked the path this project would have chosen would be
+    # checking the wrong directory on every install that configured it.
+    where, count = importer.locate(runner, library, artist, album)
     source = layout.raw / slug
     sides = []
     if source.is_dir():
