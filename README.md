@@ -90,6 +90,7 @@ ripdoctor devices       capture devices this machine has, and what each accepts
 ripdoctor probe         record twenty seconds and say what arrived
 ripdoctor measure       compare this signal chain against the shipped thresholds
 ripdoctor record        record one side, metered, stopping itself at the run-out
+ripdoctor serve         run the web interface
 ripdoctor salvage       finish a capture an interrupted session left behind
 ripdoctor lookup        find a release in the catalogue, usable entries first
 ripdoctor fit           place track boundaries from a spec and measured levels

@@ -600,3 +600,29 @@ def test_measure_without_a_device_says_which_command_lists_them(
     measure_env(monkeypatch, tmp_path)
     assert main(["measure", "--yes"], runner=everything()) == 2
     assert "ripdoctor devices" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------- serve
+
+
+def test_serve_without_a_vinyl_directory_points_at_the_doctor(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    """Nothing else about the server can be right if it has nowhere to look.
+
+    Driven through cmd_serve rather than main: every other path through this
+    command binds a socket, and a test that can accidentally start a server is
+    a test that hangs the suite.
+    """
+    import argparse
+    from dataclasses import replace
+
+    from ripdoctor.cli import Context, cmd_serve
+
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    ctx = Context(everything())
+    ctx.settings = replace(ctx.settings, vinyl="")
+    args = argparse.Namespace(port=None, bind=None, user="ripdoctor")
+    assert cmd_serve(ctx, args) == 2
+    assert "ripdoctor doctor" in capsys.readouterr().err

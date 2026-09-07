@@ -29,6 +29,16 @@ from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
+from ripdoctor.store.files import Layout
+from ripdoctor.web import auth as AUTH
+from ripdoctor.web import httpd as HTTPD
+from ripdoctor.web import routes as ROUTES
+from ripdoctor.web import static as STATIC
+from ripdoctor.web.service import Service as SERVICE
+
+# The front end ships inside the package, so an install has it and a source tree
+# runs against the same files.
+STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
 
 class Context:
@@ -291,6 +301,48 @@ def cmd_salvage(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
+    """Run the web interface."""
+    if not ctx.settings.vinyl:
+        print(
+            "no vinyl directory is configured - run `ripdoctor doctor`",
+            file=sys.stderr,
+        )
+        return 2
+
+    layout = Layout(Path(ctx.settings.vinyl))
+    layout.ensure()
+    credentials, generated = AUTH.load_or_create(
+        ctx.machine.config_dir / "auth.json", args.user
+    )
+    if generated:
+        # The only time it is ever visible: it is hashed on the way to disk and
+        # cannot be recovered from the file.
+        print("=" * 68)
+        print("  first run - a login was generated")
+        print(f"    user:     {credentials.user}")
+        print(f"    password: {generated}")
+        print("  Store it now; it is not recoverable.")
+        print("=" * 68)
+
+    service = SERVICE(
+        layout=layout,
+        settings=ctx.settings,
+        thresholds=ctx.thresholds,
+        runner=ctx.runner,
+        credentials=credentials,
+        sessions=AUTH.Sessions(secret=credentials.secret),
+    )
+    bind = args.bind or ctx.settings.bind
+    if bind not in ("127.0.0.1", "localhost", "::1"):
+        # Worth saying out loud: on any other address the login is the only
+        # thing between the network and a program that writes to the pool.
+        print(f"  reachable from the network on {bind} - the login is the only control")
+    app = ROUTES.build(service, static=STATIC.handler(STATIC_DIR))
+    HTTPD.serve(app, bind, args.port or ctx.settings.port)
+    return 0
+
+
 def cmd_lookup(ctx: Context, args: argparse.Namespace) -> int:
     """Find candidate releases, most usable first."""
     fetcher = MB.HttpFetcher()
@@ -484,6 +536,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("devices", help="list capture devices")
     v.set_defaults(run=cmd_devices)
+
+    sv2 = sub.add_parser("serve", help="run the web interface")
+    sv2.add_argument("--port", type=int, help="override the configured port")
+    sv2.add_argument("--bind", help="override the configured address")
+    sv2.add_argument("--user", default="ripdoctor", help="login name on first run")
+    sv2.set_defaults(run=cmd_serve)
 
     ms = sub.add_parser("measure", help="compare this chain against the defaults")
     ms.add_argument("--device", help="override the configured device")
