@@ -556,7 +556,7 @@ async function uploadArt(file) {
   $("#art-state").textContent = `uploading ${file.name}…`;
   try {
     const buf = await file.arrayBuffer();
-    const r = await fetch(`/api/artwork/${S.slug}`, {
+    const r = await fetch(`/api/artwork/${S.slug}/upload`, {
       method: "POST", credentials: "same-origin",
       headers: { "content-type": file.type || "application/octet-stream" },
       body: buf,

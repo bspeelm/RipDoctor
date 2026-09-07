@@ -64,6 +64,17 @@ def test_every_module_the_javascript_imports_is_there() -> None:
             assert found.group(1) in names, f"{script.name} imports {found.group(1)}"
 
 
+# A call that names a method, and the path it names it for. Matching a path
+# alone let two calls through in one session: a prepare polled with GET against
+# a POST-only route, and an upload posted to a path that only answers GET. Both
+# read as "no such route" in front of somebody using it.
+POSTING = re.compile(
+    r"postJSON\(\s*[`\"'](/api/[^`\"']*)"
+    r"|fetch\(\s*[`\"'](/api/[^`\"']*)[`\"'][^)]*?method:\s*[\"']POST",
+    re.S,
+)
+
+
 def a_route_table() -> set[str]:
     service = Service(
         layout=None,  # type: ignore[arg-type]
@@ -75,6 +86,19 @@ def a_route_table() -> set[str]:
     )
     app: App = build(service)
     return {r.pattern.pattern for r in app.routes}
+
+
+def posting_routes() -> set[str]:
+    service = Service(
+        layout=None,  # type: ignore[arg-type]
+        settings=None,  # type: ignore[arg-type]
+        thresholds=None,  # type: ignore[arg-type]
+        runner=None,  # type: ignore[arg-type]
+        credentials=None,  # type: ignore[arg-type]
+        sessions=Sessions(secret=b"0" * 32),
+    )
+    app: App = build(service)
+    return {r.pattern.pattern for r in app.routes if r.method == "POST"}
 
 
 def matches(pattern: str, path: str) -> bool:
@@ -104,3 +128,20 @@ def test_every_endpoint_the_page_calls_exists(script: Path) -> None:
         if not any(re.match(p, stem) for p in table for stem in stems):
             unknown.append(literal)
     assert not unknown, f"{script.name} calls routes that do not exist: {unknown}"
+
+
+@pytest.mark.parametrize("script", scripts(), ids=lambda p: p.name)
+def test_every_post_the_page_makes_has_a_post_route(script: Path) -> None:
+    """A route answering the wrong method is a 404 with a confusing message.
+    Matching the path alone missed a poll sent with GET to a POST-only route,
+    and an upload sent with POST to a path that only answers GET."""
+    table = posting_routes()
+    wrong = []
+    for found in POSTING.finditer(script.read_text()):
+        literal = found.group(1) or found.group(2)
+        stems = {
+            HOLE.sub(fill, literal).split("?", 1)[0].rstrip("/") for fill in ("1", "")
+        }
+        if not any(re.match(p, stem) for p in table for stem in stems):
+            wrong.append(literal)
+    assert not wrong, f"{script.name} posts to routes that take no POST: {wrong}"
