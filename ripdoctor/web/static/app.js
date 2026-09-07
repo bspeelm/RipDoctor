@@ -1088,7 +1088,8 @@ async function loadOrphans() {
       keep.onclick = async () => {
         keep.disabled = true;
         try {
-          const r = await postJSON("/api/rip/salvage", { slug: o.slug, side: o.side });
+          const r = await postJSON("/api/rip/salvage",
+                                   { slug: o.slug, side: o.side, kind: o.kind });
           status(`salvaged side ${r.side} — ${fmt(r.duration)}`);
           await loadOrphans(); await refreshAlbums(o.slug);
         } catch (e) { $("#rip-err").textContent = e.message; keep.disabled = false; }
@@ -1097,8 +1098,13 @@ async function loadOrphans() {
       drop.onclick = async () => {
         if (!confirm(`Delete the unfinished capture of side ${o.side}? This cannot be undone.`)) return;
         try {
-          await postJSON("/api/rip/salvage", { slug: o.slug, side: o.side, discard: true });
+          // Discard, not salvage with a flag on it: salvage ignored the flag
+          // and encoded the capture, so a person who confirmed "this cannot be
+          // undone" got a finished side instead of an empty orphan list.
+          await postJSON("/api/rip/discard",
+                         { slug: o.slug, side: o.side, kind: o.kind });
           await loadOrphans();
+          await loadRerip();
         } catch (e) { $("#rip-err").textContent = e.message; }
       };
       row.append(keep, drop);
@@ -1614,6 +1620,10 @@ async function ripStart() {
   try {
     await postJSON("/api/rip/start", {
       slug, side: $("#rip-side").value.trim(), device: $("#rip-device").value,
+      // The names go with the capture. They were typed into this form and
+      // lived nowhere else, so a reload left the record with audio, a slug
+      // and no way to start its second side.
+      artist: $("#rip-artist").value.trim(), album: $("#rip-album").value.trim(),
       rate: parseInt($("#rip-rate").value, 10) || 48000,
       format: $("#rip-format").value || "S16_LE",
       autostop: $("#rip-autostop").checked,
@@ -1836,6 +1846,7 @@ function wire() {
       if (r.note) logline(r.note);
       await loadRipSides();
       await refreshAlbums(S.slug);
+      await loadRerip();   // a record that was forgotten leaves the picker
     } catch (e) {
       $("#rip-err").textContent = e.message;
       $("#rip-abandon").disabled = false;

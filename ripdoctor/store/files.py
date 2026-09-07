@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.plan import Plan, Spec, SpecSide, SpecTrack
+from ripdoctor.core.plan import LEAD, TAIL, Plan, Spec, SpecSide, SpecTrack
 from ripdoctor.store.safety import under
 
 # Side files are named by letter, and the letter is opaque - a single-track
 # re-rip is kept as its own side under its own name.
 SIDE = "side-{letter}.flac"
+
+# arecord's diagnostics, kept beside a capture and removed with it.
+LOG = ".log"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +58,15 @@ class Layout:
         thing to want. Looking only in raw makes that fail obscurely - the
         decode writes nothing, the envelope comes back empty, and the failure
         surfaces somewhere far from its cause.
+
+        The test is for sides rather than for a directory, because a punch is
+        written into raw for a record whose sides are in archive. A directory
+        holding one punched track would otherwise shadow the archive it was
+        taken from, and every side of that record would stop resolving.
         """
         for base in (self.raw, self.archive):
             candidate = base / slug
-            if candidate.is_dir():
+            if candidate.is_dir() and any(candidate.glob(SIDE.format(letter="*"))):
                 return under(base, slug)
         raise FileNotFoundError(f"no album {slug!r} in {self.raw} or {self.archive}")
 
@@ -184,18 +193,89 @@ def _spec_to_dict(spec: Spec) -> dict[str, Any]:
     }
 
 
+def remember(
+    layout: Layout, slug: str, *, album: str, artist: str, date: str = ""
+) -> Path:
+    """Record what a record is called, before anything has been cut from it.
+
+    A capture writes audio and nothing else, so until now the only trace of
+    what it was has been the slug - and reading a slug backwards is a guess
+    that loses the punctuation and the case. Those names were typed into a form
+    and lived nowhere but the browser: a reload threw them away, which is not a
+    thing a person should have to know.
+
+    The spec is where a record's identity already lives, so this writes one
+    with no tracks in it. Only the names are touched: a spec that already
+    carries boundaries somebody set by ear keeps every one of them.
+    """
+    where = layout.spec_file(slug)
+    if where.is_file():
+        current = read_spec(where)
+        spec = replace(
+            current,
+            album=album or current.album,
+            artist=artist or current.artist,
+            date=date or current.date,
+        )
+    else:
+        spec = Spec(slug=slug, album=album, artist=artist, date=date, sides=())
+    write_json(where, _spec_to_dict(spec))
+    return where
+
+
+def forget(layout: Layout, slug: str) -> bool:
+    """Remove a name that turned out to belong to nothing.
+
+    The counterpart to remember, and deliberately timid: it refuses unless the
+    spec is a placeholder, there is no plan, and nothing was captured under
+    that slug anywhere. Everything it declines to touch is work somebody would
+    have to redo - a boundary set by ear, a release chosen from the catalogue,
+    twenty minutes of a side. A leaked name costs a few lines of JSON.
+
+    The audio test is "any file at all except a capture log", rather than a
+    list of the names sides are known by. A file under a record that this does
+    not recognise is a reason to stop, not a reason to continue.
+    """
+    where = layout.spec_file(slug)
+    if not where.is_file() or layout.plan_file(slug).is_file():
+        return False
+    try:
+        spec = read_spec(where)
+    except (OSError, ValueError, KeyError):
+        return False
+    if spec.sides or spec.mbid:
+        return False
+    for base in (layout.raw, layout.archive):
+        album = under(base, slug)
+        if album.is_dir() and any(
+            p.is_file() and p.suffix != LOG for p in album.rglob("*")
+        ):
+            return False
+    where.unlink(missing_ok=True)
+    # An emptied album directory is not tidiness: album_dir looks for sides
+    # rather than for a directory, but a stray one still turns up in listings.
+    with suppress(OSError):
+        under(layout.raw, slug).rmdir()
+    return True
+
+
 def letter_of(filename: str) -> str:
     stem = filename.rsplit("/", 1)[-1]
     return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
 
 
-def spec_of(plan: Plan) -> Spec:
+def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     """A spec derived from a plan, with every edge ear-set.
 
-    Used when a record is saved before it has a spec at all. A plan that was
-    saved is a decision somebody made about where the cuts go, so the next fit
-    passes those edges through rather than recomputing over them.
+    A plan that was saved is a decision somebody made about where the cuts go,
+    so the next fit passes those edges through rather than recomputing them.
+
+    The plan does not carry everything the spec does. `keep` is the spec being
+    replaced, and its lead, tail and per-side fix map come across, because a
+    save that dropped them would quietly undo the overrides the spec exists to
+    hold and the next re-fit would land somewhere else.
     """
+    fixes = {s.letter: s.fix for s in keep.sides} if keep else {}
     sides = []
     for side in plan.sides:
         tracks = tuple(
@@ -204,12 +284,14 @@ def spec_of(plan: Plan) -> Spec:
             )
             for t in side.tracks
         )
+        letter = letter_of(side.file)
         sides.append(
             SpecSide(
-                letter=letter_of(side.file),
+                letter=letter,
                 start=side.tracks[0].start if side.tracks else 0.0,
                 end=side.tracks[-1].end if side.tracks else 0.0,
                 tracks=tracks,
+                fix=dict(fixes.get(letter, {})),
             )
         )
     return Spec(
@@ -218,6 +300,8 @@ def spec_of(plan: Plan) -> Spec:
         artist=plan.artist,
         date=plan.date,
         sides=tuple(sides),
+        lead=keep.lead if keep else LEAD,
+        tail=keep.tail if keep else TAIL,
     )
 
 
@@ -227,7 +311,6 @@ def spec_from_plan(spec: Spec, plan: Plan) -> Spec:
     This is what makes a re-fit safe after somebody has moved a boundary: the
     next run passes those edges through instead of recomputing over them.
     """
-    from dataclasses import replace
 
     placed = {(side.file, t.number): t for side in plan.sides for t in side.tracks}
     sides = []

@@ -27,6 +27,10 @@ class Busy(Exception):
     """Something is already recording."""
 
 
+# How often settle() looks again. Short next to the encode it waits on.
+SETTLE_POLL = 0.2
+
+
 def _thread(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
@@ -178,6 +182,22 @@ class Recorder:
 
     def stop(self) -> None:
         self._running().control.stop()
+
+    def settle(self, limit: float = 60.0) -> Live | None:
+        """Wait for the capture loop to put the outcome down.
+
+        Stopping is asking. The loop keeps the file until it has written the
+        outcome, so anything that acts on what a capture left behind has to
+        wait for that - and abandoning without waiting races the auto-stop for
+        the same file, which the auto-stop wins by encoding a side the person
+        had just said to throw away.
+        """
+        live = self.live
+        waited = 0.0
+        while live is not None and live.running and waited < limit:
+            self.sleep(SETTLE_POLL)
+            waited += SETTLE_POLL
+        return live
 
     def snooze(self) -> None:
         self._running().control.snooze()

@@ -7,6 +7,7 @@ three in the predecessor.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from ripdoctor.audio.runner import FakeRunner
@@ -22,6 +23,7 @@ from ripdoctor.web.routes import records as R
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Jobs
 from tests.pool import WINDOWS, a_layout, a_runner, quiet_then_loud
+from tests.test_store import a_plan, a_spec
 
 SECRET = b"0" * 32
 FAST = 1000
@@ -178,6 +180,7 @@ def test_records_with_sides_are_listed(tmp_path: Path) -> None:
             "artist": "",
             "date": "",
             "sides": ["a"],
+            "archived_copy": False,
         }
     ]
 
@@ -678,3 +681,80 @@ def test_a_side_being_recorded_is_named_rather_than_looking_unprepared(
     )
     body = get(build(service), "/api/album/album", service).json()
     assert body["recording"] == ["a"]
+
+
+# ------------------------------------------------- what a record is called
+
+
+def test_a_captured_record_is_named_before_it_is_cut(tmp_path: Path) -> None:
+    """The whole point. A capture writes audio and a name; a plan does not
+    exist until a first pass has run, so until now a reload left the page
+    with nothing but a slug and no way to start the second side."""
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First", date="2019")
+    app = build(service)
+    listed = get(app, "/api/albums", service).json()["albums"][0]
+    assert (listed["artist"], listed["album"], listed["date"]) == (
+        "First",
+        "Second",
+        "2019",
+    )
+    one = get(app, "/api/album/album", service).json()
+    assert (one["artist"], one["album"], one["date"]) == ("First", "Second", "2019")
+
+
+def test_the_plan_wins_where_it_has_a_name(tmp_path: Path) -> None:
+    """Both documents carry the names. A plan's were confirmed against the
+    catalogue; a spec's may be what somebody typed to start a rip."""
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Typed", artist="Typed")
+    post(build(service), "/api/plan/album", service, a_plan_body())
+    listed = get(build(service), "/api/albums", service).json()["albums"][0]
+    assert listed["album"] == a_plan_body()["album"]
+
+
+def test_the_spec_fills_in_what_the_plan_leaves_blank(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First", date="2019")
+    F.write_json(
+        service.layout.plan_file("album"),
+        {"slug": "album", "album": "A", "artist": "", "date": "", "sides": []},
+    )
+    listed = get(build(service), "/api/albums", service).json()["albums"][0]
+    assert (listed["album"], listed["artist"], listed["date"]) == ("A", "First", "2019")
+
+
+def test_a_corrupt_spec_does_not_break_the_listing(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    service.layout.spec_file("album").write_text("{")
+    assert get(build(service), "/api/albums", service).status == 200
+    assert get(build(service), "/api/album/album", service).status == 200
+
+
+def test_a_record_only_in_archive_is_marked_as_having_one(tmp_path: Path) -> None:
+    """Aligning a re-rip needs the old cut to correlate against, and the page
+    had no way to know there was one - the field it tested was never sent."""
+    service = a_service(tmp_path)
+    (service.layout.archive / "album").mkdir()
+    listed = get(build(service), "/api/albums", service).json()["albums"][0]
+    assert listed["where"] == "raw" and listed["archived_copy"] is True
+
+
+def test_aligning_a_record_with_only_a_name_is_refused(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    r = post(build(service), "/api/align/album", service, {})
+    assert r.status == 409 and "no saved cut" in r.json()["error"]
+
+
+def test_saving_keeps_what_the_plan_does_not_carry(tmp_path: Path) -> None:
+    """A plan has no lead, no tail and no fix map. Rebuilding the spec from
+    one dropped all three on every save, which is the spec undoing the
+    overrides it exists to hold - and the next re-fit landing elsewhere."""
+    service = a_service(tmp_path)
+    kept = replace(a_spec(), mbid="chosen", lead=3.5, tail=7.5)
+    F.save(service.layout, "album", kept, a_plan())
+    post(build(service), "/api/plan/album", service, {**a_plan_body(), "mbid": ""})
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert (spec.lead, spec.tail, spec.mbid) == (3.5, 7.5, "chosen")
+    assert spec.sides[0].fix == kept.sides[0].fix

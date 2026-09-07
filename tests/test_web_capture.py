@@ -8,13 +8,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ripdoctor.audio import capture as C
+from ripdoctor.audio import session as SO
 from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.store import files as F
 from ripdoctor.web import auth as A
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.work.capture import Recorder
 from tests.tape import Tape
+from tests.test_store import a_plan, a_spec
 from tests.test_web_routes import a_service, get, post
 
 
@@ -25,6 +30,24 @@ def a_recorder(tape: Tape | None = None) -> Recorder:
         tick=tape.now if tape else (lambda: 0.0),
         sleep=tape.sleep if tape else (lambda _s: None),
     )
+
+
+def a_named_pool(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """A record with a name and nothing captured under it yet."""
+    service = a_service(tmp_path)
+    for take in (service.layout.raw / "album").iterdir():
+        take.unlink()
+    F.remember(service.layout, "album", album="Second", artist="First")
+    return service
+
+
+def a_stalled_recorder() -> Recorder:
+    """A recorder whose capture loop never runs.
+
+    Nothing puts the outcome down, so settle() waits out its whole limit -
+    which is real time unless the sleep it polls on is one of these.
+    """
+    return Recorder(spawn=lambda _w: None, now=lambda: 1000.0, sleep=lambda _s: None)
 
 
 def recording_service(tmp_path: Path, script: str = "m" * 8):  # type: ignore[no-untyped-def]
@@ -78,7 +101,7 @@ def test_an_unset_device_is_refused_before_anything_starts(tmp_path: Path) -> No
 def test_a_second_capture_is_refused_while_one_runs(tmp_path: Path) -> None:
     """The card has one input."""
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     app = build(service)
     assert (
         post(app, "/api/rip/start", service, {"slug": "album", "side": "b"}).status
@@ -93,7 +116,7 @@ def test_a_second_capture_is_refused_while_one_runs(tmp_path: Path) -> None:
 
 def running_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     app = build(service)
     post(app, "/api/rip/start", service, {"slug": "album", "side": "b"})
     return service, app
@@ -325,7 +348,7 @@ def test_the_configured_device_is_used_when_none_is_asked_for(
     tmp_path: Path,
 ) -> None:
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     r = post(build(service), "/api/rip/start", service, {"slug": "album", "side": "b"})
     assert r.status == 202 and r.json()["device"] == "hw:Rx,0"
 
@@ -338,7 +361,7 @@ def test_a_device_that_is_not_the_configured_one_is_refused(tmp_path: Path) -> N
     pressed Start on this page.
     """
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     r = post(
         build(service),
         "/api/rip/start",
@@ -356,7 +379,7 @@ def test_another_device_is_allowed_when_it_is_asked_for_twice(
     """A refusal that cannot be overridden is a refusal that gets worked around
     by editing the configuration mid-session."""
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     r = post(
         build(service),
         "/api/rip/start",
@@ -377,7 +400,7 @@ def test_a_format_the_card_cannot_take_is_refused_before_the_needle_is_down(
     """It otherwise fails inside arecord, seconds after somebody set the arm
     down - and the message comes back as `audio open error`."""
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     r = post(
         build(service),
         "/api/rip/start",
@@ -456,7 +479,7 @@ def test_the_stage_says_when_it_is_still_encoding(tmp_path: Path) -> None:
     from ripdoctor.audio import session as S
 
     service, _tape = recording_service(tmp_path)
-    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    service.recorder = a_stalled_recorder()
     live = service.recorder.start(
         FakeRunner(), "hw:Rx,0", tmp_path, "album", "b", C.Format()
     )
@@ -465,3 +488,185 @@ def test_the_stage_says_when_it_is_still_encoding(tmp_path: Path) -> None:
     assert live.stage == "encoding"
     live.outcome = S.Outcome(path=tmp_path / "side-b.flac", reason="stopped by hand")
     assert live.stage == "done"
+
+
+# --------------------------------------------------- names and back-outs
+
+
+def test_starting_a_capture_records_what_the_record_is_called(
+    tmp_path: Path,
+) -> None:
+    """The earliest moment the names are known, and the one that survives a
+    reload. Without it a person is left with audio, a slug and no way to start
+    the second side of the record they just recorded the first side of."""
+    service, _tape = recording_service(tmp_path)
+    service.recorder = a_stalled_recorder()
+    post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "b", "artist": "First", "album": "Second"},
+    )
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert (spec.artist, spec.album, spec.sides) == ("First", "Second", ())
+
+
+def test_a_punch_does_not_invent_a_name(tmp_path: Path) -> None:
+    """A punch is one track of a record that already has a name."""
+    service, _tape = recording_service(tmp_path)
+    service.recorder = a_stalled_recorder()
+    post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "1", "kind": "punch", "artist": "First"},
+    )
+    assert not service.layout.spec_file("album").is_file()
+
+
+def test_a_re_rip_does_not_overwrite_the_saved_cut(tmp_path: Path) -> None:
+    service, _tape = recording_service(tmp_path)
+    service.recorder = a_stalled_recorder()
+    F.save(service.layout, "album", a_spec(), a_plan())
+    post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "b", "artist": "First", "album": "Second"},
+    )
+    assert F.read_spec(service.layout.spec_file("album")).sides == a_spec().sides
+
+
+def test_abandoning_a_first_take_forgets_the_record(tmp_path: Path) -> None:
+    service, app = running_service(tmp_path)
+    (service.layout.raw / "album" / "side-a.flac").unlink()
+    F.remember(service.layout, "album", album="Second", artist="First")
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    body = post(app, "/api/rip/abandon", service).json()
+    assert not service.layout.spec_file("album").is_file()
+    assert not (service.layout.raw / "album").exists()
+    assert "forgotten" in body["note"]
+
+
+def test_abandoning_a_later_take_keeps_the_record(tmp_path: Path) -> None:
+    service, app = running_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    album = service.layout.raw / "album"
+    album.mkdir(parents=True, exist_ok=True)
+    (album / "side-a.flac").write_bytes(b"fLaC")
+    C.partial_path(album, "b").write_bytes(b"RIFF" + b"\x00" * 8000)
+    body = post(app, "/api/rip/abandon", service).json()
+    assert service.layout.spec_file("album").is_file()
+    assert body["note"] == ""
+
+
+def test_abandoning_says_what_it_threw_away(tmp_path: Path) -> None:
+    """It used to say `side undefined after NaN`, because the page read four
+    fields the answer did not carry."""
+    service, app = running_service(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    body = post(app, "/api/rip/abandon", service).json()
+    assert body["side"] == "b" and body["kind"] == "side"
+    assert body["freed_bytes"] == 8004 and body["seconds"] == 0.0
+
+
+def test_abandoning_does_not_leave_the_side_behind(tmp_path: Path) -> None:
+    """The auto-stop and Abandon race for the same file, and the auto-stop
+    wins by encoding a side somebody had just said to throw away."""
+    service, _tape = recording_service(tmp_path)
+    album = service.layout.raw / "album"
+    landed = album / "side-b.flac"
+    recorder = a_stalled_recorder()
+
+    def lands(_s: float) -> None:
+        live = recorder.live
+        if live is not None and live.outcome is None:
+            landed.write_bytes(b"fLaC" + b"\x00" * 400)
+            live.outcome = SO.Outcome(reason="quiet", seconds=12.0, path=landed)
+
+    recorder.sleep = lands
+    service.recorder = recorder
+    app = build(service)
+    post(app, "/api/rip/start", service, {"slug": "album", "side": "b"})
+    body = post(app, "/api/rip/abandon", service).json()
+    assert not landed.exists() and "encode" in body["note"]
+    assert body["seconds"] == 12.0
+
+
+def test_discarding_the_last_side_forgets_the_record(tmp_path: Path) -> None:
+    service = a_named_pool(tmp_path)
+    (service.layout.raw / "album" / "side-b.flac").write_bytes(b"fLaC")
+    body = post(
+        build(service), "/api/rip/discard-side", service, {"slug": "album", "side": "b"}
+    ).json()
+    assert not service.layout.spec_file("album").is_file()
+    assert "the name went too" in body["notes"][-1]
+
+
+def test_discarding_one_of_two_sides_keeps_the_record(tmp_path: Path) -> None:
+    service = a_named_pool(tmp_path)
+    album = service.layout.raw / "album"
+    for letter in ("a", "b"):
+        (album / f"side-{letter}.flac").write_bytes(b"fLaC")
+    post(
+        build(service), "/api/rip/discard-side", service, {"slug": "album", "side": "b"}
+    )
+    assert service.layout.spec_file("album").is_file()
+
+
+def test_discarding_a_partial_forgets_a_record_with_nothing_else(
+    tmp_path: Path,
+) -> None:
+    service = a_named_pool(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    body = post(
+        build(service), "/api/rip/discard", service, {"slug": "album", "side": "b"}
+    ).json()
+    assert not service.layout.spec_file("album").is_file()
+    assert body["freed_bytes"] == 8004 and "forgotten" in body["note"]
+
+
+def test_a_punch_orphan_can_be_thrown_away(tmp_path: Path) -> None:
+    """It was listed and neither button under it worked: both looked for a
+    side by that number, and a punch is not a side."""
+    service, _tape = recording_service(tmp_path)
+    album = service.layout.raw / "album"
+    album.mkdir(parents=True, exist_ok=True)
+    C.partial_path(album, "7", "punch").write_bytes(b"RIFF" + b"\x00" * 8000)
+    app = build(service)
+    found = get(app, "/api/rip/orphans", service).json()["orphans"][0]
+    assert found["kind"] == "punch" and found["side"] == "7"
+    gone = {"slug": "album", "side": "7", "kind": "punch"}
+    r = post(app, "/api/rip/discard", service, gone)
+    assert r.status == 200 and not C.partial_path(album, "7", "punch").exists()
+
+
+@pytest.mark.parametrize("what", ["salvage", "discard"])
+def test_the_capture_being_written_is_not_one_to_act_on(
+    tmp_path: Path, what: str
+) -> None:
+    """Both take the file out from under arecord: salvage encodes what has
+    arrived so far and unlinks it, and discard simply unlinks it."""
+    service, app = running_service(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    r = post(app, f"/api/rip/{what}", service, {"slug": "album", "side": "b"})
+    assert r.status == 409 and "recording now" in r.json()["error"]
+    assert partial.exists()
+
+
+def test_salvaging_says_which_side_it_wrote(tmp_path: Path) -> None:
+    service, _tape = recording_service(tmp_path)
+    album = service.layout.raw / "album"
+    album.mkdir(parents=True, exist_ok=True)
+    C.partial_path(album, "b").write_bytes(b"RIFF" + b"\x00" * 2_000_000)
+    body = post(
+        build(service), "/api/rip/salvage", service, {"slug": "album", "side": "b"}
+    ).json()
+    assert body["side"] == "b" and body["duration"] > 0

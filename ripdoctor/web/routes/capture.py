@@ -12,10 +12,11 @@ from ripdoctor.audio.runner import ToolFailed, ToolMissing
 from ripdoctor.core.meter import Verdict
 from ripdoctor.core.naming import Unsafe, token
 from ripdoctor.store import cache as CACHE
+from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.service import Service
-from ripdoctor.work.capture import Busy
+from ripdoctor.work.capture import Busy, Live
 
 PARTIAL = ".capturing.wav"
 
@@ -73,6 +74,44 @@ def _named(body: dict[str, Any], key: str) -> str:
         raise H.HttpError(400, f"{key}: {e}") from e
 
 
+def _kind(body: dict[str, Any]) -> str:
+    kind = str(body.get("kind", "side"))
+    if kind not in C.STEMS:
+        raise H.HttpError(400, f"unknown capture kind: {kind!r}")
+    return kind
+
+
+def _forget(service: Service, slug: str, ended: Live | None = None) -> bool:
+    """Drop the record's name if nothing at all is left under it.
+
+    The store decides what is left; this only refuses while some other capture
+    for the same record is running, because a partial that has not reached
+    disk yet is still a take. The capture a back-out has just ended is not
+    that, so abandon names it here.
+    """
+    live = service.recorder.live
+    if live is not None and live is not ended and live.running and live.slug == slug:
+        return False
+    return F.forget(service.layout, slug)
+
+
+def _note(forgotten: bool) -> str:
+    return "nothing was left under that name, so it was forgotten" if forgotten else ""
+
+
+def _not_while_recording(service: Service, slug: str, side: str, kind: str) -> None:
+    """A capture being written is not one to finish or throw away.
+
+    Both of these take the file out from under arecord: salvage encodes what
+    has arrived so far and unlinks it, and discard simply unlinks it.
+    """
+    live = service.recorder.live
+    if not live or not live.running:
+        return
+    if (live.slug, live.side, live.stem) == (slug, side, kind):
+        raise H.HttpError(409, f"{slug} {kind} {side} is recording now")
+
+
 def _verdict(v: Verdict) -> dict[str, Any]:
     return {
         "ok": v.ok,
@@ -125,6 +164,19 @@ def add(app: App, service: Service) -> None:
         # It is written under a stem no side scan matches.
         stem = str(body.get("kind", "side"))
         album = layout.raw / slug
+        # The earliest moment a record's name is known. It was typed into a
+        # form and lived nowhere else, so a reload threw it away and left
+        # somebody with audio, a slug and no way to start the second side.
+        # A punch is a track of a record that already has one, so it never
+        # writes; neither does a start that carries no names.
+        if stem == "side" and (body.get("artist") or body.get("album")):
+            F.remember(
+                layout,
+                slug,
+                album=str(body.get("album", "")),
+                artist=str(body.get("artist", "")),
+                date=str(body.get("date", "")),
+            )
         try:
             live = service.recorder.start(
                 service.runner,
@@ -162,9 +214,33 @@ def add(app: App, service: Service) -> None:
         if live is None or not live.running:
             raise H.HttpError(409, "nothing is recording")
         service.recorder.stop()
-        partial = C.partial_path(layout.raw / live.slug, live.side, live.stem)
+        # Wait for the loop to put the capture down. Without this the auto-stop
+        # can reach the encode first and leave behind the very side that was
+        # just thrown away.
+        service.recorder.settle()
+        album = layout.raw / live.slug
+        partial = C.partial_path(album, live.side, live.stem)
+        freed = partial.stat().st_size if partial.is_file() else 0
         partial.unlink(missing_ok=True)
-        return H.ok({"ok": True, "abandoned": f"{live.slug} {live.stem} {live.side}"})
+        notes = []
+        finished = live.outcome.path if live.outcome else None
+        if finished is not None and Path(finished).is_file():
+            freed += Path(finished).stat().st_size
+            Path(finished).unlink()
+            notes.append("the encode had already started; its file went too")
+        if _forget(service, live.slug, live):
+            notes.append("nothing was left under that name, so it was forgotten")
+        return H.ok(
+            {
+                "ok": True,
+                "slug": live.slug,
+                "side": live.side,
+                "kind": live.stem,
+                "seconds": live.outcome.seconds if live.outcome else 0.0,
+                "freed_bytes": freed,
+                "note": " ".join(notes),
+            }
+        )
 
     @app.route("POST", "/api/rip/snooze")
     def snooze(_r: H.Request) -> H.Response:
@@ -244,6 +320,9 @@ def add(app: App, service: Service) -> None:
         return {
             "slug": album.name,
             "side": C.letter_of(partial),
+            # Which kind of capture this is. A punch is listed here too, and
+            # both buttons under it used to look for a side by that letter.
+            "kind": C.stem_of(partial),
             "bytes": size,
             "seconds": round(max(0, size - C.HEADER_BYTES) / frame / fmt.rate, 1),
             "recording": bool(live and live.running and live.slug == album.name),
@@ -263,24 +342,54 @@ def add(app: App, service: Service) -> None:
 
     @app.route("POST", "/api/rip/salvage")
     def salvage(r: H.Request) -> H.Response:
+        """Encode a capture an interrupted session left behind."""
         body = r.json()
         slug, side = _named(body, "slug"), _named(body, "side")
+        kind = _kind(body)
+        _not_while_recording(service, slug, side, kind)
+        album = layout.raw / slug
+        partial = C.partial_path(album, side, kind)
+        # Measured before the encode, and from the size: a WAV that was never
+        # closed has no length in its header, and decoding a side to answer
+        # one request would cost more than the encode did.
+        seconds = _partial(album, partial)["seconds"] if partial.is_file() else 0.0
         try:
-            written = C.finish(service.runner, layout.raw / slug, side)
+            written = C.finish(service.runner, album, side, kind)
         except C.CaptureError as e:
             raise H.HttpError(404, str(e)) from e
-        return H.ok({"ok": True, "path": written.name})
+        return H.ok(
+            {
+                "ok": True,
+                "path": written.name,
+                "slug": slug,
+                "side": side,
+                "kind": kind,
+                "duration": seconds,
+            }
+        )
 
     @app.route("POST", "/api/rip/discard")
     def discard(r: H.Request) -> H.Response:
         """Throw away a partial capture, and only ever a partial capture."""
         body = r.json()
         slug, side = _named(body, "slug"), _named(body, "side")
-        partial = C.partial_path(layout.raw / slug, side)
+        kind = _kind(body)
+        _not_while_recording(service, slug, side, kind)
+        partial = C.partial_path(layout.raw / slug, side, kind)
         if not partial.name.endswith(PARTIAL) or not partial.is_file():
-            raise H.HttpError(404, f"no interrupted capture for {slug} side {side}")
+            raise H.HttpError(404, f"no interrupted capture for {slug} {kind} {side}")
+        freed = partial.stat().st_size
         partial.unlink()
-        return H.ok({"ok": True, "discarded": f"{slug} side {side}"})
+        return H.ok(
+            {
+                "ok": True,
+                "discarded": f"{slug} {kind} {side}",
+                "side": side,
+                "kind": kind,
+                "freed_bytes": freed,
+                "note": _note(_forget(service, slug)),
+            }
+        )
 
     @app.route("POST", "/api/rip/discard-side")
     def discard_side(r: H.Request) -> H.Response:
@@ -299,14 +408,10 @@ def add(app: App, service: Service) -> None:
         freed = where.stat().st_size
         where.unlink()
         forgotten = CACHE.forget(layout, slug, side)
-        return H.ok(
-            {
-                "ok": True,
-                "side": side,
-                "freed_bytes": freed,
-                "notes": [f"forgot {forgotten} cached files"] if forgotten else [],
-            }
-        )
+        notes = [f"forgot {forgotten} cached files"] if forgotten else []
+        if _forget(service, slug):
+            notes.append("that was the last of it, so the name went too")
+        return H.ok({"ok": True, "side": side, "freed_bytes": freed, "notes": notes})
 
     @app.route("GET", "/api/rip/sides/([^/]+)")
     def sides(r: H.Request) -> H.Response:

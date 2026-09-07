@@ -194,3 +194,20 @@ def test_a_punch_is_recorded_under_a_stem_no_side_scan_matches(
     assert ".punch-7.capturing.wav" in started
     assert "side-7" not in started
     assert C.partial_path(tmp_path, "7", "punch").name.startswith(".punch-")
+
+
+def test_a_record_with_only_a_name_is_still_named(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    body = get(build(service), "/api/punch/album", service).json()
+    assert (body["artist"], body["album"]) == ("First", "Second")
+    assert body["tracks"] == []
+
+
+def test_locating_against_a_record_with_no_cut_says_so(tmp_path: Path) -> None:
+    """Not "no track 1". A record that has only been named has a spec with no
+    sides in it, and the blunt answer was also the wrong one."""
+    service = a_service(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    r = post(build(service), "/api/punch/album/locate", service, {"number": 1})
+    assert "no saved cut" in r.json()["error"]

@@ -28,6 +28,7 @@ from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
+from ripdoctor.store import files as F
 from ripdoctor.store.files import Layout
 from ripdoctor.web import auth as AUTH
 from ripdoctor.web import httpd as HTTPD
@@ -37,6 +38,7 @@ from ripdoctor.web.service import Service as SERVICE
 
 # The front end ships inside the package, so an install has it and a source tree
 # runs against the same files.
+NO_POOL = "no vinyl directory is configured - run `ripdoctor doctor`"
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
 
@@ -300,13 +302,25 @@ def cmd_salvage(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_name(ctx: Context, args: argparse.Namespace) -> int:
+    """Say what a record is, for one captured before anything recorded it."""
+    if not ctx.settings.vinyl:
+        print(NO_POOL, file=sys.stderr)
+        return 2
+    layout = Layout(Path(ctx.settings.vinyl), ctx.settings.cache_name)
+    where = F.remember(
+        layout, args.slug, album=args.album, artist=args.artist, date=args.date
+    )
+    spec = F.read_spec(where)
+    print(f"{args.slug}: {spec.artist} - {spec.album}")
+    print(f"  -> {where}")
+    return 0
+
+
 def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
     """Run the web interface."""
     if not ctx.settings.vinyl:
-        print(
-            "no vinyl directory is configured - run `ripdoctor doctor`",
-            file=sys.stderr,
-        )
+        print(NO_POOL, file=sys.stderr)
         return 2
 
     layout = Layout(Path(ctx.settings.vinyl), ctx.settings.cache_name)
@@ -562,6 +576,13 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("album", help="directory holding the sides")
     sv.add_argument("--dry-run", action="store_true")
     sv.set_defaults(run=cmd_salvage)
+
+    nm = sub.add_parser("name", help="say what a record is called")
+    nm.add_argument("slug", help="the directory the sides are under")
+    nm.add_argument("--artist", default="")
+    nm.add_argument("--album", default="")
+    nm.add_argument("--date", default="")
+    nm.set_defaults(run=cmd_name)
 
     lk = sub.add_parser("lookup", help="find a release in the catalogue")
     lk.add_argument("artist")

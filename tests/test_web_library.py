@@ -286,6 +286,18 @@ def test_a_record_that_arrived_is_archived_and_read_back(tmp_path: Path) -> None
     assert not (service.layout.raw / "album").exists()
 
 
+def test_archiving_keeps_what_the_record_is_called(tmp_path: Path) -> None:
+    """An archived record still exists. Both documents stay in work, which is
+    what lets it be listed, re-cut, aligned against and punched into."""
+    service, _library = arrived(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    post(build(service), "/api/archive/album", service)
+    assert service.layout.spec_file("album").is_file()
+    assert service.layout.plan_file("album").is_file()
+    listed = get(build(service), "/api/albums?archive=1", service).json()["albums"][0]
+    assert listed["where"] == "archive" and listed["artist"]
+
+
 def test_what_is_cleared_is_only_what_can_be_made_again(tmp_path: Path) -> None:
     """The cut tracks, the tick clips and the measurements. All derived, all
     large, and all of them fill the disk if nothing clears them."""
@@ -563,3 +575,13 @@ def test_a_record_with_no_cut_is_not_ready_rather_than_missing(
     body = r.json()
     assert body["ready"] is False and "first pass" in body["why"]
     assert body["sides"] == [] and body["will_remove"] == []
+
+
+def test_re_labelling_a_record_with_only_a_name_is_refused(tmp_path: Path) -> None:
+    """A spec with no sides would keep none of the new titles while the plan
+    took all of them, and the two documents would stay diverged."""
+    service, _library = with_library(tmp_path)
+    F.remember(service.layout, "album", album="Second", artist="First")
+    r = post(build(service), "/api/relabel/album", service, {"mbid": "x"})
+    assert r.status == 409 and "no saved cut" in r.json()["error"]
+    assert json.loads(service.layout.spec_file("album").read_text())["sides"] == []
