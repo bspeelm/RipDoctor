@@ -306,9 +306,10 @@ async function openAlbum(slug) {
   loadReview();
   loadRipSides();               // per-album, so it follows the selection
   // and so does the Rip panel: the record is open, so the side it has not got
-  // yet is the one you are about to record
-  await loadRerip();
-  pinRerip(slug, S.meta.sides);
+  // yet is the one you are about to record. The list behind the picker is
+  // loaded when that panel is shown, not here - opening a record should not
+  // wait on something no one is looking at.
+  pinRerip(slug, S.meta.sides, S.meta.artist, S.meta.album);
   refreshAlignButton();
   refreshArchiveButton();
   renderPipeline();
@@ -943,7 +944,7 @@ function setMode(mode) {
   $("#readout").hidden = capturing;
   $("#lower").hidden = capturing;
   if (capturing) startRipPoll(); else stopRipPoll();
-  if (mode === "rip") loadOrphans();
+  if (mode === "rip") { loadOrphans(); loadRerip(); }
   if (mode === "punch") loadPunchAlbums();
   if (!capturing) ed.render();
 }
@@ -1057,7 +1058,7 @@ function nextFreeSide(sides) {
 // so opening one does this too - otherwise the panel sat on "new album" with
 // empty fields while the record was open at the top of the page, and the only
 // way to record its second side was to type the name in again.
-function pinRerip(slug, sides) {
+function pinRerip(slug, sides, artist, album) {
   ripPinned = slug || null;
   ripPinnedSides = (sides || []).join(" ");
   const sel = $("#rip-rerip");
@@ -1065,12 +1066,17 @@ function pinRerip(slug, sides) {
   // hide it, so re-render rather than assigning a value nothing matches.
   if (!Array.from(sel.options).some((o) => o.value === (slug || ""))) renderRerip();
   sel.value = slug || "";
-  const a = ripAlbums.find((x) => x.slug === slug);
-  if (ripPinned && a) {
-    $("#rip-artist").value = a.artist || "";
-    $("#rip-album").value = a.album || "";
+  // The names come from the caller where it has them. Fetching the album list
+  // to look up something already in hand put a network round trip in the
+  // middle of opening a record, and every late redraw it delayed landed while
+  // somebody was already clicking something else.
+  const a = ripAlbums.find((x) => x.slug === slug) || {};
+  const named = { artist: artist ?? a.artist, album: album ?? a.album };
+  if (ripPinned) {
+    $("#rip-artist").value = named.artist || "";
+    $("#rip-album").value = named.album || "";
     $("#rip-side").value = nextFreeSide(sides);
-  } else if (!ripPinned) {           // "new album" is a deliberate fresh start
+  } else {                           // "new album" is a deliberate fresh start
     $("#rip-artist").value = ""; $("#rip-album").value = ""; $("#rip-side").value = "a";
   }
   // read-only rather than disabled: still selectable and copyable, and it
@@ -1858,7 +1864,7 @@ function wire() {
   $("#rip-rerip").onchange = (e) => {
     const o = e.target.selectedOptions[0];
     const sides = (o.dataset.sides || "").split(" ").filter(Boolean);
-    pinRerip(e.target.value, sides);
+    pinRerip(e.target.value, sides, o.dataset.artist, o.dataset.album);
   };
   $("#rip-vol").oninput = () => {
     const v = (parseInt($("#rip-vol").value, 10) || 0) / 100;
