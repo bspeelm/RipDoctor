@@ -143,9 +143,10 @@ minutes have gone by.
 | 1 — the detection and fitting core, and its tests | done |
 | 2 — audio seam, config, doctor; offline CLI | done |
 | 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
+| 7 — validate on the server, then cut over | not started |
 | 4 — web interface | done, except listening while cueing (untested against hardware) |
 | 5 — tagging and import | done |
-| 6 — documentation revision, then 1.0 | in progress |
+| 6 — documentation revision, then 1.0 | revision done; 1.0 not tagged |
 
 ## Development
 

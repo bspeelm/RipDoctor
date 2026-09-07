@@ -121,9 +121,9 @@ def main() -> int:
         failed = True
     if dratio > MAX_DOC_RATIO:
         print(
-            f"\nnote: prose is over the {MAX_DOC_RATIO}% ceiling and is a draft"
-            " until the code is complete (ADR-023)."
-            "\nIt is trimmed in the revision pass, not rationed now."
+            f"\nnote: prose is over the {MAX_DOC_RATIO}% ceiling. That is the"
+            " author's call, like the code one."
+            "\nIt is a trend rather than a gate - see ADR-037 for why."
         )
 
     if "--wheel" in sys.argv:
