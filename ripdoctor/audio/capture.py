@@ -41,7 +41,7 @@ def check_device(device: str) -> str:
 # arecord's names for the sample formats worth capturing at, and how wide each
 # one is. A capture read at the wrong width is not slightly wrong: a 24-bit
 # file read as 16 is noise at the wrong speed.
-_WIDTHS = {"S16_LE": 2, "S24_3LE": 3, "S32_LE": 4}
+SAMPLE_FORMATS = {"S16_LE": 2, "S24_3LE": 3, "S32_LE": 4}
 _FORMATS = {16: "S16_LE", 24: "S24_3LE", 32: "S32_LE"}
 
 
@@ -54,7 +54,7 @@ class Format:
     @property
     def width(self) -> int:
         """Bytes per sample."""
-        return _WIDTHS.get(self.sample_format, 3)
+        return SAMPLE_FORMATS.get(self.sample_format, 3)
 
 
 def capture_argv(

@@ -32,6 +32,18 @@ def everything() -> FakeRunner:
     return FakeRunner(installed=set(D.REQUIRED) | set(D.OPTIONAL))
 
 
+def listing(card: str = "Rx") -> str:
+    return (
+        f"**** List of CAPTURE Hardware Devices ****\n"
+        f"card 1: {card} [SAVITECH Audio], device 0: USB Audio [USB Audio]\n"
+    )
+
+
+def with_device(card: str = "Rx") -> FakeRunner:
+    """A machine that can actually see the configured device."""
+    return everything().expect("-l", stdout=listing(card).encode())
+
+
 def find(results: list[D.Result], check: str) -> D.Result:
     return next(r for r in results if r.check == check)
 
@@ -114,16 +126,37 @@ def test_capture_is_not_mentioned_when_recording_is_impossible() -> None:
 
 
 def test_an_unconfigured_device_warns_and_names_the_command_that_lists_them() -> None:
-    r = next(iter(D.capture(Settings(), everything())))
+    r = next(iter(D.capture(Settings(), with_device())))
     assert r.level is D.Level.WARN
     assert "ripdoctor devices" in r.fix
 
 
 def test_a_configured_device_is_reported_with_its_format() -> None:
     s = replace(Settings(), capture_device="hw:Rx,0", capture_rate=96000)
-    r = next(iter(D.capture(s, everything())))
+    r = next(iter(D.capture(s, with_device())))
     assert r.level is D.Level.OK
     assert "hw:Rx,0" in r.summary and "96000" in r.summary
+
+
+def test_a_device_the_machine_cannot_see_is_a_failure() -> None:
+    """The configuration file still names an interface that has lost contact.
+
+    Recording against whatever answered instead is twenty minutes of the wrong
+    input, which is how 162 seconds of mic-jack bleed once got recorded.
+    """
+    s = replace(Settings(), capture_device="hw:Rx,0")
+    r = find(list(D.capture(s, with_device("PCH"))), "capture_device")
+    assert r.level is D.Level.FAIL
+    assert "cable" in r.fix
+
+
+def test_a_sample_format_this_cannot_record_in_is_named() -> None:
+    """An unrecognised format means the meter reads the capture at the wrong
+    width, which is noise at the wrong speed."""
+    s = replace(Settings(), capture_device="hw:Rx,0", capture_format="S24_LE")
+    r = find(list(D.capture(s, with_device())), "capture_format")
+    assert r.level is D.Level.FAIL
+    assert "S24_3LE" in r.fix
 
 
 # ------------------------------------------------------- configuration
@@ -175,8 +208,8 @@ def test_the_report_ends_with_whether_it_can_run(tmp_path: Path) -> None:
     )
     assert "cannot run" in D.report(broken)
 
-    working = replace(defaults(a_machine(tmp_path)), capture_device="hw:X,0")
-    fine = D.run_all(a_machine(tmp_path), working, Thresholds(), everything())
+    working = replace(defaults(a_machine(tmp_path)), capture_device="hw:Rx,0")
+    fine = D.run_all(a_machine(tmp_path), working, Thresholds(), with_device())
     assert "cannot run" not in D.report(fine)
 
 

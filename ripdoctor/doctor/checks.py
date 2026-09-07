@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ripdoctor.audio.capture import SAMPLE_FORMATS as CAPTURE_FORMATS
+from ripdoctor.audio.devices import enumerate_devices
 from ripdoctor.audio.runner import Runner
 from ripdoctor.config.machine import Machine
 from ripdoctor.config.settings import Settings, nearest
@@ -118,6 +120,31 @@ def capture(settings: Settings, runner: Runner) -> Iterator[Result]:
             fix="run `ripdoctor devices`, then set capture_device in config.toml",
         )
         return
+    if settings.capture_format not in CAPTURE_FORMATS:
+        yield Result(
+            "capture_format",
+            Level.FAIL,
+            f"{settings.capture_format} is not a sample format this records in",
+            fix=f"set capture_format to one of {', '.join(sorted(CAPTURE_FORMATS))}",
+        )
+
+    # The device is checked against what the box can see, not just read back.
+    # A USB interface that has lost contact is still in the configuration file,
+    # and a capture against whatever answered instead is twenty minutes of the
+    # wrong input - which is how 162 seconds of mic-jack bleed once got recorded.
+    seen = {d.id for d in enumerate_devices(runner)}
+    if settings.capture_device not in seen:
+        yield Result(
+            "capture_device",
+            Level.FAIL,
+            f"{settings.capture_device} is not a device this machine can see",
+            fix=(
+                "if that is the turntable it has lost its connection - check the "
+                "cable before recording twenty minutes of nothing"
+            ),
+        )
+        return
+
     yield Result(
         "capture_device",
         Level.OK,
