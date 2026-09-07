@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from ripdoctor.audio.capture import Format, check_device
+from ripdoctor.audio.capture import HEADER_BYTES, Format, check_device
 from ripdoctor.audio.runner import Process, Runner
 
 CHUNK = 8192
@@ -62,18 +62,46 @@ def device_argv(device: str, fmt: Format) -> list[str]:
     ]
 
 
-def tail_argv(wav: str | Path) -> list[str]:
+# How far behind the write head a listener starts. Without a cushion the reader
+# begins where the writer is and the two run at the same speed for the whole
+# side, so the reader sits permanently at the end of the file: any jitter in
+# either direction is an end-of-stream, and an Opus decoder resyncing after one
+# is a burst of loud static. Fifteen seconds absorbs that and the drift between
+# ffmpeg's pacing and the sound card's own clock - about a second over a
+# twenty-minute side. Being fifteen seconds behind costs nothing: this is for
+# hearing that the side sounds right, and cueing a needle uses the device
+# directly with no lag at all.
+LAG = 15.0
+
+
+def tail_start(wav: str | Path, fmt: Format, lag: float = LAG) -> float:
+    """Where in the capture a listener should join, given how much exists."""
+    try:
+        written = Path(wav).stat().st_size - HEADER_BYTES
+    except OSError:
+        return 0.0
+    frame = fmt.channels * fmt.width
+    if frame <= 0 or fmt.rate <= 0 or written <= 0:
+        return 0.0
+    return max(0.0, written / frame / fmt.rate - lag)
+
+
+def tail_argv(wav: str | Path, start: float = 0.0) -> list[str]:
     """Listen to a capture in progress, from the file it is writing.
 
     `-re` matters: without it ffmpeg reads the file as fast as the disk allows,
     empties it in a second and then reports end of stream, so what a listener
     hears is the last few seconds at high speed followed by silence.
+
+    `-ss` matters for the opposite reason - see LAG.
     """
     return [
         "ffmpeg",
         "-v",
         "error",
         "-re",
+        "-ss",
+        f"{max(0.0, start):.3f}",
         "-i",
         str(wav),
         *_encode(),

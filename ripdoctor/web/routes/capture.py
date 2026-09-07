@@ -218,7 +218,8 @@ def add(app: App, service: Service) -> None:
             wav = C.partial_path(layout.raw / live.slug, live.side, live.stem)
             if not wav.is_file():
                 raise H.HttpError(409, "the capture has not written anything yet")
-            argv = PT.tail_argv(wav)
+            fmt = _format(service)
+            argv = PT.tail_argv(wav, PT.tail_start(wav, fmt))
         else:
             device = str(r.query.get("device") or service.settings.capture_device)
             try:
