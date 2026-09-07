@@ -35,8 +35,8 @@ Full band puts music and arm-rumble 10 dB apart. The band lane puts them 27 dB
 apart. Every boundary decision in this tool keys off that.
 
 These are measurements from one signal chain, not universal constants. See
-[docs/thresholds.md](docs/thresholds.md) for what each number means and how to
-measure your own.
+[docs/method.md](docs/method.md) for what each number means and where it came
+from.
 
 ## What it does
 
@@ -84,12 +84,13 @@ The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
 
 | Phase | State |
 |---|---|
-| 0 — scaffold, decisions, budgets, architecture tests | in progress |
-| 1 — the detection and fitting core, and its tests | not started |
+| 0 — scaffold, decisions, budgets, architecture tests | done |
+| 1 — the detection and fitting core, and its tests | in progress |
 | 2 — audio seam, config, doctor; offline CLI | not started |
 | 3 — capture | not started |
 | 4 — web interface | not started |
-| 5 — tagging and import; 1.0 | not started |
+| 5 — tagging and import | not started |
+| 6 — documentation revision, then 1.0 | not started |
 
 ## Development
 
@@ -103,8 +104,12 @@ subprocess, no filesystem, no clock — so the whole algorithm is testable with
 no ffmpeg, no sound card and no audio files. That boundary is enforced by
 `tests/test_architecture.py`, not by convention.
 
-Size budgets are failing checks. Do not raise one to make a change fit; retire
-something, or write a decision record explaining why the number moved.
+Size budgets are failing checks. The comment ratio is hard and is never raised;
+the others are the author's call. Never write less code to fit a number.
+
+The documentation is a draft until the code is complete, so the prose budget is
+knowingly over. It is trimmed in Phase 6, and the ratio is how that pass is
+checked. See ADR-023.
 
 ## Prior work
 

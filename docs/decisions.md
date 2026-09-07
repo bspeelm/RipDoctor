@@ -565,6 +565,10 @@ soft ceiling and therefore the author's call - see ADR-020.
 
 **Status:** accepted by the author, 2026-09-06.
 
+> **Superseded by ADR-023 the same day.** The freeze was the wrong instrument:
+> prose written ahead of the code is a draft, and rationing a draft loses material
+> that is cheaper to cut later than to recover.
+
 The prose budget is breached: 898 lines of live documentation against 779 lines
 of code, or 115 per cent where the ceiling is 75. It is accepted as it stands
 rather than resolved.
@@ -594,3 +598,35 @@ preventing the thing the budget exists to prevent.
 
 **What would reverse this.** Prose continuing to grow once the freeze lifts, or
 the ratio failing to fall as the code does.
+
+---
+
+## ADR-023 — Documentation is a draft until the code is complete
+
+**Status:** accepted by the author, 2026-09-06. Supersedes ADR-022.
+
+The prose ratio stays over budget, and prose may grow. There is no freeze and no
+rationing. The documentation written so far is a draft: it was written ahead of
+most of the code it describes, and some of it will turn out to be wrong or
+redundant once that code exists.
+
+**Why not ration it now.** Cutting prose while the code it describes is still
+being written throws away material at the moment it is least possible to judge.
+A finding that reads as excessive today may be the one that explains a defect in
+Phase 3. Recovering a deleted paragraph costs far more than deleting it later
+will.
+
+**The obligation this creates.** A revision pass, once the code is complete and
+before 1.0 is published - not an intention but a step in the plan, alongside the
+phases. It covers all live documentation:
+
+* findings in `docs/method.md` that the code no longer does, or never did
+* decisions superseded so thoroughly that the entry is only history
+* README sections describing behaviour that changed
+* anything said twice
+
+The ratio is the measure of whether that pass was real. If it is still over 75
+per cent when the code is complete, the pass did not happen.
+
+**What is not deferred.** The comment ratio remains hard and is enforced every
+run. This concerns `docs/` and the README, not the package.

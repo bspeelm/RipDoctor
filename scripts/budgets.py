@@ -34,15 +34,11 @@ MAX_COMMENT_RATIO = 25
 MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
 
-# The prose ratio is over budget and the author has accepted it as it stands:
-# the project is one layer of seven, the decisions were written before the code
-# they govern, and the ratio falls to about 45 per cent by the end of the next
-# two phases. See ADR-022.
-#
-# The condition is that prose may not GROW while the ratio is over. So a new
-# document costs an old one until the ceiling is met again, which is what "over
-# budget means retiring" amounts to in practice. The freeze lifts by itself.
-PROSE_FROZEN_AT_LINES = 934
+# The prose ratio is over budget and stays that way for now by decision: the
+# documentation is a draft, written ahead of the code it describes, and it is
+# more useful to keep it and cut later than to ration it now. It is reported
+# every run so the trend stays visible, and a revision pass once the code is
+# complete is a scheduled step rather than an intention. ADR-023.
 
 # Append-only records are the only prose exempt, because the remedy this budget
 # asks for - retire something - cannot be applied to them.
@@ -125,19 +121,11 @@ def main() -> int:
         print("\nover the code budget - the author decides whether it moves.")
         failed = True
     if dratio > MAX_DOC_RATIO:
-        if docs > PROSE_FROZEN_AT_LINES:
-            print(
-                f"\nover the prose budget, and past the {PROSE_FROZEN_AT_LINES}-line"
-                " freeze it was accepted at (ADR-022)."
-                "\nWhile over the ceiling, a new document costs an old one."
-            )
-            failed = True
-        else:
-            print(
-                f"\nnote: prose is over the {MAX_DOC_RATIO}% ceiling, accepted at"
-                f" {PROSE_FROZEN_AT_LINES} lines by ADR-022 and frozen there."
-                "\nThe freeze lifts on its own as the code grows."
-            )
+        print(
+            f"\nnote: prose is over the {MAX_DOC_RATIO}% ceiling and is a draft"
+            " until the code is complete (ADR-023)."
+            "\nIt is trimmed in the revision pass, not rationed now."
+        )
 
     if "--wheel" in sys.argv:
         subprocess.run(  # noqa: S603
