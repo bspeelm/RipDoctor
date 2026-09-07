@@ -164,8 +164,51 @@ def test_who_am_i_answers_for_a_session(tmp_path: Path) -> None:
 
 
 def test_records_with_sides_are_listed(tmp_path: Path) -> None:
+    """Each one carries what the picker draws it with: the two things that
+    decide what can be done to it. Returning bare names left the page reading
+    `undefined` off every entry and asking for an album by that name."""
     service = a_service(tmp_path)
-    assert get(build(service), "/api/albums", service).json()["albums"] == ["album"]
+    body = get(build(service), "/api/albums", service).json()
+    assert body["albums"] == [
+        {
+            "slug": "album",
+            "where": "raw",
+            "old_format": False,
+            "album": "",
+            "artist": "",
+            "date": "",
+        }
+    ]
+
+
+def test_a_record_in_the_superseded_format_is_marked_in_the_listing(
+    tmp_path: Path,
+) -> None:
+    """Refusing that format is deliberate. Saying which records it applies to
+    beats each one failing when somebody opens it."""
+    service = a_service(tmp_path)
+    F.write_json(
+        service.layout.plan_file("album"),
+        {"slug": "album", "album": "A", "artist": "B", "sides": [{"cuts": [1, 2]}]},
+    )
+    body = get(build(service), "/api/albums", service).json()
+    assert body["albums"][0]["old_format"] is True
+
+
+def test_a_readable_plan_is_not_marked(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    post(build(service), "/api/plan/album", service, a_plan_body())
+    body = get(build(service), "/api/albums", service).json()
+    assert body["albums"][0]["old_format"] is False
+
+
+def test_a_record_carries_what_it_is_called(tmp_path: Path) -> None:
+    """Re-ripping fills the fields from what was decided last time rather than
+    from somebody retyping it."""
+    service = a_service(tmp_path)
+    post(build(service), "/api/plan/album", service, a_plan_body())
+    entry = get(build(service), "/api/albums", service).json()["albums"][0]
+    assert (entry["artist"], entry["album"], entry["date"]) == ("B", "A", "2022")
 
 
 def test_the_archive_is_listed_only_when_asked(tmp_path: Path) -> None:
@@ -176,10 +219,13 @@ def test_the_archive_is_listed_only_when_asked(tmp_path: Path) -> None:
     old.mkdir()
     (old / "side-a.flac").write_bytes(b"fLaC")
     app = build(service)
-    assert get(app, "/api/albums", service).json()["albums"] == ["album"]
-    assert get(app, "/api/albums?archive=1", service).json()["albums"] == [
-        "album",
-        "older",
+    assert [a["slug"] for a in get(app, "/api/albums", service).json()["albums"]] == [
+        "album"
+    ]
+    both = get(app, "/api/albums?archive=1", service).json()["albums"]
+    assert [(a["slug"], a["where"]) for a in both] == [
+        ("album", "raw"),
+        ("older", "archive"),
     ]
 
 

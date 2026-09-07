@@ -215,7 +215,11 @@ def test_interrupted_captures_are_found_across_every_record(tmp_path: Path) -> N
     service = a_service(tmp_path)
     a_partial(service)
     body = get(build(service), "/api/rip/orphans", service).json()
-    assert body["orphans"] == [{"slug": "album", "side": "b", "bytes": 8004}]
+    found = body["orphans"][0]
+    assert (found["slug"], found["side"], found["bytes"]) == ("album", "b", 8004)
+    # How long it is, which is what says whether it is most of a side or a
+    # false start. A WAV that was never closed has no length in its header.
+    assert found["seconds"] >= 0 and found["recording"] is False
 
 
 def test_salvaging_finishes_the_capture(tmp_path: Path) -> None:

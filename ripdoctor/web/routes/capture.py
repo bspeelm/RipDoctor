@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio import capture as C
@@ -229,6 +230,25 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, str(e)) from e
         return H.streaming(lambda: PT.stream(service.runner, argv), "audio/ogg")
 
+    def _partial(album: Path, partial: Path) -> dict[str, Any]:
+        """A capture that was interrupted, described well enough to judge it.
+
+        Its length comes from the size rather than from decoding: a WAV that
+        was never closed has no length in its header, and this is the one
+        number that says whether it is most of a side or a false start.
+        """
+        fmt = C.wav_format(partial, _format(service))
+        frame = fmt.channels * fmt.width
+        size = partial.stat().st_size
+        live = service.recorder.live
+        return {
+            "slug": album.name,
+            "side": C.letter_of(partial),
+            "bytes": size,
+            "seconds": round(max(0, size - C.HEADER_BYTES) / frame / fmt.rate, 1),
+            "recording": bool(live and live.running and live.slug == album.name),
+        }
+
     @app.route("GET", "/api/rip/orphans")
     def orphans(_r: H.Request) -> H.Response:
         """Captures an interrupted session left behind, across every record.
@@ -236,16 +256,9 @@ def add(app: App, service: Service) -> None:
         Each one is most of a side, and a side is twenty minutes of somebody's
         evening.
         """
-        found = []
+        found: list[dict[str, Any]] = []
         for album in sorted(p for p in layout.raw.iterdir() if p.is_dir()):
-            for partial in C.salvageable(album):
-                found.append(
-                    {
-                        "slug": album.name,
-                        "side": C.letter_of(partial),
-                        "bytes": partial.stat().st_size,
-                    }
-                )
+            found.extend(_partial(album, partial) for partial in C.salvageable(album))
         return H.ok({"orphans": found})
 
     @app.route("POST", "/api/rip/salvage")

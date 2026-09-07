@@ -96,7 +96,7 @@ def test_a_record_goes_from_the_pool_to_cut_tracks(running) -> None:  # type: ig
     assert status == 200 and body["user"] == "listener"
 
     status, body = call("GET", "/api/albums")
-    assert status == 200 and body["albums"] == ["album"]
+    assert status == 200 and [a["slug"] for a in body["albums"]] == ["album"]
 
     status, body = call("POST", "/api/prepare/album")
     assert status == 202 and body["done"] and not body["error"], body["error"]
