@@ -54,7 +54,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]
 [tool.ruff.lint.per-file-ignores]
 # assert is the point, and a seeded PRNG is how deterministic test signals are
 # built - neither is a security concern in a test.
-"tests/*" = ["S101", "S311"]
+# Test credentials are literal by necessity; S105-S107 flag every one.
+"tests/*" = ["S101", "S311", "S105", "S106", "S107"]
 # A transliteration table is definitionally a table of confusable characters;
 # flagging them is the rule working against the file's whole purpose.
 "ripdoctor/core/naming.py" = ["RUF001"]

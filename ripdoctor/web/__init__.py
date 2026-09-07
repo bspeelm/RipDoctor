@@ -1,1 +1,1 @@
-"""web layer. See ripdoctor/__init__.py for the layering rules."""
+"""The HTTP layer: routes as values, and one adapter that owns the socket."""
