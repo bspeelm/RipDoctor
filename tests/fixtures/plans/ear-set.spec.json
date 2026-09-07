@@ -1,0 +1,117 @@
+{
+ "slug": "album-one",
+ "album": "Album One",
+ "artist": "Artist One",
+ "lead": 1.3,
+ "tail": 1.5,
+ "sides": [
+  {
+   "letter": "a",
+   "start": 17.35,
+   "end": 1094.5,
+   "tracks": [
+    {
+     "number": 1,
+     "title": "Track 1",
+     "len": 153.32,
+     "start": 15.35,
+     "end": 167.15
+    },
+    {
+     "number": 2,
+     "title": "Track 2",
+     "len": 212.16,
+     "start": 168.0,
+     "end": 381.0
+    },
+    {
+     "number": 3,
+     "title": "Track 3",
+     "len": 262.44,
+     "start": 381.15,
+     "end": 643.55
+    },
+    {
+     "number": 4,
+     "title": "Track 4",
+     "len": 109.253,
+     "start": 643.8,
+     "end": 752.2
+    },
+    {
+     "number": 5,
+     "title": "Track 5",
+     "len": 166.026,
+     "start": 753.15,
+     "end": 917.9
+    },
+    {
+     "number": 6,
+     "title": "Track 6",
+     "len": 178.973,
+     "start": 918.95,
+     "end": 1098.2
+    }
+   ]
+  },
+  {
+   "letter": "b",
+   "start": 21.45,
+   "end": 1229.5,
+   "tracks": [
+    {
+     "number": 8,
+     "title": "Track 8",
+     "len": 437.653,
+     "start": 20.45,
+     "end": 459.6
+    },
+    {
+     "number": 9,
+     "title": "Track 9",
+     "len": 265.186,
+     "start": 459.8,
+     "end": 726.0
+    },
+    {
+     "number": 10,
+     "title": "Track 10",
+     "len": 233.426,
+     "start": 726.6,
+     "end": 956.0
+    },
+    {
+     "number": 11,
+     "title": "Track 11",
+     "len": 285.986,
+     "start": 958.3,
+     "end": 1239.5
+    }
+   ],
+   "fix": {
+    "9": [
+     722.5,
+     727.9
+    ],
+    "10": [
+     954.5,
+     959.6
+    ]
+   }
+  },
+  {
+   "letter": "Orphan",
+   "start": 55.6,
+   "end": 316.5,
+   "tracks": [
+    {
+     "number": 7,
+     "title": "Track 7",
+     "len": 300.68,
+     "start": 22.3,
+     "end": 319.8
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,99 @@
+{
+ "album": "Album One",
+ "artist": "Artist One",
+ "slug": "album-one",
+ "sides": [
+  {
+   "file": "side-a.flac",
+   "tracks": [
+    {
+     "number": 1,
+     "title": "Track 1",
+     "start": 15.35,
+     "end": 167.15,
+     "cat": 153.32
+    },
+    {
+     "number": 2,
+     "title": "Track 2",
+     "start": 168.0,
+     "end": 381.0,
+     "cat": 212.16
+    },
+    {
+     "number": 3,
+     "title": "Track 3",
+     "start": 381.15,
+     "end": 643.55,
+     "cat": 262.44
+    },
+    {
+     "number": 4,
+     "title": "Track 4",
+     "start": 643.8,
+     "end": 752.2,
+     "cat": 109.253
+    },
+    {
+     "number": 5,
+     "title": "Track 5",
+     "start": 753.15,
+     "end": 917.9,
+     "cat": 166.026
+    },
+    {
+     "number": 6,
+     "title": "Track 6",
+     "start": 918.95,
+     "end": 1098.2,
+     "cat": 178.973
+    }
+   ]
+  },
+  {
+   "file": "side-b.flac",
+   "tracks": [
+    {
+     "number": 8,
+     "title": "Track 8",
+     "start": 20.45,
+     "end": 459.6,
+     "cat": 437.653
+    },
+    {
+     "number": 9,
+     "title": "Track 9",
+     "start": 459.8,
+     "end": 726.0,
+     "cat": 265.186
+    },
+    {
+     "number": 10,
+     "title": "Track 10",
+     "start": 726.6,
+     "end": 956.0,
+     "cat": 233.426
+    },
+    {
+     "number": 11,
+     "title": "Track 11",
+     "start": 958.3,
+     "end": 1239.5,
+     "cat": 285.986
+    }
+   ]
+  },
+  {
+   "file": "side-Orphan.flac",
+   "tracks": [
+    {
+     "number": 7,
+     "title": "Track 7",
+     "start": 22.3,
+     "end": 319.8,
+     "cat": 300.68
+    }
+   ]
+  }
+ ]
+}
