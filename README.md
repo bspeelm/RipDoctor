@@ -122,10 +122,10 @@ is refused with the reason, rather than written as an empty or duplicated file.
 |---|---|
 | 0 — scaffold, decisions, budgets, architecture tests | done |
 | 1 — the detection and fitting core, and its tests | done |
-| 2 — audio seam, config, doctor; offline CLI | in progress |
-| 3 — capture | not started |
+| 2 — audio seam, config, doctor; offline CLI | done |
+| 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
 | 4 — web interface | not started |
-| 5 — tagging and import | not started |
+| 5 — tagging and import | base tagger done; beets extra and artwork not started |
 | 6 — documentation revision, then 1.0 | not started |
 
 ## Development
