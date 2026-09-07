@@ -22,6 +22,7 @@ from ripdoctor.core.envelope import Envelope, decode
 from ripdoctor.core.fit import fit_side, report, to_side
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
+from ripdoctor.integrations import tagger as T
 
 
 class Context:
@@ -185,6 +186,61 @@ def cmd_check(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import(ctx: Context, args: argparse.Namespace) -> int:
+    """Tag the cut tracks and place them in the library."""
+    plan = _load_plan(args.plan)
+    if plan is None:
+        return 2
+    try:
+        validate(plan)
+    except BadPlan as e:
+        print(f"refusing to import from this plan: {e}", file=sys.stderr)
+        return 1
+
+    library = args.library or ctx.settings.library
+    if not library:
+        print("no library directory is set; see `ripdoctor doctor`", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        for p in T.placements(plan, args.review, library):
+            print(f"  {p.source}  ->  {p.dest}")
+        return 0
+
+    moved = T.apply(
+        ctx.runner,
+        plan,
+        args.review,
+        library,
+        file_mode=ctx.settings.file_mode,
+        dir_mode=ctx.settings.dir_mode,
+    )
+    where, count = T.locate(library, plan.artist, plan.album)
+    print(f"\n{len(moved)} tracks -> {where}")
+    print(f"the library now holds {count} track(s) for this record")
+    return 0
+
+
+def cmd_archive(ctx: Context, args: argparse.Namespace) -> int:
+    """Say whether the raw sides are safe to clear, and why."""
+    plan = _load_plan(args.plan)
+    if plan is None:
+        return 2
+    library = args.library or ctx.settings.library
+    where, count = T.locate(library, plan.artist, plan.album)
+    expected = sum(len(s.tracks) for s in plan.sides)
+
+    if where is None:
+        print(f"not in the library yet: {library}", file=sys.stderr)
+        return 1
+    if count < expected:
+        print(f"{count} of {expected} tracks are in {where}", file=sys.stderr)
+        return 1
+    print(f"all {expected} tracks are in {where}")
+    print("the raw sides are safe to archive")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ripdoctor",
@@ -222,6 +278,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("out", help="directory to write tracks into")
     s.add_argument("--dry-run", action="store_true", help="print the cuts only")
     s.set_defaults(run=cmd_split)
+
+    i = sub.add_parser("import", help="tag the cut tracks and place them")
+    i.add_argument("plan")
+    i.add_argument("review", help="directory holding the cut tracks")
+    i.add_argument("--library", help="override the configured library root")
+    i.add_argument("--dry-run", action="store_true", help="print the moves only")
+    i.set_defaults(run=cmd_import)
+
+    a = sub.add_parser("archive", help="check a record arrived before clearing raw")
+    a.add_argument("plan")
+    a.add_argument("--library", help="override the configured library root")
+    a.set_defaults(run=cmd_archive)
 
     k = sub.add_parser("check", help="build tick clips for listening to")
     k.add_argument("plan")

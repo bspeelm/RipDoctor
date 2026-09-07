@@ -90,11 +90,17 @@ ripdoctor devices       capture devices this machine has, and what each accepts
 ripdoctor fit           place track boundaries from a spec and measured levels
 ripdoctor split         cut a plan into tracks
 ripdoctor check         build tick clips, one per boundary, for listening to
+ripdoctor import        tag the cut tracks and place them in the library
+ripdoctor archive       confirm a record arrived before the raw sides are cleared
 ```
 
 `ripdoctor doctor` is the one to run first. It never needs a working machine -
 that is the point of it - and every problem it reports comes with what to do
 about it.
+
+The raw sides are never cleared until the record is provably somewhere else -
+`ripdoctor archive` counts what actually arrived and says so. beets can do the
+tagging instead if you have it, but nothing requires it.
 
 Nothing is cut until a plan validates. A track that would end before it starts,
 overlap its neighbour, collide on a track number or run past the end of the side
