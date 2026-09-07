@@ -309,7 +309,7 @@ def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
         )
         return 2
 
-    layout = Layout(Path(ctx.settings.vinyl))
+    layout = Layout(Path(ctx.settings.vinyl), ctx.settings.cache_name)
     layout.ensure()
     credentials, generated = AUTH.load_or_create(
         ctx.machine.config_dir / "auth.json", args.user

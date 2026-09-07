@@ -48,6 +48,12 @@ class Settings:
     port: int = 8080
     bind: str = "127.0.0.1"
 
+    # Where measurements are kept, under the vinyl root's work directory. A
+    # pool that already holds them under another name is adopted by naming it
+    # here: the files are the same, and re-measuring an archive to change a
+    # directory name costs hours for nothing.
+    cache_name: str = ".cache"
+
     # Getting a record into the library. "beets" is the one this ships with
     # and depends on; "tagger" is metaflac and a directory, kept for when beets
     # is broken halfway through a record. ADR-038.

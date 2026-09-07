@@ -250,3 +250,19 @@ def test_a_track_the_plan_does_not_mention_keeps_what_it_had() -> None:
 def test_the_fold_is_idempotent() -> None:
     once = F.spec_from_plan(a_spec(), a_plan())
     assert F.spec_from_plan(once, a_plan()) == once
+
+
+def test_measurements_can_be_kept_under_a_name_a_pool_already_uses(
+    tmp_path: Path,
+) -> None:
+    """Adopting an existing pool costs nothing: the file for a side is the same
+    file, and re-measuring an archive to change a directory name would be hours
+    of ffmpeg for a rename."""
+    layout = F.Layout(tmp_path / "vinyl", ".cutassist-cache")
+    layout.ensure()
+    assert layout.cache.name == ".cutassist-cache"
+    assert layout.cache.is_dir() and layout.cache.parent == layout.work
+
+
+def test_the_default_name_is_this_project_s_own(tmp_path: Path) -> None:
+    assert F.Layout(tmp_path).cache.name == ".cache"

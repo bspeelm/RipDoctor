@@ -21,6 +21,11 @@ class Layout:
     """Where everything lives under one vinyl root."""
 
     root: Path
+    # Named rather than fixed so a pool that already holds measurements under
+    # another name can be adopted in place. The format is the same file for the
+    # same side; re-measuring an archive to change a directory name would cost
+    # hours of ffmpeg for nothing.
+    cache_name: str = ".cache"
 
     @property
     def raw(self) -> Path:
@@ -40,7 +45,7 @@ class Layout:
 
     @property
     def cache(self) -> Path:
-        return self.work / ".cache"
+        return self.work / self.cache_name
 
     def album_dir(self, slug: str) -> Path:
         """A record's sides: raw first, then archive.
