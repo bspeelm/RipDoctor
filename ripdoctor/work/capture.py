@@ -49,9 +49,18 @@ class Live:
     def running(self) -> bool:
         return self.outcome is None and not self.error
 
-    def as_dict(self, now: float, dwell: float) -> dict[str, Any]:
+    @property
+    def stage(self) -> str:
+        if self.error:
+            return "failed"
+        if self.outcome is None:
+            return "recording"
+        return "done" if self.outcome.path else "encoding"
+
+    def as_dict(self, now: float, dwell: float, below: float) -> dict[str, Any]:
         out: dict[str, Any] = {
             "running": self.running,
+            "stage": self.stage,
             "slug": self.slug,
             "side": self.side,
             "kind": self.stem,
@@ -60,6 +69,11 @@ class Live:
             "autostop": self.control.autostop,
             "snoozes": self.control.snoozes,
             "dwell": dwell,
+            # How long a quiet stretch has to run before the page says
+            # something. Well short of the dwell, so there is time to press
+            # snooze rather than watch it fire.
+            "warn": round(dwell * 0.25),
+            "below": below,
             "error": self.error,
         }
         if self.reading:
@@ -92,6 +106,7 @@ class Recorder:
     tick: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
     dwell: float = A.DWELL
+    below: float = A.BELOW
     live: Live | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -151,7 +166,7 @@ class Recorder:
         if live is None:
             # Not recording is a state, not an absence: the page shows it.
             return {"running": False}
-        return live.as_dict(self.now(), self.dwell)
+        return live.as_dict(self.now(), self.dwell, self.below)
 
     def _running(self) -> Live:
         if self.live is None or not self.live.running:

@@ -147,7 +147,7 @@ def test_the_boundaries_are_fitted_rather_than_typed(
     )
     found = P.locate(Tools(), layout, "album", 1)
     assert found.start == 5.0 and found.end == 65.0
-    assert found.scale_assumed and found.r == 0.95
+    assert found.scale_assumed and found.as_dict()["fit"]["r"] == 0.95
 
 
 def test_a_track_that_maps_outside_the_capture_says_what_to_do(
@@ -293,7 +293,7 @@ def test_every_track_reports_whether_it_can_be_punched(tmp_path: Path) -> None:
     found = P.state(Tools(), layout, a_plan(), str(library), "album")
     rows = found["tracks"]
     assert [r["number"] for r in rows] == [1, 2]
-    assert all(r["in_library"] for r in rows)
+    assert all(r["in_library"] and r["side_audio"] for r in rows)
     assert rows[0]["punch"]["seconds"] == PUNCH_SECONDS
     assert rows[1]["punch"] is None
 

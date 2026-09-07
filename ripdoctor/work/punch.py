@@ -69,6 +69,12 @@ class Located:
     seconds: float
     scale_assumed: bool
     r: float
+    offset: float = 0.0
+    drift_ms_per_min: float = 0.0
+
+    @property
+    def length(self) -> float:
+        return round(self.end - self.start, 3)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -79,9 +85,17 @@ class Located:
             "old_end": self.old_end,
             "start": self.start,
             "end": self.end,
+            "length": self.length,
             "punch_seconds": self.seconds,
             "scale_assumed": self.scale_assumed,
-            "r": round(self.r, 4),
+            "fit": {
+                "r": round(self.r, 4),
+                "offset": round(self.offset, 3),
+                "drift_ms_per_min": round(self.drift_ms_per_min, 1),
+                # A punch is fitted on one or two probes and has none left over
+                # to check against, unlike a whole side.
+                "check_miss": None,
+            },
         }
 
 
@@ -153,6 +167,8 @@ def locate(runner: Runner, layout: Layout, slug: str, number: int) -> Located:
         seconds=round(seconds, 2),
         scale_assumed=assumed,
         r=min(p.r for p in probes),
+        offset=transform.offset,
+        drift_ms_per_min=transform.drift_ms_per_min,
     )
 
 
@@ -262,6 +278,14 @@ def apply(
     return Applied(int(number), old, was, got, art, backup)
 
 
+def _has_side(layout: Layout, slug: str, letter: str) -> bool:
+    try:
+        layout.side_file(slug, letter)
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def discard(layout: Layout, slug: str, number: int) -> int:
     """Throw away a punch capture so the track can be recorded again."""
     capture = recorded(layout, slug, number)
@@ -294,6 +318,10 @@ def state(
                     "end": track.end,
                     "length": round(track.end - track.start, 2),
                     "in_library": in_library,
+                    # Both halves have to be there: something to fit against
+                    # and something to replace. Saying which is missing beats a
+                    # dead entry in a list.
+                    "side_audio": _has_side(layout, slug, letter),
                     "punch": None
                     if capture is None
                     else {

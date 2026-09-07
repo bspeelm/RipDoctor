@@ -98,7 +98,10 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, str(e)) from e
         except C.CaptureError as e:
             raise H.HttpError(400, str(e)) from e
-        return H.ok(live.as_dict(service.now(), service.recorder.dwell), 202)
+        return H.ok(
+            live.as_dict(service.now(), service.recorder.dwell, service.recorder.below),
+            202,
+        )
 
     @app.route("POST", "/api/rip/stop")
     def stop(_r: H.Request) -> H.Response:

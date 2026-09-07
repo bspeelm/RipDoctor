@@ -1156,9 +1156,9 @@ function closeAutostopWarning(action) {
 
 function updateAutostopWarning(st, running) {
   const dlg = $("#autostopdlg");
-  const armed = running && st.autostop !== false && st.music_level != null;
-  const left = armed ? Math.round((st.autostop_dwell || 120) - (st.quiet_for || 0)) : null;
-  const warn = st.autostop_warn || 20;
+  const armed = running && st.autostop !== false && st.music != null;
+  const left = armed ? Math.round((st.dwell || 120) - (st.quiet_for || 0)) : null;
+  const warn = st.warn || 20;
 
   if (!armed || left == null || left > warn) {
     // the passage got loud again, the capture ended, or auto-stop was turned
@@ -1168,7 +1168,7 @@ function updateAutostopWarning(st, running) {
     return;
   }
   $("#as-count").textContent = Math.max(0, left);
-  $("#as-below").textContent = Math.round(st.autostop_below ?? 20);
+  $("#as-below").textContent = Math.round(st.below ?? 20);
   $("#as-quiet").textContent = `${Math.round(st.quiet_for)}s`;
   if (!autostopShown) {
     autostopShown = true;
@@ -1262,22 +1262,22 @@ function startRipPoll() {
       // keep the checkbox honest: the running capture owns the setting, not the
       // form, so a reload or a second tab shows what is actually in force
       if (on && st.autostop != null) $("#rip-autostop").checked = st.autostop;
-      if (st.level_warning) {
-        auto.textContent = `⚠ ${st.level_warning}`;
+      if (st.warning) {
+        auto.textContent = `⚠ ${st.warning}`;
         auto.className = "err";
-      } else if (st.auto_stop) {
+      } else if (st.reason) {
         auto.className = "dim";
-        auto.textContent = `auto-stopped — ${st.auto_stop}`;
+        auto.textContent = `auto-stopped — ${st.reason}`;
       } else if (on && st.autostop === false) {
-        auto.textContent = st.music_level != null
-          ? `music level ${st.music_level} dB · auto-stop OFF — stop this side yourself`
+        auto.textContent = st.music != null
+          ? `music level ${st.music} dB · auto-stop OFF — stop this side yourself`
           : "auto-stop OFF — stop this side yourself";
-      } else if (on && st.music_level != null) {
+      } else if (on && st.music != null) {
         const q = st.quiet_for || 0;
         auto.textContent = q > 5
-          ? `quiet for ${Math.round(q)}s — auto-stops at ${Math.round(st.autostop_dwell)}s`
-          : `music level ${st.music_level} dB · auto-stop armed`;
-      } else if (!on && st.listening && st.levels) {
+          ? `quiet for ${Math.round(q)}s — auto-stops at ${Math.round(st.dwell)}s`
+          : `music level ${st.music} dB · auto-stop armed`;
+      } else if (!on && st.levels) {
         auto.className = "dim";
         // deliberately no peak here: this is a 42 ms window and it jumps every
         // poll, which is unreadable. `ripdoctor probe` is where gain is set.
@@ -1299,8 +1299,7 @@ function startRipPoll() {
       $("#rip-state").textContent = on
         ? `recording ${st.slug} side ${st.side} — ${(st.bytes / 1e6).toFixed(0)} MB`
           + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
-        : (st.stage === "encoding" ? "encoding…"
-           : st.listening ? "listening — not recording" : "idle");
+        : (st.stage === "encoding" ? "encoding…" : "idle");
       // levels arrive while merely listening too, not only while recording
       drawMeter($("#meter"), st.levels || null);
     } catch {}
