@@ -123,7 +123,9 @@ class FakeRunner:
 
     replies: list[tuple[Match, Result]] = field(default_factory=list)
     calls: list[tuple[str, ...]] = field(default_factory=list)
-    installed: set[str] = field(default_factory=set)
+    # None means every tool exists. An empty set means none do - which is a
+    # thing a test needs to say, and cannot if the two are the same value.
+    installed: set[str] | None = None
 
     def expect(
         self,
@@ -154,7 +156,7 @@ class FakeRunner:
         if not args:
             raise ValueError("empty argv")
         self.calls.append(args)
-        if self.installed and args[0] not in self.installed:
+        if self.installed is not None and args[0] not in self.installed:
             raise ToolMissing(args[0])
         for match, reply in self.replies:
             if match(args):
@@ -162,9 +164,9 @@ class FakeRunner:
         return Result(args, 0, b"", b"")
 
     def which(self, tool: str) -> str | None:
-        if not self.installed:
+        if self.installed is None or tool in self.installed:
             return f"/usr/bin/{tool}"
-        return f"/usr/bin/{tool}" if tool in self.installed else None
+        return None
 
     def argv_for(self, needle: str) -> tuple[str, ...]:
         """The one recorded call containing `needle`. Raises if not exactly one."""

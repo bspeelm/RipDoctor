@@ -2,11 +2,9 @@
 
 Capture a vinyl side, find the track boundaries, cut them where you want them.
 
-**Status: early. Not yet usable as an application.** The detection core is
-complete and tested - gap detection, boundary fitting, side layout, run-out
-detection, re-rip alignment and the live meter all run as a library over
-envelopes you supply, with no ffmpeg and no hardware. What is missing is
-everything that reads a file or a sound card. See
+**Status: early, and usable offline.** `ripdoctor doctor`, `config`, `fit`,
+`split` and `check` work today against sides you already have. Capture and the
+web interface are not built yet. See
 [docs/decisions.md](docs/decisions.md) for what has been decided and why, and
 the phase table below for what exists.
 
@@ -83,13 +81,31 @@ The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
 `flac` and `metaflac` on the system, plus `arecord` if you want to record.
 `ripdoctor doctor` reports which of those are missing.
 
+## Commands
+
+```
+ripdoctor doctor        what this machine has, what it lacks, and what to do
+ripdoctor config        every resolved setting, including where the audio lives
+ripdoctor fit           place track boundaries from a spec and measured levels
+ripdoctor split         cut a plan into tracks
+ripdoctor check         build tick clips, one per boundary, for listening to
+```
+
+`ripdoctor doctor` is the one to run first. It never needs a working machine -
+that is the point of it - and every problem it reports comes with what to do
+about it.
+
+Nothing is cut until a plan validates. A track that would end before it starts,
+overlap its neighbour, collide on a track number or run past the end of the side
+is refused with the reason, rather than written as an empty or duplicated file.
+
 ## Phases
 
 | Phase | State |
 |---|---|
 | 0 — scaffold, decisions, budgets, architecture tests | done |
 | 1 — the detection and fitting core, and its tests | done |
-| 2 — audio seam, config, doctor; offline CLI | next |
+| 2 — audio seam, config, doctor; offline CLI | in progress |
 | 3 — capture | not started |
 | 4 — web interface | not started |
 | 5 — tagging and import | not started |

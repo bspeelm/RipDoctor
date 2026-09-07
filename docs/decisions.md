@@ -804,3 +804,40 @@ silence.
 and a test asserts both that every threshold appears and that the documented
 value is the one the code uses. The numbers are the domain knowledge, so they
 are the thing that must not drift.
+
+---
+
+## ADR-029 — The fake runner distinguishes "everything" from "nothing"
+
+**Status:** accepted. Fixes a defect in the test seam itself.
+
+`FakeRunner(installed=None)` means every tool exists; `FakeRunner(installed=set())`
+means none do.
+
+**The defect.** The field defaulted to an empty set and was tested for
+truthiness, so both spellings meant the same thing - everything exists. A test
+that asked for a machine with nothing installed silently got a fully equipped
+one and passed for the wrong reason. It was found by a doctor test that expected
+a bare machine to fail and watched it succeed.
+
+A fake that lies is worse than no fake, because everything above it is then
+tested against a world that cannot occur. Neither value is now a default that
+could be reached by accident.
+
+---
+
+## ADR-030 — The lane and its anchor travel together
+
+**Status:** accepted.
+
+`core.gaps.find` refuses to guess whether an envelope is the full lane or the
+band lane, because the two need opposite anchors and getting it wrong inverts
+detection rather than degrading it. The command line inherits that refusal:
+`ripdoctor fit --lane` names which lane the supplied envelopes hold, and the
+anchor follows from it.
+
+**Why it needed saying.** The first version of the command hardcoded the band
+anchor and was handed full-band envelopes, which produced a plan with tracks
+running backwards. The refusal in the core is only worth having if every caller
+above it is equally explicit; a caller that guesses on the core's behalf
+reintroduces exactly what the core refused to do.
