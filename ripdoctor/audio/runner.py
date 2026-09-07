@@ -8,6 +8,7 @@ architecture test holds that boundary.
 from __future__ import annotations
 
 import shutil
+import signal
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -64,7 +65,9 @@ class Process(Protocol):
 
     def poll(self) -> int | None: ...
 
-    def terminate(self) -> None: ...
+    def interrupt(self) -> None: ...
+
+    def kill(self) -> None: ...
 
     def wait(self, timeout: float | None = ...) -> int: ...
 
@@ -80,7 +83,9 @@ class Runner(Protocol):
         timeout: float | None = ...,
     ) -> Result: ...
 
-    def start(self, argv: Sequence[str]) -> Process: ...
+    def start(
+        self, argv: Sequence[str], *, stderr_path: str | None = ...
+    ) -> Process: ...
 
     def which(self, tool: str) -> str | None: ...
 
@@ -116,23 +121,62 @@ class RealRunner:
             raise ToolMissing(args[0]) from e
         return Result(tuple(args), p.returncode, p.stdout or b"", p.stderr or b"")
 
-    def start(self, argv: Sequence[str]) -> Process:
+    def start(self, argv: Sequence[str], *, stderr_path: str | None = None) -> Process:
         """Begin a program and return while it runs.
 
         Used only for capture, which lasts a side. Everything else finishes
         inside one call and goes through run().
+
+        Errors go to a file rather than a pipe. A capture runs for twenty
+        minutes and a driver reporting overruns writes the whole time; nobody
+        is reading a pipe during that, and a full pipe blocks the writer - so
+        the program recording the record would stall on a diagnostic about the
+        record. A file cannot block, and it can be read while the capture runs.
         """
         args = [str(a) for a in argv]
         if not args:
             raise ValueError("empty argv")
         if self.which(args[0]) is None:
             raise ToolMissing(args[0])
-        return subprocess.Popen(  # noqa: S603 - argv list, never shell=True
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        errors = open(stderr_path, "wb") if stderr_path else subprocess.DEVNULL  # noqa: SIM115
+        try:
+            proc = subprocess.Popen(  # noqa: S603 - argv list, never shell=True
+                args, stdout=subprocess.DEVNULL, stderr=errors
+            )
+        except FileNotFoundError as e:
+            raise ToolMissing(args[0]) from e
+        finally:
+            if errors is not subprocess.DEVNULL:
+                errors.close()  # type: ignore[union-attr]
+        return Started(proc)
 
     def which(self, tool: str) -> str | None:
         return shutil.which(tool)
+
+
+@dataclass
+class Started:
+    """A running program, and the one signal a capture needs.
+
+    arecord backfills the WAV header - which is where the length lives - when
+    it is interrupted, and does not when it is killed. A killed capture leaves
+    a file reporting no duration, which every tool that reads it then has to
+    work around. So a capture is asked to stop, and only killed if it will not.
+    """
+
+    proc: subprocess.Popen[bytes]
+
+    def poll(self) -> int | None:
+        return self.proc.poll()
+
+    def interrupt(self) -> None:
+        self.proc.send_signal(signal.SIGINT)
+
+    def kill(self) -> None:
+        self.proc.kill()
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.proc.wait(timeout)
 
 
 Match = Callable[[Sequence[str]], bool]
@@ -194,7 +238,7 @@ class FakeRunner:
                 return Result(args, reply.returncode, reply.stdout, reply.stderr)
         return Result(args, 0, b"", b"")
 
-    def start(self, argv: Sequence[str]) -> Process:
+    def start(self, argv: Sequence[str], *, stderr_path: str | None = None) -> Process:
         args = tuple(str(a) for a in argv)
         if not args:
             raise ValueError("empty argv")
@@ -225,7 +269,8 @@ class FakeProcess:
     exit_after: int | None = None
     polls: int = 0
     returncode: int | None = None
-    terminated: bool = False
+    interrupted: bool = False
+    killed: bool = False
 
     def poll(self) -> int | None:
         self.polls += 1
@@ -237,10 +282,15 @@ class FakeProcess:
             self.returncode = 0
         return self.returncode
 
-    def terminate(self) -> None:
-        self.terminated = True
+    def interrupt(self) -> None:
+        self.interrupted = True
         if self.returncode is None:
-            self.returncode = -15
+            self.returncode = 0
+
+    def kill(self) -> None:
+        self.killed = True
+        if self.returncode is None:
+            self.returncode = -9
 
     def wait(self, timeout: float | None = None) -> int:
         if self.returncode is None:

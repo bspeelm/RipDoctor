@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 
 from ripdoctor.audio import capture as C
-from ripdoctor.audio.runner import FakeRunner, ToolFailed
+from ripdoctor.audio.runner import FakeProcess, FakeRunner, ToolFailed
 from ripdoctor.core.meter import verdict
+from tests import tape
 
 
 def fmt(**kw: object) -> C.Format:
@@ -246,3 +247,123 @@ def test_a_capture_is_judged_from_both_lanes() -> None:
     v = C.judge(fake, "probe.wav")
     assert v.ok and "music" in v.summary
     assert v.band_rms == -41.0 and v.full_peak == -6.0
+
+
+# ------------------------------------------------------- reading the file
+
+
+def test_the_format_is_read_from_the_header_not_assumed(tmp_path: Path) -> None:
+    """The chain stopped being 48 kHz/16-bit when it became a Waxwing into a
+    UR23. A capture metered at the wrong rate measures 2-6 kHz and calls it
+    1-3."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header(rate=96000, channels=2, bits=24))
+    fmt = C.wav_format(wav, C.Format(rate=48000, sample_format="S16_LE"))
+    assert fmt.rate == 96000 and fmt.width == 3
+
+
+@pytest.mark.parametrize(("bits", "width"), [(16, 2), (24, 3), (32, 4)])
+def test_every_capture_width_is_recognised(
+    tmp_path: Path, bits: int, width: int
+) -> None:
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header(bits=bits))
+    assert C.wav_format(wav, C.Format()).width == width
+
+
+def test_a_file_that_is_not_a_wav_falls_back_rather_than_guessing(
+    tmp_path: Path,
+) -> None:
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"not a riff header at all, but long enough to read" * 2)
+    assert C.wav_format(wav, C.Format(rate=44100)).rate == 44100
+    assert C.wav_format(tmp_path / "absent.wav", C.Format(rate=44100)).rate == 44100
+
+
+def test_an_absurd_rate_in_the_header_is_not_believed(tmp_path: Path) -> None:
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header(rate=3))
+    assert C.wav_format(wav, C.Format(rate=48000)).rate == 48000
+
+
+def test_the_meter_reads_the_file_the_recorder_is_writing(tmp_path: Path) -> None:
+    """ALSA gives one program the input. A meter needing its own stream would
+    be a meter that could not run during a capture."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header())
+    with wav.open("ab") as f:
+        f.write(tape.block(1500.0, 48000, 3, 2, 0.4))
+
+    measured = C.meter(wav, C.Format())
+    assert measured is not None
+    levels, fmt = measured
+    assert fmt.rate == 48000
+    assert levels.band > -20.0, "a 1500 Hz tone did not show in the band lane"
+
+
+def test_a_capture_with_less_than_a_block_yet_reads_nothing(tmp_path: Path) -> None:
+    """Not a number, and certainly not a floor: too early is not silence."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header())
+    assert C.meter(wav, C.Format()) is None
+    assert C.meter(tmp_path / "absent.wav", C.Format()) is None
+
+
+def test_only_the_tail_is_read(tmp_path: Path) -> None:
+    """Whatever the side has done so far, the meter shows what it is doing
+    now."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(tape.header())
+    with wav.open("ab") as f:
+        f.write(tape.block(1500.0, 48000, 3, 2, 0.4))
+        f.write(tape.block(None, 48000, 3, 2, 0.0))
+
+    measured = C.meter(wav, C.Format())
+    assert measured is not None
+    assert measured[0].band < -100.0, "the meter is still showing the loud part"
+
+
+# ------------------------------------------------------------- overruns
+
+
+def test_overruns_are_counted_with_the_time_they_cost(tmp_path: Path) -> None:
+    log = tmp_path / "a.log"
+    log.write_text(
+        "overrun!!! (at least 8.235 ms long)\n"
+        "arecord: something else entirely\n"
+        "overrun!!! (at least 12.100 ms long)\n"
+    )
+    assert C.overruns(log) == (2, 20.3)
+
+
+def test_a_log_that_is_not_there_is_no_complaints(tmp_path: Path) -> None:
+    assert C.overruns(tmp_path / "absent.log") == (0, 0.0)
+
+
+# -------------------------------------------------------------- stopping
+
+
+def test_a_capture_is_interrupted_so_the_header_is_backfilled() -> None:
+    """Killed, arecord leaves a file that reports no duration."""
+    proc = FakeProcess()
+    C.stop(proc)
+    assert proc.interrupted and not proc.killed
+
+
+def test_a_capture_that_will_not_stop_is_killed() -> None:
+    class Stubborn(FakeProcess):
+        def wait(self, timeout: float | None = None) -> int:
+            if not self.killed:
+                raise TimeoutError("still going")
+            return 0
+
+    proc = Stubborn()
+    C.stop(proc)
+    assert proc.killed, "a recorder that ignored the interrupt was left running"
+
+
+def test_a_capture_that_already_ended_is_left_alone() -> None:
+    proc = FakeProcess(exit_after=1)
+    proc.poll()
+    C.stop(proc)
+    assert not proc.interrupted and not proc.killed

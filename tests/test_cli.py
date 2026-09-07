@@ -12,8 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from ripdoctor.audio import session as S
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.cli import build_parser, main
+from ripdoctor.cli import meter_line as main_meter
+from ripdoctor.core.meter import Levels
 from ripdoctor.doctor import checks as D
 
 FIXTURES = Path(__file__).parent / "fixtures" / "golden"
@@ -428,3 +431,55 @@ def test_salvage_dry_run_leaves_the_capture_alone(tmp_path: Path, capsys) -> Non
 def test_salvage_with_nothing_to_do_says_so(tmp_path: Path, capsys) -> None:
     assert main(["salvage", str(tmp_path)], runner=everything()) == 0
     assert "nothing to salvage" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------- record
+
+
+def a_reading(**kw: object) -> S.Reading:
+    fields: dict = {
+        "elapsed": 63.0,
+        "levels": Levels(full=-21.4, band=-18.2, peak=-8.1),
+        "music": -17.9,
+        "quiet_for": 0.0,
+        "warning": None,
+    }
+    return S.Reading(**{**fields, **kw})
+
+
+def test_the_meter_line_shows_both_lanes() -> None:
+    """The whole point is that they disagree: the full band cannot tell a gap
+    from a quiet passage and 1-3 kHz can."""
+    line = main_meter(a_reading())
+    assert "1:03" in line
+    assert "-21.4" in line and "-18.2" in line and "-8.1" in line
+    assert "-17.9" in line, "the music level the auto-stop compares against"
+
+
+def test_the_meter_shows_a_dash_before_the_detector_arms() -> None:
+    assert "music      -" in main_meter(a_reading(music=None))
+
+
+def test_the_quiet_timer_appears_only_while_it_is_running() -> None:
+    assert "12.0s" in main_meter(a_reading(quiet_for=12.0))
+    assert "0.0s" not in main_meter(a_reading(quiet_for=0.0))
+
+
+def test_a_warning_is_printed_once_not_every_second(capsys) -> None:
+    """Repeating it every second buries the meter under it."""
+    from ripdoctor.cli import Meter
+
+    meter = Meter()
+    warned = a_reading(warning="no music-like signal after 31s")
+    for _ in range(3):
+        meter(warned)
+    assert capsys.readouterr().err.count("no music-like signal") == 1
+
+
+def test_record_without_a_device_says_which_command_lists_them(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert main(["record", str(tmp_path), "a"], runner=everything()) == 2
+    assert "ripdoctor devices" in capsys.readouterr().err

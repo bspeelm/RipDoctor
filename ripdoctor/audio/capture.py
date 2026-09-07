@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import math
 import re
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
 from ripdoctor.audio.runner import Process, Runner
-from ripdoctor.core.meter import Verdict, verdict
+from ripdoctor.core.meter import BLOCK, Levels, Verdict, levels_of, verdict
 
 # A device name is a small alphabet. Anything else is a mistake or an attempt,
 # and either way the answer is to say so rather than to pass it on.
@@ -37,11 +38,23 @@ def check_device(device: str) -> str:
     return device
 
 
+# arecord's names for the sample formats worth capturing at, and how wide each
+# one is. A capture read at the wrong width is not slightly wrong: a 24-bit
+# file read as 16 is noise at the wrong speed.
+_WIDTHS = {"S16_LE": 2, "S24_3LE": 3, "S32_LE": 4}
+_FORMATS = {16: "S16_LE", 24: "S24_3LE", 32: "S32_LE"}
+
+
 @dataclass(frozen=True, slots=True)
 class Format:
     rate: int = 48000
     channels: int = 2
     sample_format: str = "S24_3LE"
+
+    @property
+    def width(self) -> int:
+        """Bytes per sample."""
+        return _WIDTHS.get(self.sample_format, 3)
 
 
 def capture_argv(
@@ -101,7 +114,13 @@ def finished_path(album_dir: str | Path, letter: str) -> Path:
 
 
 def start(
-    runner: Runner, device: str, album_dir: str | Path, letter: str, fmt: Format
+    runner: Runner,
+    device: str,
+    album_dir: str | Path,
+    letter: str,
+    fmt: Format,
+    *,
+    log: bool = False,
 ) -> tuple[Process, Path]:
     """Begin recording one side. Returns the running process and its file."""
     check_device(device)
@@ -109,7 +128,9 @@ def start(
     dest = partial_path(album_dir, letter)
     if finished_path(album_dir, letter).exists():
         raise CaptureError(f"side {letter} already exists; move it first")
-    return runner.start(capture_argv(device, str(dest), fmt)), dest
+    errors = str(log_path(album_dir, letter)) if log else None
+    argv = capture_argv(device, str(dest), fmt)
+    return runner.start(argv, stderr_path=errors), dest
 
 
 def finish(runner: Runner, album_dir: str | Path, letter: str) -> Path:
@@ -201,3 +222,88 @@ def judge(runner: Runner, path: str) -> Verdict:
         read_stat(wide.err, "Peak level dB") or -120.0,
         read_stat(narrow.err, "RMS level dB") or -120.0,
     )
+
+
+LOG = ".side-{letter}.capturing.log"
+
+
+def log_path(album_dir: str | Path, letter: str) -> Path:
+    return Path(album_dir) / LOG.format(letter=letter)
+
+
+def wav_format(path: str | Path, fallback: Format) -> Format:
+    """Rate, channels and sample width read from the header, not assumed.
+
+    `wave.open` refuses a file that is still being written, so the fixed fields
+    are parsed directly - they are written up front and never change. Reading
+    them matters: the capture rate stopped being 48 kHz when the chain became a
+    Waxwing into a UR23, and metering a 96 kHz capture as 48 measures 2-6 kHz
+    and calls it 1-3.
+    """
+    try:
+        with Path(path).open("rb") as f:
+            header = f.read(44)
+    except OSError:
+        return fallback
+    if len(header) < 40 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+        return fallback
+    channels = struct.unpack("<H", header[22:24])[0] or fallback.channels
+    rate = struct.unpack("<I", header[24:28])[0]
+    bits = struct.unpack("<H", header[34:36])[0] or fallback.width * 8
+    if not (8000 <= rate <= 384000):
+        rate = fallback.rate
+    return Format(rate, channels, _FORMATS.get(bits, fallback.sample_format))
+
+
+def meter(path: str | Path, fallback: Format) -> tuple[Levels, Format] | None:
+    """Levels over the tail of a capture that is still being written.
+
+    Reading the file the recorder is already writing is what makes a live meter
+    possible without opening the device a second time. ALSA gives one program
+    the input; a meter that needed its own stream would be a meter that could
+    not run during a capture.
+    """
+    fmt = wav_format(path, fallback)
+    need = BLOCK * fmt.channels * fmt.width
+    try:
+        with Path(path).open("rb") as f:
+            f.seek(0, 2)
+            if f.tell() < need + 44:
+                return None
+            f.seek(-need, 2)
+            raw = f.read(need)
+    except OSError:
+        return None
+    levels = levels_of(raw, fmt.rate, fmt.channels, fmt.width)
+    return None if levels is None else (levels, fmt)
+
+
+# "overrun!!! (at least 8.235 ms long)" - the driver could not be read fast
+# enough and that many milliseconds of the record are simply not in the file.
+_OVERRUN = re.compile(r"overrun!!! \(at least ([\d.]+) ms long\)")
+
+
+def overruns(log: str | Path) -> tuple[int, float]:
+    """How many gaps the driver reported, and how much time they cost."""
+    try:
+        text = Path(log).read_text(errors="replace")
+    except OSError:
+        return 0, 0.0
+    found = [float(ms) for ms in _OVERRUN.findall(text)]
+    return len(found), round(sum(found), 1)
+
+
+def stop(proc: Process, *, grace: float = 15.0) -> None:
+    """Ask the capture to stop, and only kill it if it will not.
+
+    Interrupted, arecord backfills the WAV header with the real length. Killed,
+    it does not, and the file then reports no duration.
+    """
+    if proc.poll() is not None:
+        return
+    proc.interrupt()
+    try:
+        proc.wait(timeout=grace)
+    except Exception:  # whatever the wait raises, the answer is the same
+        proc.kill()
+        proc.wait(timeout=5)

@@ -467,10 +467,30 @@ test suite segfaults on roughly one run in ten. The fault lands inside
 tuple. Pure Python arithmetic cannot segfault in a correct interpreter.
 
 **What was ruled out.** The experimental JIT (it still crashes with
-`PYTHON_JIT=0`), pytest plugins (it crashes with hypothesis, cov and the cache
-provider all disabled), the cycle collector, and any single test file - one file
-alone reproduces it. It does not reproduce in a plain script looping over the
-same decode sixty times, so it needs pytest's environment, not the workload.
+`PYTHON_JIT=0`, and this build has no JIT compiled in), pytest and its plugins,
+the cycle collector (`gc.disable()`: four crashes in ten, against five with it
+on), the allocator (`PYTHONMALLOC=malloc`: no change), and this project's code.
+
+**It is not the hardware, and it is not this project.** The reproducer needs
+neither pytest nor a line of RipDoctor:
+
+    import random
+    random.seed(1)
+    for _ in range(3000):
+        xs = [random.random() for _ in range(4096)]
+        xs.sort()
+        s = sum(x * x for x in xs)
+
+That segfaults or raises an impossible error in roughly four runs in ten. A C
+program compiled by the same GCC 16.1.1 doing the equivalent work - three
+thousand rounds of four thousand small allocations each, every byte written and
+verified, then two hundred repetitions of a floating-point sum compared against
+the first - ran six times with no corruption and byte-identical results. So the
+memory and the arithmetic are sound; what is unsound is this interpreter binary
+running a hot loop over many small objects.
+
+That last detail is why the rate went up when the live meter arrived: an FFT per
+reading is exactly that shape, several hundred times per suite run.
 
 No second interpreter is installed on this machine to compare against.
 
@@ -502,12 +522,15 @@ errors that are *impossible*: an unknown opcode, a NameError for a name that is
 imported at the top of the file, a TypeError about a type that cannot be there.
 Anything in the second category means run it again.
 
-`PYTHONMALLOC=malloc` was tried and did not clearly help; the rate is low enough
-that a handful of runs cannot discriminate, and chasing it further costs more
-than it saves.
+Observed in the reproducer above, none of which any correct interpreter can
+produce:
 
-**What would reverse this.** The same crash on 3.13 or earlier, or on a second
-3.14 build. Either would mean the fault is in this code after all.
+    TypeError: unsupported operand type(s) for *: 'range_iterator' and 'complex'
+    TypeError: 'complex' object does not support item assignment
+    TypeError: 'list' object is not an iterator
+
+**What would reverse this.** The same crashes on a second 3.14 build, or on 3.13
+or earlier. Either would mean the fault is in this code after all.
 
 ---
 
@@ -859,3 +882,52 @@ anchor and was handed full-band envelopes, which produced a plan with tracks
 running backwards. The refusal in the core is only worth having if every caller
 above it is equally explicit; a caller that guesses on the core's behalf
 reintroduces exactly what the core refused to do.
+
+---
+
+## ADR-031 — The meter reads the file the recorder is writing
+
+**Status:** accepted.
+
+ALSA gives one program the input. A live meter that opened its own stream would
+be a meter that could not run during a capture, which is the only time it
+matters. So the meter reads the tail of the WAV the recorder is already writing:
+the last block of frames, seeked from the end, metered in memory.
+
+Two things follow from it. The format is read out of the header on every reading
+rather than assumed, because `wave.open` refuses a file that is still being
+written and because a 96 kHz capture metered as 48 measures 2-6 kHz and reports
+it as 1-3. And the capture is written as WAV rather than piped into an encoder:
+a pipe ended with a signal never closes the stream, so the header is never
+backfilled, the file reports no duration, and there is nothing to seek into
+while it grows.
+
+---
+
+## ADR-032 — The recorder's errors go to a file, not a pipe
+
+**Status:** accepted.
+
+A capture runs for twenty minutes and a driver reporting overruns writes for all
+of it. Nobody is draining a pipe during that, and a full pipe blocks the writer -
+so the program recording the record would stall on a diagnostic about the record.
+The predecessor solved this with a thread per capture whose only job was to read
+a pipe nobody wanted. A file cannot block, it can be read while the capture runs,
+and the overrun count comes out of it at the end. Each overrun is a slice of the
+record that is not in the file, so it is reported rather than dropped.
+
+---
+
+## ADR-033 — A capture is interrupted, and only killed if it will not stop
+
+**Status:** accepted.
+
+`arecord` backfills the WAV header - which is where the length lives - when it is
+interrupted, and does not when it is killed. So stopping a side sends SIGINT and
+waits; a recorder that ignores it is killed after the grace period, because a
+capture that will not stop is worse than a header that needs repairing.
+
+The same reasoning covers Ctrl-C: it stops the record, not the program. The loop
+catches it, stops the recorder properly, and encodes what was captured. A side is
+twenty minutes of somebody's evening, and every path out of the capture loop
+encodes what is on disk rather than discarding it.

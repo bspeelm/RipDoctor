@@ -11,6 +11,7 @@ from typing import Any
 
 from ripdoctor import __version__
 from ripdoctor.audio import capture as CAP
+from ripdoctor.audio import session as SESSION
 from ripdoctor.audio.devices import enumerate_devices
 from ripdoctor.audio.devices import report as devices_report
 from ripdoctor.audio.runner import RealRunner, Runner, ToolFailed, ToolMissing
@@ -18,6 +19,7 @@ from ripdoctor.audio.split import cut_one, plan_cuts, tick_one
 from ripdoctor.config.machine import Machine, detect
 from ripdoctor.config.settings import Settings, describe, load
 from ripdoctor.config.thresholds import Thresholds
+from ripdoctor.core import autostop as A
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope, decode
 from ripdoctor.core.fit import fit_side, report, to_side
@@ -124,6 +126,89 @@ def cmd_probe(ctx: Context, args: argparse.Namespace) -> int:
     print(f"  1-3 kHz    rms {v.band_rms:>7.1f}")
     print(f"\n  {v.summary}")
     return 0 if v.ok else 1
+
+
+def _clock(seconds: float) -> str:
+    return f"{int(seconds) // 60:>2}:{int(seconds) % 60:02d}"
+
+
+def meter_line(r: SESSION.Reading) -> str:
+    """The one line somebody watches for twenty minutes.
+
+    Both lanes, because the whole point is that they disagree: the full band
+    cannot tell a gap from a quiet passage and 1-3 kHz can. The music level and
+    the quiet timer say how close the auto-stop is to firing.
+    """
+    music = f"{r.music:>6.1f}" if r.music is not None else "     -"
+    quiet = f"{r.quiet_for:>5.1f}s" if r.quiet_for else "      "
+    return (
+        f"  {_clock(r.elapsed)}  full {r.levels.full:>6.1f}  "
+        f"1-3k {r.levels.band:>6.1f}  peak {r.levels.peak:>6.1f}  "
+        f"music {music}  quiet {quiet}"
+    )
+
+
+class Meter:
+    """Prints the live line, and each warning exactly once.
+
+    Repeating the warning every second would bury the meter under it, and the
+    warning is the thing worth reading.
+    """
+
+    def __init__(self) -> None:
+        self.said: set[str] = set()
+
+    def __call__(self, r: SESSION.Reading) -> None:
+        print("\r" + meter_line(r), end="", flush=True)
+        if r.warning and r.warning not in self.said:
+            self.said.add(r.warning)
+            print(f"\n  {r.warning}", file=sys.stderr, flush=True)
+
+
+def cmd_record(ctx: Context, args: argparse.Namespace) -> int:
+    """Record one side, watching it, and encode what was captured.
+
+    The meter runs here rather than in a browser: a meter that stopped when
+    somebody closed a laptop lid would stop in the middle of every side.
+    """
+    device = args.device or ctx.settings.capture_device
+    try:
+        CAP.check_device(device)
+    except CAP.CaptureError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+    print(f"recording side {args.side} from {device} - Ctrl-C to stop")
+    outcome = SESSION.record(
+        ctx.runner,
+        device,
+        args.album,
+        args.side,
+        CAP.Format(
+            rate=ctx.settings.capture_rate,
+            channels=ctx.settings.capture_channels,
+            sample_format=ctx.settings.capture_format,
+        ),
+        autostop=not args.no_autostop,
+        on_reading=Meter(),
+        dwell=A.DWELL if args.dwell is None else args.dwell,
+        max_seconds=(
+            A.MAX_SECONDS if args.max_minutes is None else args.max_minutes * 60.0
+        ),
+    )
+    print(f"\n\n  stopped: {outcome.reason}")
+    print(f"  {_clock(outcome.seconds)} captured")
+    if outcome.overruns:
+        # Each one is a slice of the record that is not in the file.
+        print(
+            f"  {outcome.overruns} overruns, {outcome.overrun_ms:.0f} ms lost",
+            file=sys.stderr,
+        )
+    if outcome.path is None:
+        print(f"  {outcome.error}", file=sys.stderr)
+        return 1
+    print(f"  -> {outcome.path}")
+    return 0
 
 
 def cmd_salvage(ctx: Context, args: argparse.Namespace) -> int:
@@ -340,6 +425,19 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--device", help="override the configured device")
     pr.add_argument("--seconds", type=float, default=CAP.TEST_SECONDS)
     pr.set_defaults(run=cmd_probe)
+
+    rc = sub.add_parser("record", help="record one side, watching it")
+    rc.add_argument("album", help="directory to write the side into")
+    rc.add_argument("side", help="side letter")
+    rc.add_argument("--device", help="override the configured device")
+    rc.add_argument(
+        "--no-autostop",
+        action="store_true",
+        help="for a record that is quiet throughout; the hard cap still applies",
+    )
+    rc.add_argument("--dwell", type=float, help="seconds of run-out before stopping")
+    rc.add_argument("--max-minutes", type=float, help="hard cap on the capture")
+    rc.set_defaults(run=cmd_record)
 
     sv = sub.add_parser("salvage", help="finish captures an interruption left")
     sv.add_argument("album", help="directory holding the sides")
