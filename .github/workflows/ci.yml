@@ -28,6 +28,22 @@ jobs:
       - run: python -m pytest
       - run: python scripts/budgets.py
 
+  # The tier that needs real external programs. It asserts the marked tests
+  # actually ran: a filter that matches nothing exits zero, so a job meant to
+  # run this tier and running none of it would otherwise report green.
+  with-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg flac
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q --require=needs_ffmpeg
+
   # Python's failure mode is not a compile error, it is a wheel that will not
   # install. Build it, check it, install it clean, and run the binary.
   packaging:
@@ -47,6 +63,7 @@ jobs:
           python -m venv /tmp/clean
           /tmp/clean/bin/pip install dist/*.whl
           /tmp/clean/bin/ripdoctor --version
+          /tmp/clean/bin/ripdoctor doctor --json > /dev/null || true
       - name: the base install must pull in nothing
         run: |
           n=$(/tmp/clean/bin/pip list --not-required --format=freeze \
