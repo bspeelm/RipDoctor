@@ -24,6 +24,12 @@ BASE = "https://musicbrainz.org/ws/2"
 # being down.
 USER_AGENT = f"ripdoctor/{__version__} (https://github.com/bspeelm/RipDoctor)"
 
+VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
+
+# How many candidates are asked for a tracklist. Each is its own request to a
+# service that allows one a second.
+PROBE = 4
+
 RETRY_STATUS = (429, 500, 502, 503, 504)
 RETRIES = 4
 BACKOFF = 1.5
@@ -210,6 +216,25 @@ def _format_of(release: dict[str, Any]) -> str:
     return str(media[0].get("format", "")) if media else ""
 
 
+def likely(releases: list[Release], keep: int = PROBE) -> list[Release]:
+    """The few worth asking about, from what a search already answered.
+
+    A search answers with the format and the date. Only a second request per
+    release says whether it has durations, and that is what the ranking needs,
+    so asking about all ten took eleven requests against a service that allows
+    one a second - and the page said `searching...` for the whole of it.
+
+    The cheap facts choose who gets asked. A dated vinyl pressing of a record
+    somebody is ripping from vinyl is the likely answer; the rest are not worth
+    a second each to find out.
+    """
+    ordered = sorted(
+        releases,
+        key=lambda r: (r.format.lower() not in VINYL, not r.date),
+    )
+    return ordered[:keep]
+
+
 def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
     data = _request(
         fetcher, f"{BASE}/release/{release.mbid}?inc=recordings&fmt=json", **kw
@@ -231,7 +256,7 @@ def rank(releases: list[Release]) -> list[Release]:
         releases,
         key=lambda r: (
             not r.has_durations,
-            r.format.lower() not in ("vinyl", '12" vinyl'),
+            r.format.lower() not in VINYL,
             -len(r.tracks),
         ),
     )

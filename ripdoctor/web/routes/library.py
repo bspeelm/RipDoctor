@@ -83,7 +83,10 @@ def add(app: App, service: Service) -> None:
         if not artist or not album:
             raise H.HttpError(400, "an artist and an album are needed")
         try:
-            found = MB.search(service.fetcher, artist, album)
+            # Only the few worth asking about. Each tracklist is its own
+            # request to a service that allows one a second, and a search that
+            # probed all ten of them took a minute with nothing on screen.
+            found = MB.likely(MB.search(service.fetcher, artist, album))
             for release in found:
                 MB.fetch_tracks(service.fetcher, release)
         except MB.LookupFailed as e:

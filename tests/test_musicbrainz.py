@@ -248,3 +248,34 @@ def test_the_group_a_pressing_belongs_to_is_asked_for() -> None:
 def test_a_release_with_no_group_is_an_empty_answer() -> None:
     fetcher = FakeFetcher(replies=[b"{}"])
     assert MB.release_group(fetcher, "rel-1") == ""
+
+
+def a_release(fmt: str = "CD", date: str = "2015", mbid: str = "x") -> MB.Release:
+    return MB.Release(
+        mbid=mbid, title="T", artist="A", date=date, format=fmt, tracks=[]
+    )
+
+
+def test_only_the_likely_few_are_asked_about() -> None:
+    """Each tracklist is its own request to a service that allows one a second,
+    so probing all ten took a minute with nothing on screen."""
+    many = [a_release(mbid=str(i)) for i in range(10)]
+    assert len(MB.likely(many)) == MB.PROBE
+
+
+def test_a_vinyl_pressing_is_asked_about_before_a_cd() -> None:
+    """The record being ripped is vinyl, so a vinyl entry is the likely answer
+    - and asking is the only way to learn whether it has durations at all."""
+    found = MB.likely([a_release("CD", mbid="cd"), a_release('12" Vinyl', mbid="lp")])
+    assert found[0].mbid == "lp"
+
+
+def test_a_dated_entry_is_asked_about_before_an_undated_one() -> None:
+    found = MB.likely(
+        [a_release("CD", date="", mbid="no"), a_release("CD", mbid="yes")]
+    )
+    assert found[0].mbid == "yes"
+
+
+def test_asking_about_fewer_than_there_are_is_fine() -> None:
+    assert len(MB.likely([a_release()])) == 1

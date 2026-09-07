@@ -44,6 +44,18 @@ def handler_for(app: App) -> type[BaseHTTPRequestHandler]:
         def log_message(self, fmt: str, *args: Any) -> None:
             sys.stderr.write(f"{self.client_address[0]} - {fmt % args}\n")
 
+        def handle_one_request(self) -> None:
+            # Cleared first so a timeout can be told from a request. Nothing
+            # read means the connection sat idle - a tab somebody left open,
+            # which is not a fault and should not be reported as one.
+            self.raw_requestline = b""
+            super().handle_one_request()
+
+        def log_error(self, fmt: str, *args: Any) -> None:
+            if not self.raw_requestline and "timed out" in fmt:
+                return
+            self.log_message(fmt, *args)
+
         def do_GET(self) -> None:
             self._run()
 

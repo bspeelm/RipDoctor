@@ -8,6 +8,7 @@ ranges, the streaming and the headers actually work.
 from __future__ import annotations
 
 import http.client
+import socket
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from ripdoctor.web import http as H
+from ripdoctor.web import httpd as httpd_module
 from ripdoctor.web import static
 from ripdoctor.web.app import App
 from ripdoctor.web.auth import Sessions
@@ -212,3 +214,35 @@ def test_two_requests_are_served_at_once(server) -> None:  # type: ignore[no-unt
     status, _h, _b = call(server, "GET", "/healthz")
     held.close()
     assert status == 200
+
+
+def test_a_connection_that_never_asks_for_anything_is_not_an_error(
+    tmp_path: Path, capfd, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """A tab somebody left open holds a keep-alive connection until it times
+    out. Reported as a failure, it is indistinguishable in the log from a
+    request that arrived and could not be served - which is the one case the
+    log has to be able to tell apart."""
+    monkeypatch.setattr(httpd_module, "TIMEOUT", 0.2)
+    app = App(Sessions(secret=b"0" * 32))
+
+    @app.route("GET", "/healthz", needs_auth=False)
+    def health(_r: H.Request) -> H.Response:
+        return H.ok({"ok": True})
+
+    server = make_server(app, "127.0.0.1", 0)
+    host, port = server.socket.getsockname()[:2]
+    thread = threading.Thread(
+        target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+    )
+    thread.start()
+    try:
+        capfd.readouterr()
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.recv(1)  # nothing is sent; wait for the server to give up
+        sock.close()
+        assert "timed out" not in capfd.readouterr().err
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
