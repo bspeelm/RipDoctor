@@ -782,3 +782,18 @@ def test_a_name_can_still_be_changed_to_a_different_one(tmp_path: Path) -> None:
     post(build(service), "/api/plan/album", service, renamed)
     spec = F.read_spec(service.layout.spec_file("album"))
     assert (spec.album, spec.artist) == ("Other", "Someone")
+
+
+def test_a_record_named_only_by_its_spec_opens_with_that_name(tmp_path: Path) -> None:
+    """The listing had it right and the record itself came up blank, because
+    the detail route took the plan's names raw after asking for the decided
+    ones - so a plan with empty names put them back."""
+    service = a_service(tmp_path)
+    F.save(service.layout, "album", a_spec(), a_plan())
+    F.write_json(
+        service.layout.plan_file("album"),
+        {"slug": "album", "album": "", "artist": "", "date": "", "sides": []},
+    )
+    F.remember(service.layout, "album", album="Second", artist="First", date="2019")
+    body = get(build(service), "/api/album/album", service).json()
+    assert (body["artist"], body["album"], body["date"]) == ("First", "Second", "2019")

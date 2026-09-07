@@ -125,7 +125,10 @@ def add(app: App, service: Service) -> None:
                 # Refusing the superseded format is deliberate, so say so with a
                 # status the browser can act on rather than a 500.
                 raise H.HttpError(409, str(e)) from e
-            out.update(album=plan.album, artist=plan.artist, date=plan.date)
+            # The names are `named`'s to decide - it already prefers the plan
+            # where the plan has one and falls back to the spec where it does
+            # not. Taking them raw here put the plan's empty strings back over
+            # a record whose name only the spec still had.
             out["tracks_by_side"] = {
                 F.letter_of(side.file): [
                     {
