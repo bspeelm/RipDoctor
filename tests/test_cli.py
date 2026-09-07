@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 from ripdoctor.audio import session as S
-from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.audio.runner import FakeRunner, Result
+from ripdoctor.cli import STAGES as CLI_STAGES
 from ripdoctor.cli import build_parser, main
 from ripdoctor.cli import meter_line as main_meter
 from ripdoctor.core.meter import Levels
@@ -482,4 +483,120 @@ def test_record_without_a_device_says_which_command_lists_them(
     monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     assert main(["record", str(tmp_path), "a"], runner=everything()) == 2
+    assert "ripdoctor devices" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------- measure
+
+
+class Chain:
+    """A signal chain: arecord leaves a file, astats answers per recording.
+
+    Each stage of `ripdoctor measure` is a separate short capture, so the fake
+    has to answer differently as it goes - which is the whole shape of the
+    command.
+    """
+
+    def __init__(self, stages: list[tuple[float, float, float]]) -> None:
+        self.stages = stages
+        self.stage = -1
+        self.calls: list[tuple[str, ...]] = []
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = tuple(str(a) for a in argv)
+        self.calls.append(args)
+        if args[0] == "arecord":
+            self.stage += 1
+            Path(args[-1]).write_bytes(b"RIFF" + b"\x00" * 4000)
+            return Result(args, 0, b"", b"")
+        full, peak, band = self.stages[min(self.stage, len(self.stages) - 1)]
+        level = band if any("highpass" in a for a in args) else full
+        return Result(
+            args,
+            0,
+            b"",
+            f"[astats] RMS level dB: {level}\n"
+            f"[astats] Peak level dB: {peak}\n".encode(),
+        )
+
+    def start(self, argv, *, stderr_path=None):  # type: ignore[no-untyped-def]
+        raise NotImplementedError
+
+    def which(self, tool: str) -> str | None:
+        return f"/usr/bin/{tool}"
+
+
+def measure_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
+LIKE_THE_DEFAULTS = [
+    (-91.0, -85.0, -95.0),
+    (-52.0, -60.0, -72.0),
+    (-22.0, -12.3, -30.0),
+]
+NARROW = [(-91.0, -85.0, -95.0), (-40.0, -30.0, -45.0), (-22.0, -12.3, -30.0)]
+
+
+def test_measure_on_a_chain_like_the_defaults_suggests_nothing(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    measure_env(monkeypatch, tmp_path)
+    code = main(
+        ["measure", "--yes", "--device", "hw:Rx,0"], runner=Chain(LIKE_THE_DEFAULTS)
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "agrees with the defaults" in out
+    assert "[thresholds]" not in out
+
+
+def test_measure_emits_a_snippet_when_the_chain_disagrees(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    """A chain with less separation than the shipped numbers assume."""
+    measure_env(monkeypatch, tmp_path)
+    assert main(["measure", "--yes", "--device", "hw:Rx,0"], runner=Chain(NARROW)) == 0
+    out = capsys.readouterr().out
+    assert "[thresholds]" in out and "span_below" in out
+    assert "config.toml" in out, "nowhere to paste it"
+
+
+def test_measure_records_all_three_references(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    chain = Chain(LIKE_THE_DEFAULTS)
+    measure_env(monkeypatch, tmp_path)
+    main(["measure", "--yes", "--device", "hw:Rx,0"], runner=chain)
+    assert sum(1 for c in chain.calls if c[0] == "arecord") == 3
+    out = capsys.readouterr().out
+    for _key, title, _how in CLI_STAGES:
+        assert title in out
+
+
+def test_measure_waits_between_recordings_unless_told_not_to(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Somebody has to move the needle between them."""
+    measure_env(monkeypatch, tmp_path)
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt))
+    main(["measure", "--device", "hw:Rx,0"], runner=Chain(LIKE_THE_DEFAULTS))
+    assert len(asked) == 3
+
+
+def test_measure_that_captured_nothing_stops_rather_than_reporting(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    measure_env(monkeypatch, tmp_path)
+    assert main(["measure", "--yes", "--device", "hw:Rx,0"], runner=everything()) == 1
+    assert "nothing was captured" in capsys.readouterr().err
+
+
+def test_measure_without_a_device_says_which_command_lists_them(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    measure_env(monkeypatch, tmp_path)
+    assert main(["measure", "--yes"], runner=everything()) == 2
     assert "ripdoctor devices" in capsys.readouterr().err

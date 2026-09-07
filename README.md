@@ -88,6 +88,7 @@ ripdoctor doctor        what this machine has, what it lacks, and what to do
 ripdoctor config        every resolved setting, including where the audio lives
 ripdoctor devices       capture devices this machine has, and what each accepts
 ripdoctor probe         record twenty seconds and say what arrived
+ripdoctor measure       compare this signal chain against the shipped thresholds
 ripdoctor record        record one side, metered, stopping itself at the run-out
 ripdoctor salvage       finish a capture an interrupted session left behind
 ripdoctor lookup        find a release in the catalogue, usable entries first

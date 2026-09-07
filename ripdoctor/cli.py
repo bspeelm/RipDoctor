@@ -21,8 +21,10 @@ from ripdoctor.config.settings import Settings, describe, load
 from ripdoctor.config.thresholds import Thresholds
 from ripdoctor.core import autostop as A
 from ripdoctor.core import gaps as G
+from ripdoctor.core import measure as MEASURE
 from ripdoctor.core.envelope import Envelope, decode
 from ripdoctor.core.fit import fit_side, report, to_side
+from ripdoctor.core.meter import Levels, Verdict
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
 from ripdoctor.integrations import musicbrainz as MB
@@ -96,36 +98,98 @@ def _format(ctx: Context) -> CAP.Format:
     )
 
 
+def _short_capture(ctx: Context, device: str, seconds: float) -> Verdict | None:
+    """Record briefly, measure it whole, and throw the audio away."""
+    scratch = Path(ctx.machine.cache_dir) / "probe.wav"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    argv = CAP.test_capture_argv(device, str(scratch), _format(ctx), seconds)
+    try:
+        ctx.runner.run(argv, timeout=seconds + 30).require()
+        if not scratch.is_file() or scratch.stat().st_size < 1024:
+            return None
+        return CAP.judge(ctx.runner, str(scratch))
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
+def _device_or_fail(ctx: Context, override: str | None) -> str:
+    device = override or ctx.settings.capture_device
+    CAP.check_device(device)
+    return device
+
+
 def cmd_probe(ctx: Context, args: argparse.Namespace) -> int:
     """Record briefly and say what arrived.
 
     Turns "drop the needle, wait twenty minutes, find out it was the wrong
     input" into a twenty-second question.
     """
-    device = args.device or ctx.settings.capture_device
     try:
-        CAP.check_device(device)
+        device = _device_or_fail(ctx, args.device)
     except CAP.CaptureError as e:
         print(str(e), file=sys.stderr)
         return 2
 
-    scratch = Path(ctx.machine.cache_dir) / "probe.wav"
-    scratch.parent.mkdir(parents=True, exist_ok=True)
-    argv = CAP.test_capture_argv(device, str(scratch), _format(ctx), args.seconds)
     print(f"recording {args.seconds:.0f}s from {device} ...")
-    try:
-        ctx.runner.run(argv, timeout=args.seconds + 30).require()
-        if not scratch.is_file() or scratch.stat().st_size < 1024:
-            print("nothing was captured", file=sys.stderr)
-            return 1
-        v = CAP.judge(ctx.runner, str(scratch))
-    finally:
-        scratch.unlink(missing_ok=True)
+    v = _short_capture(ctx, device, args.seconds)
+    if v is None:
+        print("nothing was captured", file=sys.stderr)
+        return 1
 
     print(f"  full band  rms {v.full_rms:>7.1f}  peak {v.full_peak:>7.1f}")
     print(f"  1-3 kHz    rms {v.band_rms:>7.1f}")
     print(f"\n  {v.summary}")
     return 0 if v.ok else 1
+
+
+# What each reference recording is of, in the order they are asked for. Dead air
+# first because it needs nothing set up, and music last because by then the
+# record is already playing.
+STAGES = (
+    ("dead", "dead air", "amplifier on, needle up, nothing playing"),
+    ("groove", "silent groove", "needle down on the lead-in or run-out"),
+    ("music", "music", "a loud passage playing"),
+)
+
+
+def cmd_measure(ctx: Context, args: argparse.Namespace) -> int:
+    """Report what this chain does beside the numbers this ships with.
+
+    It suggests and does not write. The shipped thresholds came from one
+    turntable through one converter; a command that rewrote them from three
+    short recordings would be shipping a guess with the authority of a
+    measurement. ADR-008.
+    """
+    try:
+        device = _device_or_fail(ctx, args.device)
+    except CAP.CaptureError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+    taken: dict[str, Levels] = {}
+    for key, title, how in STAGES:
+        print(f"\n  {title}: {how}")
+        if not args.yes:
+            input("  press Enter when ready ")
+        print(f"  recording {args.seconds:.0f}s ...")
+        v = _short_capture(ctx, device, args.seconds)
+        if v is None:
+            print(f"nothing was captured for {title}", file=sys.stderr)
+            return 1
+        taken[key] = Levels(full=v.full_rms, band=v.band_rms, peak=v.full_peak)
+
+    ref = MEASURE.Reference(**taken)
+    findings = MEASURE.compare(ref, ctx.thresholds.as_dict())
+    print()
+    print(MEASURE.report(ref, findings))
+
+    text = MEASURE.snippet(findings)
+    if not text:
+        print("\n  nothing to change - this chain agrees with the defaults")
+        return 0
+    print(f"\n  paste this into {ctx.machine.settings_file}:\n")
+    print(text)
+    return 0
 
 
 def _clock(seconds: float) -> str:
@@ -420,6 +484,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("devices", help="list capture devices")
     v.set_defaults(run=cmd_devices)
+
+    ms = sub.add_parser("measure", help="compare this chain against the defaults")
+    ms.add_argument("--device", help="override the configured device")
+    ms.add_argument("--seconds", type=float, default=CAP.TEST_SECONDS)
+    ms.add_argument(
+        "--yes", action="store_true", help="do not wait for Enter between recordings"
+    )
+    ms.set_defaults(run=cmd_measure)
 
     pr = sub.add_parser("probe", help="record briefly and say what arrived")
     pr.add_argument("--device", help="override the configured device")
