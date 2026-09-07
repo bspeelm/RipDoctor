@@ -59,6 +59,13 @@ def deq_db(v: int) -> float:
     return v * DB_STEP - DB_OFFSET
 
 
+# A stored reading is one byte, so there are exactly 256 possible values. Decode
+# is a lookup rather than arithmetic per sample: a 22-minute side is 26,500
+# readings per lane, and computing the same 256 answers over and over is work
+# nobody asked for.
+_DEQ = tuple(deq_db(v) for v in range(256))
+
+
 @dataclass(frozen=True, slots=True)
 class Envelope:
     """Decibel readings on a uniform grid, and the grid spacing."""
@@ -184,8 +191,9 @@ def decode(blob: bytes) -> Lanes:
     lanes = []
     for i in range(3):
         start = HEADER_BYTES + i * n
-        raw = blob[start : start + n]
-        lanes.append(Envelope(tuple(deq_db(v) for v in raw), window))
+        lanes.append(
+            Envelope(tuple(map(_DEQ.__getitem__, blob[start : start + n])), window)
+        )
     return Lanes(*lanes)
 
 
@@ -203,7 +211,7 @@ def encode(lanes: Lanes) -> bytes:
     out += n.to_bytes(4, "little")
     out += window_ms.to_bytes(4, "little")
     for lane in lanes:
-        out += bytes(q_db(v) for v in lane.levels)
+        out += bytes(map(q_db, lane.levels))
     return bytes(out)
 
 

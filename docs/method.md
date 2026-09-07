@@ -136,3 +136,30 @@ and such a file must be re-encoded rather than moved into an archive.
 at r > 0.99 wherever real groove content exists; handling noise, arm rumble and
 dead air do not correlate at all, at r ≈ 0.2. That is how to settle whether a
 suspicious quiet stretch is on the record or was introduced.
+
+## When a side has ended
+
+Detecting the run-out is worth doing but is not worth trusting alone. Measured
+across fifteen archived sides:
+
+* **An absolute threshold is useless.** Run-out read −41 to −85 dB in the band
+  lane across those sides, and on one it was *louder* than the quietest music on
+  the same record. The gate has to be relative to that side's own music level.
+* **Music can be very quiet for a very long time.** One side sits 17.5 dB below
+  its music level for two continuous minutes, a third of the way in, and is
+  still the song.
+* **20 dB below is the tightest gate that never trips inside any of the
+  fifteen.** That is 2.5 dB of margin, which is why the dwell is two minutes and
+  why a hard cap exists at all.
+* What the gate reliably catches is a lifted or never-dropped needle — dead air
+  sits about 50 dB down. Whether it catches a needle sitting *in* the run-out
+  depends on the pressing: one measured 24 dB down and trips, a quieter groove
+  might not. That case belongs to the hard cap.
+
+Flatness was tried as a second discriminator and rejected: run-out measured a
+standard deviation of 6.74 against quiet music's 8.51, too close to separate.
+
+The detector must not arm before the needle is down, or the minutes spent cueing
+trip it immediately. Once it has been quiet for thirty seconds with nothing
+music-like, that is worth saying out loud: one capture ran its whole length at
+−77 dB — a wrong input — and the meter reported it the entire time, to nobody.

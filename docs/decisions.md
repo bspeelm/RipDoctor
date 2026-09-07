@@ -448,3 +448,39 @@ stops anything impure being moved there to qualify.
 
 **What would reverse this.** Core drifting above 60 would mean the findings have
 outgrown the code that acts on them, and belong in `docs/method.md` instead.
+
+---
+
+## ADR-019 — Python 3.14.6 segfaults intermittently here; the suite is not at fault
+
+**Status:** accepted as a known environment defect. Not worked around further.
+
+On the development machine - Fedora's Python 3.14.6, built with GCC 16.1.1 - the
+test suite segfaults on roughly one run in ten. The fault lands inside
+`envelope.decode`, in code that multiplies integers by floats and builds a
+tuple. Pure Python arithmetic cannot segfault in a correct interpreter.
+
+**What was ruled out.** The experimental JIT (it still crashes with
+`PYTHON_JIT=0`), pytest plugins (it crashes with hypothesis, cov and the cache
+provider all disabled), the cycle collector, and any single test file - one file
+alone reproduces it. It does not reproduce in a plain script looping over the
+same decode sixty times, so it needs pytest's environment, not the workload.
+
+No second interpreter is installed on this machine to compare against.
+
+**What was done.** `decode` now maps bytes through a precomputed 256-entry table
+instead of computing the same 256 answers 26,500 times per lane. That is the
+right implementation on its own merits and it lowered the crash rate, but it did
+not remove it - which is the evidence that the allocation pattern was not the
+cause.
+
+**Why nothing further.** CI runs 3.11, 3.12 and 3.13, none of which are
+affected, so this does not reach anyone else. Contorting the code around an
+interpreter bug that a point release will fix would cost more than re-running a
+failed check.
+
+**How it shows up.** `make check` exits 139 with no test failure reported. Run it
+again. If it fails twice with an actual assertion, that is a real failure.
+
+**What would reverse this.** The same crash on 3.13 or earlier, or on a second
+3.14 build. Either would mean the fault is in this code after all.
