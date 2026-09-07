@@ -232,3 +232,19 @@ def test_a_report_of_only_usable_entries_carries_no_warning() -> None:
 
 def test_the_mbid_is_shown_so_a_choice_can_be_recorded() -> None:
     assert "x" in MB.report([timed("Vinyl")])
+
+
+def test_the_group_a_pressing_belongs_to_is_asked_for() -> None:
+    """Where a vinyl cover usually is. The archive holds a scan for the album
+    far more often than for one twelve-inch edition of it."""
+    fetcher = FakeFetcher(
+        replies=[b'{"release-group": {"id": "rg-1", "title": "Album"}}']
+    )
+    assert MB.release_group(fetcher, "rel-1") == "rg-1"
+    url = fetcher.calls[0][0]
+    assert "release/rel-1" in url and "inc=release-groups" in url
+
+
+def test_a_release_with_no_group_is_an_empty_answer() -> None:
+    fetcher = FakeFetcher(replies=[b"{}"])
+    assert MB.release_group(fetcher, "rel-1") == ""

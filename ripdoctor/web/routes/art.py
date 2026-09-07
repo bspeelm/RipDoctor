@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from ripdoctor.integrations import artwork as ART
+from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
@@ -68,7 +70,21 @@ def add(app: App, service: Service) -> None:
                 "no release is recorded for this record - run a first pass, or "
                 "give a page to take the cover from",
             )
-        found = ART.candidates(service.fetcher, service.runner, mbid=mbid, page=page)
+        # A pressing often has no cover of its own while the album plainly does:
+        # this is a vinyl tool, and a twelve-inch is exactly the release the
+        # archive is least likely to hold a scan for. The group is where the
+        # rest of the editions keep theirs, so it is asked for as well.
+        group = ""
+        if mbid:
+            with suppress(MB.LookupFailed, OSError, ValueError):
+                group = MB.release_group(service.fetcher, mbid)
+        found = ART.candidates(
+            service.fetcher,
+            service.runner,
+            mbid=mbid,
+            release_group=group,
+            page=page,
+        )
         usable = [
             c for c in found if c.ok and c.image is not None and c.image.big_enough
         ]

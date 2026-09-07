@@ -165,6 +165,21 @@ def _phrase(value: str) -> str:
     return f'"{escaped}"'
 
 
+def release_group(fetcher: Fetcher, mbid: str, **kw: Any) -> str:
+    """The group a pressing belongs to, which is where its cover usually is.
+
+    Not stored anywhere. It is derived from the release id and asking is one
+    request, where keeping a copy would be a second thing to hold in step with
+    the first - and a stale one points at the wrong record's sleeve.
+    """
+    quoted = urllib.parse.quote(mbid, safe="")
+    data = _request(
+        fetcher, f"{BASE}/release/{quoted}?inc=release-groups&fmt=json", **kw
+    )
+    group = data.get("release-group") or {}
+    return str(group.get("id", ""))
+
+
 def search(
     fetcher: Fetcher, artist: str, album: str, limit: int = 10, **kw: Any
 ) -> list[Release]:
