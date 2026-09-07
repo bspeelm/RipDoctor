@@ -961,3 +961,32 @@ wrong answer here. ADR-020.
 decision to ship the command line alone. Neither would justify moving the
 ceiling back on its own; a smaller number is only worth setting if something is
 retired to fit it.
+
+---
+
+## ADR-035 — The ceiling moves again, because the front end ports whole
+
+**Status:** accepted. Set by the author, 2026-09-06. Amends ADR-034.
+
+ADR-034 said a further move needs a record saying what changed. This is it.
+
+**What changed.** The front end was to port as-is. That turned out not to be
+possible: the page calls artwork and punch endpoints that do not exist here, and
+chat endpoints that were deliberately cut. The choice was to write a smaller page
+matched to what exists, or to build the two missing features so the page ports
+whole. Building them is the decision, so the estimate ADR-034 was set against no
+longer covers the work.
+
+Artwork and punch are roughly 450 lines with their routes, and the beets importer
+another 150. That lands near 5,400, so the ceiling is 6,000 for the same reason
+5,000 was not 4,700: a ceiling set at the estimate moves again the moment the
+estimate is out.
+
+**What punch is, since it is now in scope.** A capture of one track, taken to
+replace a track that came out dirty - a skip, a click, a passage the stylus
+fought. It is not a side and must never be mistaken for one: it is written under
+a stem no side scan matches, so the album picker and the archive gate cannot see
+it. That invisibility is the whole reason for the separate name.
+
+**What did not move.** The comment ratio, still hard, still 25%. Nothing has been
+trimmed to fit any of these numbers.
