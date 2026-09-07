@@ -738,3 +738,30 @@ nothing about whether the right seconds were taken.
 **What it costs.** A `Runner` is threaded through constructors that would
 otherwise reach for a process directly, and the real one is only exercised in
 its own tests.
+
+---
+
+## ADR-027 — A reading that is not a finite number is the floor
+
+**Status:** accepted. Fixes a latent defect inherited from the predecessor.
+
+ffmpeg prints `-nan` for a window of digital silence. That is a real reading,
+not a fault, and it becomes the floor.
+
+**The defect.** The predecessor guarded with `except ValueError`, which does not
+catch it: `float("-nan")` succeeds and returns a NaN. Every such window carried
+a NaN out of the parser. It never caused visible harm because those values went
+directly into a quantiser that happened to test for NaN, so the cache on disk
+was always clean.
+
+Here the parsed lane goes into an `Envelope` and is sorted for a percentile. A
+NaN compares false against everything, so the sort order is undefined and the
+threshold every detector anchors on becomes arbitrary. The guard is now on the
+value being finite rather than on the parse succeeding.
+
+**A second alignment fault, found while fixing it.** A frame whose value could
+not be read produced no entry at all, so the lane came back one window short and
+every reading after it shifted by 50 ms. Over a side that is a boundary in the
+wrong place, from one bad line. Every frame now contributes exactly one reading
+per lane, unreadable or not - and a corrupt line is not hypothetical here, since
+that is precisely what the interleaving defect produced.
