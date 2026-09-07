@@ -21,7 +21,7 @@ from ripdoctor.work.jobs import Busy, Job
 CACHEABLE = "private, max-age=3600"
 
 
-def _slug(r: H.Request, index: int = 0) -> str:
+def slug_of(r: H.Request, index: int = 0) -> str:
     try:
         return token(r.params[index])
     except Unsafe as e:
@@ -51,7 +51,7 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/album/([^/]+)")
     def album(r: H.Request) -> H.Response:
-        slug = _slug(r)
+        slug = slug_of(r)
         try:
             sides = layout.sides_on_disk(slug)
         except FileNotFoundError as e:
@@ -100,7 +100,7 @@ def add(app: App, service: Service) -> None:
 
     @app.route("POST", "/api/prepare/([^/]+)")
     def prepare(r: H.Request) -> H.Response:
-        slug = _slug(r)
+        slug = slug_of(r)
         sides = layout.sides_on_disk(slug)
         if not sides:
             raise H.HttpError(404, "no side files")
@@ -131,20 +131,20 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/prepare/([^/]+)")
     def prepare_status(r: H.Request) -> H.Response:
-        job = service.jobs.status(_slug(r))
+        job = service.jobs.status(slug_of(r))
         if job is None:
             raise H.HttpError(404, "no job")
         return H.ok(job.as_dict())
 
     @app.route("GET", "/api/env/([^/]+)/([^/]+)")
     def envelope(r: H.Request) -> H.Response:
-        slug, side = _slug(r), _slug(r, 1)
+        slug, side = slug_of(r), slug_of(r, 1)
         _require_prepared(layout, slug, side)
         return H.file_at(str(C.envelope_path(layout, slug, side)), cache=CACHEABLE)
 
     @app.route("GET", "/api/audio/([^/]+)/([^/]+)")
     def audio(r: H.Request) -> H.Response:
-        slug, side = _slug(r), _slug(r, 1)
+        slug, side = slug_of(r), slug_of(r, 1)
         _require_prepared(layout, slug, side)
         return H.file_at(str(C.preview_path(layout, slug, side)), cache=CACHEABLE)
 
@@ -157,7 +157,7 @@ def add(app: App, service: Service) -> None:
         gets its own anchor - the full one down from the music, the band one up
         from its floor - and reversing them inverts detection. ADR-030.
         """
-        slug, side = _slug(r), _slug(r, 1)
+        slug, side = slug_of(r), slug_of(r, 1)
         _require_prepared(layout, slug, side)
         lanes = C.lanes_of(layout, slug, side)
         return H.ok(
@@ -175,7 +175,7 @@ def add(app: App, service: Service) -> None:
         become ear overrides that win on the next fit. Writing only the plan
         discards a decision somebody made by listening.
         """
-        slug = _slug(r)
+        slug = slug_of(r)
         body = r.json()
         try:
             plan = Plan.from_dict(body.get("plan") or body)

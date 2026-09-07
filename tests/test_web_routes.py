@@ -378,3 +378,149 @@ def test_every_route_registered_here_is_reachable(tmp_path: Path) -> None:
     """A table that silently emptied would pass every test above by 404."""
     app = build(a_service(tmp_path))
     assert len(app.routes) >= 12
+
+
+# --------------------------------------------------------------- cutting
+
+
+def with_a_plan(tmp_path: Path) -> Service:
+    service = a_service(tmp_path)
+    F.write_json(
+        service.layout.plan_file("album"),
+        Plan(
+            slug="album",
+            album="A",
+            artist="B",
+            date="2022",
+            sides=(
+                PlanSide(
+                    file="side-a.flac",
+                    tracks=(
+                        PlanTrack(number=1, title="One", start=1.0, end=9.0, cat=8.0),
+                        PlanTrack(number=2, title="Two", start=10.0, end=19.0, cat=9.0),
+                    ),
+                ),
+            ),
+        ).to_dict(),
+    )
+    return service
+
+
+class Cutting(FakeRunner):
+    """A fake ffmpeg that leaves the track it was told to write."""
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if args[0] == "ffmpeg" and args[-1].endswith(".flac"):
+            Path(args[-1]).write_bytes(b"fLaC" + b"\x00" * 100)
+        return super().run(argv, stdin=stdin, timeout=timeout)
+
+
+def test_splitting_cuts_every_track_and_verifies_it(tmp_path: Path) -> None:
+    """A file that will not decode is not a track."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    r = post(build(service), "/api/split/album", service)
+    assert r.status == 202
+    body = r.json()
+    assert body["result"]["tracks"] == 2 and body["result"]["unreadable"] == []
+    assert len(list(service.layout.review_dir("album").glob("*.flac"))) == 2
+
+
+def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
+    service = with_a_plan(tmp_path)
+    # Matched on the program, not the string: every cut writes a .flac, so a
+    # substring match would fail the cut instead of the verification.
+    service.runner = Cutting().expect(
+        lambda a: a[0] == "flac", returncode=1, stderr=b"bad"
+    )
+    body = post(build(service), "/api/split/album", service).json()
+    assert body["result"]["unreadable"], "an unreadable track was reported as fine"
+
+
+def test_splitting_without_a_plan_is_a_404(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    assert post(build(service), "/api/split/album", service).status == 404
+
+
+def test_splitting_a_plan_that_cannot_be_cut_is_refused(tmp_path: Path) -> None:
+    """Nothing is cut until the plan validates: a track that ends before it
+    starts would otherwise be written as an empty file."""
+    service = a_service(tmp_path)
+    F.write_json(
+        service.layout.plan_file("album"),
+        {
+            "slug": "album",
+            "album": "A",
+            "artist": "B",
+            "sides": [
+                {
+                    "file": "side-a.flac",
+                    "tracks": [
+                        {
+                            "number": 1,
+                            "title": "One",
+                            "start": 9.0,
+                            "end": 1.0,
+                            "cat": 8.0,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    assert post(build(service), "/api/split/album", service).status == 409
+
+
+def test_the_cut_tracks_are_listed(tmp_path: Path) -> None:
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    post(app, "/api/split/album", service)
+    tracks = get(app, "/api/review/album", service).json()["tracks"]
+    assert [t["index"] for t in tracks] == [0, 1]
+
+
+def test_a_record_with_nothing_cut_lists_nothing(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    assert get(build(service), "/api/review/album", service).json()["tracks"] == []
+
+
+def test_a_track_is_fetched_by_number_never_by_name(tmp_path: Path) -> None:
+    """The client sends an index into a listing this server made, so there is
+    no filename from a request anywhere near the filesystem."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    post(app, "/api/split/album", service)
+    r = get(app, "/api/review/album/0", service)
+    assert r.path and r.path.endswith(".flac")
+    assert get(app, "/api/review/album/99", service).status == 404
+
+
+def test_clips_are_built_one_per_boundary(tmp_path: Path) -> None:
+    """Two per track: playing a track tells you it sounds fine, not that the
+    cut landed in the gap."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    body = post(app, "/api/clips/album", service).json()
+    assert body["result"]["clips"] == 4
+    assert len(get(app, "/api/clips/album", service).json()["clips"]) == 4
+
+
+def test_a_clip_carries_a_tick_at_the_boundary(tmp_path: Path) -> None:
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    post(build(service), "/api/clips/album", service)
+    built = [" ".join(c) for c in service.runner.calls if "sine" in " ".join(c)]
+    assert len(built) == 4, "a clip was built with no tick in it"
+
+
+def test_clips_land_beside_the_album_not_inside_it(tmp_path: Path) -> None:
+    """An importer pointed at the review directory would take them for tracks."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    post(app, "/api/clips/album", service)
+    assert get(app, "/api/review/album", service).json()["tracks"] == []
