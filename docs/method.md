@@ -163,3 +163,50 @@ The detector must not arm before the needle is down, or the minutes spent cueing
 trip it immediately. Once it has been quiet for thirty seconds with nothing
 music-like, that is worth saying out loud: one capture ran its whole length at
 −77 dB — a wrong input — and the meter reported it the entire time, to nobody.
+
+## Carrying a cut across a re-rip
+
+Re-ripping a record does not invalidate boundaries somebody already approved.
+Needle-drop timing drifts by seconds between sessions; timing *within* a side
+does not, because it is the same record on the same platter. The old cut is a
+template needing `new = offset + scale × old`.
+
+**Scale is not optional.** A belt running 0.1 per cent different between
+sessions drifts about a second across a sixteen-minute side — audible at a
+boundary. Converter crystal tolerance, around 50 ppm or 50 ms over the same
+side, is noise beside it.
+
+**Correlation locates; it does not judge.** Pearson r collapses on dense
+material while the lag it picks stays correct. Measured on a wall-of-guitar side
+against a known +7.30 s shift:
+
+| window | envelope sd | best r | recovered |
+|---|---|---|---|
+| 0.20 s | 0.31 dB | 0.635 | +7.20 |
+| 0.02 s | 0.92 dB | 1.000 | +7.30 |
+
+The same trap sits one level down: a 0.1 per cent platter difference stretches
+the envelope inside the probe itself, so r falls as the probe lengthens while
+the answer stays right.
+
+| fine probe | r | recovered a −0.162 s truth as |
+|---|---|---|
+| 2 s | 0.882 | −0.160 |
+| 4 s | 0.840 | −0.160 |
+| 10 s | 0.665 | −0.160 |
+
+So probes are short, and r is asked one question only — is this the same music
+at all — which it answers very well:
+
+| | r |
+|---|---|
+| same side, self / shifted / 0.1% fast | 1.000 / 1.000 / 0.882 |
+| a needle from one side against another side of the same record | 0.391 |
+| the same needle against a different record | 0.379 |
+
+`MIN_R` sits at 0.65, in the empty gap between those groups.
+
+**Correctness comes from a prediction, not from r.** Any two points define a
+line, including two wrong ones. Fit on two probes, then predict a third the fit
+has never seen and measure where the music actually is. An internally consistent
+but wrong fit fails that and is refused.

@@ -1,16 +1,11 @@
 """Laying out a side: where its music runs, and which tracks are on it.
 
-Two steps, both done before any boundary is placed.
+`music_span` must measure on the band lane - full band, the needle-down
+transient and arm-handling rumble are louder than quiet music, so a level gate
+lands in the middle of the handling noise rather than at the first note.
 
-`music_span` finds where a side's music starts and ends. It must use the band
-lane: full band, the needle-down transient and arm-handling rumble are LOUDER
-than quiet music, so a level gate on the full lane puts the start in the middle
-of the handling noise rather than at the first note.
-
-`assign_sides` decides which tracks are on which side by comparing each side's
-measured music length against running totals of catalogue durations. Vinyl
-releases rarely record side breaks, so this is arithmetic rather than metadata -
-the same sum a person does by hand, done exhaustively.
+`assign_sides` decides what is on which side by arithmetic, because vinyl
+releases rarely record side breaks. See docs/method.md.
 """
 
 from __future__ import annotations
@@ -23,9 +18,8 @@ from ripdoctor.core.envelope import Envelope
 # from an inter-track silence.
 SPAN_BELOW = 20.0
 
-# A run must last this long to count as the start of the music. Shorter than an
-# inter-track gap on purpose: a needle drop that skids into a groove can produce
-# a second or so of real audio before the arm is lifted and re-dropped, and that
+# A run must last this long to count as music. A needle drop that skids into a
+# groove makes a second or so of real audio before the arm is lifted; that
 # accident is not the start of side one.
 SPAN_RUN = 1.5
 
