@@ -630,3 +630,39 @@ per cent when the code is complete, the pass did not happen.
 
 **What is not deferred.** The comment ratio remains hard and is enforced every
 run. This concerns `docs/` and the README, not the package.
+
+---
+
+## ADR-024 — The meter's band level was 1.76 dB hot
+
+**Status:** accepted. Fixes a defect inherited from the predecessor.
+
+The live meter's 1-3 kHz reading is computed by summing FFT bin power across the
+band and correcting for the analysis window. The predecessor divided by the Hann
+window's **coherent gain squared**, 0.25. Summing power requires the window's
+**mean square**, 0.375. The ratio is 1.5, so every band reading was 1.76 dB
+louder than the signal actually was.
+
+Measured on a half-scale 2 kHz tone, whose true RMS is -9.03 dBFS: the shipped
+correction returns -7.27, the correct one returns -9.03 exactly.
+
+**What it affected.** The comment above that line said the correction existed
+"so the band figure is comparable with the dB numbers the analysis tools
+report", which is the one thing it did not do - the envelope path measures the
+band with a filter and an RMS, and sat 1.76 dB below the meter for the same
+audio. Anyone comparing the live meter against the waveform's band curve was
+comparing two different scales.
+
+The auto-stop gate is unharmed: it is relative, and both its terms come from
+this same meter, so a constant offset cancels. The arming floor is absolute and
+was therefore effectively -61.76 rather than -60.
+
+**Why it was not noticed.** 1.76 dB is small, systematic, and in the direction
+that makes a capture look healthier rather than worse. Nothing in the workflow
+compares the two paths numerically; a person looking at both sees a meter and a
+curve that broadly agree.
+
+**How it is held.** A test asserts the band reading of a pure in-band tone
+matches the full-band reading of the same signal, which is only true when the
+normalisation is right. The window's mean square is now computed from the window
+rather than written as a constant, so it stays correct if the window changes.
