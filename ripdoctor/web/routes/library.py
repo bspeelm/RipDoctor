@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from ripdoctor.core.fit import fit_plan, report
-from ripdoctor.core.plan import BadPlan, Spec, SpecSide, SpecTrack, validate
+from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, validate
 from ripdoctor.core.sides import assign_sides, music_span
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
@@ -19,15 +20,24 @@ from ripdoctor.web.routes.records import slug_of
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Busy, Job
 
+VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
+
 
 def _release(r: MB.Release) -> dict[str, Any]:
     return {
-        "mbid": r.mbid,
+        "id": r.mbid,
         "title": r.title,
         "artist": r.artist,
         "date": r.date,
-        "format": r.format,
+        "country": r.country,
+        "disambiguation": r.disambiguation,
+        "formats": [r.format] if r.format else [],
         "tracks": len(r.tracks),
+        # How many of them have a length, which is what decides whether this
+        # entry can be fitted at all.
+        "durations": sum(1 for t in r.tracks if t.length),
+        "total": round(r.total_seconds),
+        "vinyl": r.format.lower() in VINYL,
         "has_durations": r.has_durations,
         "describe": r.describe(),
     }
@@ -59,6 +69,7 @@ def spec_from(slug: str, release: MB.Release, sides: list[tuple[str, float, floa
         album=release.title,
         artist=release.artist,
         date=release.date,
+        mbid=release.mbid,
         sides=tuple(out),
     )
 
@@ -124,13 +135,77 @@ def add(app: App, service: Service) -> None:
                 "album": plan.album,
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
-                "report": {k: report(v) for k, v in working.items()},
+                "report": "\n".join(
+                    f"=== side {letter}\n{report(fitted)}"
+                    for letter, fitted in working.items()
+                ),
             }
 
         try:
             return H.ok(service.jobs.start(slug, "firstpass", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
+
+    @app.route("POST", "/api/relabel/([^/]+)")
+    def relabel(r: H.Request) -> H.Response:
+        """Take the titles from a different release. Move no boundary.
+
+        A release picked at import time is usually picked because the one from
+        the first pass was wrong - most often a CD edition against an LP that
+        carries extra tracks. Re-fitting is the wrong answer by then: the
+        boundaries are already correct and hard-won.
+
+        It refuses when the counts differ rather than shifting every title by
+        one, which is the mistake this exists to make impossible.
+        """
+        slug = slug_of(r)
+        mbid = str(r.json().get("mbid", ""))
+        if not mbid:
+            raise H.HttpError(400, "a release is needed")
+        spec = F.read_spec(_file(layout.spec_file(slug), slug))
+        plan = F.read_plan(_file(layout.plan_file(slug), slug))
+        try:
+            release = MB.fetch_tracks(
+                service.fetcher, MB.Release(mbid, "", "", "", "", [])
+            )
+        except MB.LookupFailed as e:
+            raise H.HttpError(503, str(e)) from e
+
+        mine = sum(len(s.tracks) for s in plan.sides)
+        if len(release.tracks) != mine:
+            raise H.HttpError(
+                409,
+                f"that release has {len(release.tracks)} tracks and this cut has "
+                f"{mine} - re-labelling would shift every title",
+            )
+        titles = [t.title for t in release.tracks]
+        F.save(
+            layout,
+            slug,
+            _retitled_spec(spec, titles, release, mbid),
+            _retitled_plan(plan, titles, release),
+        )
+        return H.ok(
+            {"ok": True, "applied": mine, "release": release.title, "mbid": mbid}
+        )
+
+    @app.route("GET", "/api/library/existing/([^/]+)")
+    def existing(r: H.Request) -> H.Response:
+        """Whether this record is already in the library, and how much of it.
+
+        Asked before an import rather than after, because finding out after is
+        finding out from a directory holding two copies.
+        """
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
+        where, count = T.locate(service.settings.library, plan.artist, plan.album)
+        return H.ok(
+            {
+                "existing": None
+                if where is None
+                else {"where": str(where), "tracks": count},
+            }
+        )
 
     @app.route("GET", "/api/library")
     def library(_r: H.Request) -> H.Response:
@@ -204,6 +279,51 @@ def add(app: App, service: Service) -> None:
         # Moved, never deleted. Nothing in this application removes a side.
         shutil.move(str(source), str(dest))
         return H.ok({"ok": True, "archived": str(dest)})
+
+
+def _file(where: Path, slug: str) -> Path:
+    if not where.is_file():
+        raise H.HttpError(404, f"no saved cut for {slug}")
+    return where
+
+
+def _retitled_spec(
+    spec: Spec, titles: list[str], release: MB.Release, mbid: str
+) -> Spec:
+    n = 0
+    sides = []
+    for side in spec.sides:
+        tracks = []
+        for t in side.tracks:
+            tracks.append(replace(t, title=titles[n]))
+            n += 1
+        sides.append(replace(side, tracks=tuple(tracks)))
+    return replace(
+        spec,
+        sides=tuple(sides),
+        mbid=mbid,
+        album=release.title or spec.album,
+        artist=release.artist or spec.artist,
+        date=release.date or spec.date,
+    )
+
+
+def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
+    n = 0
+    sides = []
+    for side in plan.sides:
+        tracks = []
+        for t in side.tracks:
+            tracks.append(replace(t, title=titles[n]))
+            n += 1
+        sides.append(replace(side, tracks=tuple(tracks)))
+    return replace(
+        plan,
+        sides=tuple(sides),
+        album=release.title or plan.album,
+        artist=release.artist or plan.artist,
+        date=release.date or plan.date,
+    )
 
 
 def _isdir(path: str) -> bool:

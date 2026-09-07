@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from ripdoctor.audio import capture as C
+from ripdoctor.audio import passthru as PT
 from ripdoctor.audio.devices import enumerate_devices
 from ripdoctor.audio.runner import ToolFailed, ToolMissing
 from ripdoctor.core.meter import Verdict
 from ripdoctor.core.naming import Unsafe, token
+from ripdoctor.store import cache as CACHE
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.service import Service
@@ -158,6 +160,29 @@ def add(app: App, service: Service) -> None:
         finally:
             scratch.unlink(missing_ok=True)
 
+    @app.route("GET", "/api/rip/monitor")
+    def monitor(r: H.Request) -> H.Response:
+        """Hear the input, live.
+
+        The meter says there is signal and the probe says it is musical.
+        Neither tells you the arm is tracking, or that this is the record you
+        meant. While a capture runs the card is taken, so what is played is the
+        file it is writing.
+        """
+        live = service.recorder.live
+        if live is not None and live.running:
+            wav = C.partial_path(layout.raw / live.slug, live.side, live.stem)
+            if not wav.is_file():
+                raise H.HttpError(409, "the capture has not written anything yet")
+            argv = PT.tail_argv(wav)
+        else:
+            device = str(r.query.get("device") or service.settings.capture_device)
+            try:
+                argv = PT.device_argv(device, _format(service))
+            except C.CaptureError as e:
+                raise H.HttpError(400, str(e)) from e
+        return H.streaming(lambda: PT.stream(service.runner, argv), "audio/ogg")
+
     @app.route("GET", "/api/rip/orphans")
     def orphans(_r: H.Request) -> H.Response:
         """Captures an interrupted session left behind, across every record.
@@ -197,6 +222,32 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(404, f"no interrupted capture for {slug} side {side}")
         partial.unlink()
         return H.ok({"ok": True, "discarded": f"{slug} side {side}"})
+
+    @app.route("POST", "/api/rip/discard-side")
+    def discard_side(r: H.Request) -> H.Response:
+        """Remove a finished side from raw, so it can be recorded again.
+
+        Only from raw, and never from archive: a side in raw is a rip somebody
+        can redo, and a side in archive is the only copy there is. The cache
+        goes with it, or the next view of the record shows the envelope of a
+        capture that no longer exists.
+        """
+        body = r.json()
+        slug, side = _named(body, "slug"), _named(body, "side")
+        where = layout.raw / slug / f"side-{side}.flac"
+        if not where.is_file():
+            raise H.HttpError(404, f"no side {side} in raw for {slug}")
+        freed = where.stat().st_size
+        where.unlink()
+        forgotten = CACHE.forget(layout, slug, side)
+        return H.ok(
+            {
+                "ok": True,
+                "side": side,
+                "freed_bytes": freed,
+                "notes": [f"forgot {forgotten} cached files"] if forgotten else [],
+            }
+        )
 
     @app.route("GET", "/api/rip/sides/([^/]+)")
     def sides(r: H.Request) -> H.Response:

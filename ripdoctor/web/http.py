@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from http.cookies import CookieError, SimpleCookie
 from typing import Any
@@ -106,7 +107,12 @@ class Request:
 
 @dataclass(frozen=True, slots=True)
 class Response:
-    """One response. `path` names a file to stream instead of a body."""
+    """One response.
+
+    `path` names a file to send instead of a body, and `stream` a source of
+    chunks whose length is not known in advance - a live one, which ends when
+    the listener goes away rather than when the content does.
+    """
 
     status: int = 200
     body: bytes = b""
@@ -114,6 +120,7 @@ class Response:
     headers: tuple[tuple[str, str], ...] = ()
     cache: str = "no-store"
     path: str | None = None
+    stream: Callable[[], Iterator[bytes]] | None = None
 
     @property
     def text(self) -> str:
@@ -134,6 +141,12 @@ def ok(payload: Any, status: int = 200) -> Response:
 
 def fail(status: int, message: str) -> Response:
     return ok({"error": message}, status=status)
+
+
+def streaming(source: Callable[[], Iterator[bytes]], content_type: str) -> Response:
+    """A response with no end in sight. Sent without a length, and not kept
+    alive afterwards: there is nothing to say how much is coming."""
+    return Response(content_type=content_type, stream=source)
 
 
 def file_at(path: str, *, cache: str = "no-store") -> Response:

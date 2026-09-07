@@ -48,6 +48,38 @@ def add(app: App, service: Service) -> None:
         )
         return H.ok({"candidates": [c.as_dict() for c in found]})
 
+    @app.route("POST", "/api/artwork/([^/]+)/fetch")
+    def fetch(r: H.Request) -> H.Response:
+        """Find the best cover for this record and install it, in one step.
+
+        The release this was fitted against is in the spec, which is the only
+        reason the catalogue can be asked again later. Candidates below the
+        size floor are not installed: a small cover is worse than the one a
+        player already shows for a record with none.
+        """
+        slug = slug_of(r)
+        album = _album(service, slug)
+        spec_file = service.layout.spec_file(slug)
+        mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+        page = str(r.json().get("page", ""))
+        if not mbid and not page:
+            raise H.HttpError(
+                409,
+                "no release is recorded for this record - run a first pass, or "
+                "give a page to take the cover from",
+            )
+        found = ART.candidates(service.fetcher, service.runner, mbid=mbid, page=page)
+        usable = [
+            c for c in found if c.ok and c.image is not None and c.image.big_enough
+        ]
+        if not usable:
+            why = "; ".join(f"{c.source}: {c.why or c.image}" for c in found)
+            raise H.HttpError(404, f"nothing usable was found - {why}")
+        best = max(usable, key=lambda c: c.image.edge if c.image else 0)
+        data = service.fetcher.get(best.url, {"Accept": "image/*"})
+        response = _install(service, album, data)
+        return response.with_header("X-Artwork-Source", best.source)
+
     @app.route("POST", "/api/artwork/([^/]+)/install")
     def install(r: H.Request) -> H.Response:
         album = _album(service, slug_of(r))

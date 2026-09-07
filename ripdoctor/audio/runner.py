@@ -7,12 +7,13 @@ architecture test holds that boundary.
 
 from __future__ import annotations
 
+import io
 import shutil
 import signal
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import IO, Protocol
 
 
 class ToolMissing(Exception):
@@ -63,6 +64,10 @@ class Result:
 class Process(Protocol):
     """A program still running. A capture outlives a single call."""
 
+    @property
+    def stdout(self) -> IO[bytes] | None:
+        """What it is writing, when it was started to be read from."""
+
     def poll(self) -> int | None: ...
 
     def interrupt(self) -> None: ...
@@ -84,7 +89,11 @@ class Runner(Protocol):
     ) -> Result: ...
 
     def start(
-        self, argv: Sequence[str], *, stderr_path: str | None = ...
+        self,
+        argv: Sequence[str],
+        *,
+        stderr_path: str | None = ...,
+        reading: bool = ...,
     ) -> Process: ...
 
     def which(self, tool: str) -> str | None: ...
@@ -121,7 +130,13 @@ class RealRunner:
             raise ToolMissing(args[0]) from e
         return Result(tuple(args), p.returncode, p.stdout or b"", p.stderr or b"")
 
-    def start(self, argv: Sequence[str], *, stderr_path: str | None = None) -> Process:
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        stderr_path: str | None = None,
+        reading: bool = False,
+    ) -> Process:
         """Begin a program and return while it runs.
 
         Used only for capture, which lasts a side. Everything else finishes
@@ -137,7 +152,9 @@ class RealRunner:
         errors = open(stderr_path, "wb") if stderr_path else subprocess.DEVNULL  # noqa: SIM115
         try:
             proc = subprocess.Popen(  # noqa: S603 - argv list, never shell=True
-                args, stdout=subprocess.DEVNULL, stderr=errors
+                args,
+                stdout=subprocess.PIPE if reading else subprocess.DEVNULL,
+                stderr=errors,
             )
         except FileNotFoundError as e:
             raise ToolMissing(args[0]) from e
@@ -161,6 +178,10 @@ class Started:
     """
 
     proc: subprocess.Popen[bytes]
+
+    @property
+    def stdout(self) -> IO[bytes] | None:
+        return self.proc.stdout
 
     def poll(self) -> int | None:
         return self.proc.poll()
@@ -196,6 +217,8 @@ class FakeRunner:
     # How many poll() calls a started process runs for. None means it keeps
     # going until something stops it, which is what a capture does.
     exit_after: int | None = None
+    # What a started program writes, for the one caller that reads from one.
+    output: bytes = b""
     started: list[FakeProcess] = field(default_factory=list)
 
     def expect(
@@ -234,14 +257,20 @@ class FakeRunner:
                 return Result(args, reply.returncode, reply.stdout, reply.stderr)
         return Result(args, 0, b"", b"")
 
-    def start(self, argv: Sequence[str], *, stderr_path: str | None = None) -> Process:
+    def start(
+        self,
+        argv: Sequence[str],
+        *,
+        stderr_path: str | None = None,
+        reading: bool = False,
+    ) -> Process:
         args = tuple(str(a) for a in argv)
         if not args:
             raise ValueError("empty argv")
         self.calls.append(args)
         if self.installed is not None and args[0] not in self.installed:
             raise ToolMissing(args[0])
-        proc = FakeProcess(self.exit_after)
+        proc = FakeProcess(self.exit_after, reading=io.BytesIO(self.output))
         self.started.append(proc)
         return proc
 
@@ -263,6 +292,7 @@ class FakeProcess:
     """A started program that never existed."""
 
     exit_after: int | None = None
+    reading: IO[bytes] | None = None
     polls: int = 0
     returncode: int | None = None
     interrupted: bool = False
@@ -277,6 +307,10 @@ class FakeProcess:
         ):
             self.returncode = 0
         return self.returncode
+
+    @property
+    def stdout(self) -> IO[bytes] | None:
+        return self.reading
 
     def interrupt(self) -> None:
         self.interrupted = True

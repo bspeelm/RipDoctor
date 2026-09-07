@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
@@ -81,7 +82,7 @@ def test_a_search_returns_ranked_releases(tmp_path: Path) -> None:
     service = a_catalogue_service(tmp_path, SEARCH, release([150000, 200000]))
     r = get(build(service), "/api/mb/search?artist=A+Band&album=A+Record", service)
     body = r.json()
-    assert body["releases"][0]["mbid"] == "aaa"
+    assert body["releases"][0]["id"] == "aaa"
     assert body["releases"][0]["has_durations"]
 
 
@@ -379,3 +380,117 @@ def test_an_error_page_never_reaches_the_files(tmp_path: Path) -> None:
     )
     assert r.status == 400
     assert (album / "cover.jpg").read_bytes() == b"the existing cover"
+
+
+def test_the_best_cover_is_found_and_installed_in_one_step(tmp_path: Path) -> None:
+    """The release the record was fitted against is in the spec, which is the
+    only reason the catalogue can be asked again later."""
+    service, album = in_the_library(tmp_path, image=probed(1500, 1500))
+    F.save(
+        service.layout,
+        "album",
+        replace(F.spec_of(Plan.from_dict(a_plan_dict())), mbid="aaa"),
+        Plan.from_dict(a_plan_dict()),
+    )
+    service.fetcher = Catalogue(JPEG, JPEG)  # type: ignore[assignment]
+    r = post(build(service), "/api/artwork/album/fetch", service, {})
+    assert r.status == 200 and (album / "cover.jpg").is_file()
+    assert dict(r.headers)["X-Artwork-Source"] == "release"
+
+
+def test_fetching_without_a_release_says_what_to_do(tmp_path: Path) -> None:
+    service, _album = in_the_library(tmp_path)
+    r = post(build(service), "/api/artwork/album/fetch", service, {})
+    assert r.status == 409 and "first pass" in r.json()["error"]
+
+
+def test_nothing_big_enough_is_reported_rather_than_installed(
+    tmp_path: Path,
+) -> None:
+    """A small cover is worse than the one a player already shows for a record
+    with none."""
+    service, album = in_the_library(tmp_path, image=probed(316, 316))
+    F.save(
+        service.layout,
+        "album",
+        replace(F.spec_of(Plan.from_dict(a_plan_dict())), mbid="aaa"),
+        Plan.from_dict(a_plan_dict()),
+    )
+    service.fetcher = Catalogue(JPEG, JPEG)  # type: ignore[assignment]
+    r = post(build(service), "/api/artwork/album/fetch", service, {})
+    assert r.status == 404 and "nothing usable" in r.json()["error"]
+    assert not (album / "cover.jpg").exists()
+
+
+# -------------------------------------------------------------- relabel
+
+
+def with_a_cut(tmp_path: Path, *replies: bytes):  # type: ignore[no-untyped-def]
+    service, library = with_library(tmp_path)
+    plan = Plan.from_dict(a_plan_dict())
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    service.fetcher = Catalogue(*replies)  # type: ignore[assignment]
+    return service, library
+
+
+def test_titles_can_be_taken_from_another_release_without_moving_anything(
+    tmp_path: Path,
+) -> None:
+    """A release picked at import time is usually picked because the first one
+    was wrong. Re-fitting by then throws away boundaries that are already
+    correct and hard-won."""
+    service, _library = with_a_cut(tmp_path, release([200000]))
+    before = F.read_plan(service.layout.plan_file("album")).sides[0].tracks[0]
+    r = post(build(service), "/api/relabel/album", service, {"mbid": "bbb"})
+    assert r.status == 200 and r.json()["applied"] == 1
+    after = F.read_plan(service.layout.plan_file("album")).sides[0].tracks[0]
+    assert after.title == "Track 1" and after.title != before.title
+    assert after.start == before.start and after.end == before.end
+
+
+def test_the_release_id_is_recorded_so_art_can_be_found_later(
+    tmp_path: Path,
+) -> None:
+    service, _library = with_a_cut(tmp_path, release([200000]))
+    post(build(service), "/api/relabel/album", service, {"mbid": "bbb"})
+    assert F.read_spec(service.layout.spec_file("album")).mbid == "bbb"
+
+
+def test_a_release_with_a_different_number_of_tracks_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Re-labelling one of those would shift every title by one."""
+    service, _library = with_a_cut(tmp_path, release([200000, 200000]))
+    r = post(build(service), "/api/relabel/album", service, {"mbid": "bbb"})
+    assert r.status == 409 and "shift every title" in r.json()["error"]
+
+
+def test_relabelling_a_record_with_no_cut_is_a_404(tmp_path: Path) -> None:
+    service, _library = with_library(tmp_path)
+    service.fetcher = Catalogue(release([200000]))  # type: ignore[assignment]
+    (service.layout.plan_file("album")).unlink()
+    assert (
+        post(build(service), "/api/relabel/album", service, {"mbid": "b"}).status == 404
+    )
+
+
+# -------------------------------------------------------------- existing
+
+
+def test_a_record_already_in_the_library_is_reported_before_the_import(
+    tmp_path: Path,
+) -> None:
+    """Finding out afterwards means finding out from a directory holding two
+    copies."""
+    service, library = with_library(tmp_path)
+    placed = library / "A Band" / "A Record"
+    placed.mkdir(parents=True)
+    (placed / "01 One.flac").write_bytes(b"fLaC")
+    body = get(build(service), "/api/library/existing/album", service).json()
+    assert body["existing"]["tracks"] == 1
+
+
+def test_a_record_that_is_not_there_reports_nothing(tmp_path: Path) -> None:
+    service, _library = with_library(tmp_path)
+    body = get(build(service), "/api/library/existing/album", service).json()
+    assert body["existing"] is None

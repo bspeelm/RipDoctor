@@ -96,6 +96,9 @@ def handler_for(app: App) -> type[BaseHTTPRequestHandler]:
                 self.send_header(name, value)
 
         def _send(self, response: H.Response) -> None:
+            if response.stream is not None:
+                self._send_stream(response)
+                return
             if response.path:
                 self._send_file(response)
                 return
@@ -104,6 +107,34 @@ def handler_for(app: App) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(response.body)
+
+        def _send_stream(self, response: H.Response) -> None:
+            """No length, so no keep-alive: the connection closes at the end.
+
+            A listener closing a tab is how this normally ends, so the source is
+            closed on the way out - otherwise whatever is producing the audio
+            keeps the sound card for the life of the process.
+            """
+            assert response.stream is not None  # noqa: S101 - checked by caller
+            self.close_connection = True
+            self.send_response(200)
+            for name, value in H.SECURITY_HEADERS:
+                self.send_header(name, value)
+            self.send_header("Content-Type", response.content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command == "HEAD":
+                return
+            chunks = response.stream()
+            try:
+                for block in chunks:
+                    self.wfile.write(block)
+                    self.wfile.flush()
+            finally:
+                close = getattr(chunks, "close", None)
+                if close:
+                    close()
 
         def _send_file(self, response: H.Response) -> None:
             path = Path(str(response.path))

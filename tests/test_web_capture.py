@@ -279,3 +279,27 @@ def test_every_capture_route_needs_a_session(tmp_path: Path) -> None:
         r = app.dispatch(H.Request.of(method, path, body=b"{}"))
         assert r.status == 401, f"{path} answered without a session"
     assert A.COOKIE  # the cookie name is what the check above turns on
+
+
+def test_a_bad_side_can_be_discarded_and_recorded_again(tmp_path: Path) -> None:
+    """Only from raw. A side in raw is a rip somebody can redo; a side in
+    archive is the only copy there is."""
+    service = a_service(tmp_path)
+    side = service.layout.raw / "album" / "side-a.flac"
+    r = post(
+        build(service), "/api/rip/discard-side", service, {"slug": "album", "side": "a"}
+    )
+    assert r.status == 200 and r.json()["freed_bytes"] > 0
+    assert not side.exists()
+
+
+def test_a_side_in_the_archive_is_not_reachable_from_there(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-z.flac").write_bytes(b"fLaC" + b"\x00" * 100)
+    r = post(
+        build(service), "/api/rip/discard-side", service, {"slug": "album", "side": "z"}
+    )
+    assert r.status == 404
+    assert (archived / "side-z.flac").is_file()

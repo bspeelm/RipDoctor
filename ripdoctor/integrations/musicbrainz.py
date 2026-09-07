@@ -65,6 +65,11 @@ class Release:
     date: str
     format: str
     tracks: list[Track]
+    # MusicBrainz keeps pressing qualifiers here rather than in the title.
+    # Without it a search for one well-known record returns fifty rows that all
+    # read the same.
+    disambiguation: str = ""
+    country: str = ""
 
     @property
     def has_durations(self) -> bool:
@@ -180,6 +185,8 @@ def search(
                 date=str(r.get("date", "")),
                 format=_format_of(r),
                 tracks=[],
+                disambiguation=str(r.get("disambiguation", "")),
+                country=str(r.get("country", "")),
             )
         )
     return out

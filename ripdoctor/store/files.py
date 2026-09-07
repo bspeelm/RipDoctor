@@ -150,6 +150,7 @@ def _spec_to_dict(spec: Spec) -> dict[str, Any]:
         "album": spec.album,
         "artist": spec.artist,
         "date": spec.date,
+        "mbid": spec.mbid,
         "lead": spec.lead,
         "tail": spec.tail,
         "sides": [

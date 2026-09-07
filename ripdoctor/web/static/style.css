@@ -1,0 +1,262 @@
+:root{
+  color-scheme:dark;
+  --bg:#14161a; --panel:#1a1d23; --fg:#e6e8ea; --dim:#8b9199; --line:#2a2e35;
+  --accent:#5aa9e6; --start:#5fd38d; --end:#e6705a; --ghost:#6b7480; --warn:#e8c468;
+}
+*{box-sizing:border-box}
+/* An explicit display: rule beats the hidden attribute's UA display:none, so
+   #login (grid) and #app (flex) both stayed painted after a successful login
+   and it looked like signing in had failed. Keep this above those rules. */
+[hidden]{display:none !important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  overflow:hidden}
+
+#login{display:grid;place-items:center;min-height:100vh}
+#login form{display:flex;flex-direction:column;gap:.75rem;min-width:18rem;padding:2rem;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+#login h1{margin:0 0 .5rem;font-size:1.25rem;font-weight:600}
+label{display:flex;flex-direction:column;gap:.25rem;color:var(--dim);font-size:.8rem}
+input,select{padding:.4rem .5rem;background:#0f1114;color:var(--fg);
+  border:1px solid var(--line);border-radius:6px;font:inherit}
+button{padding:.4rem .8rem;background:var(--accent);color:#0b0d10;border:0;border-radius:6px;
+  font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:500}
+button:disabled{opacity:.45;cursor:default}
+.err{color:#ff8080;min-height:1.2em;margin:0;font-size:.85rem}
+.dim{color:var(--dim)}
+.spacer{flex:1}
+label.inline{flex-direction:row;align-items:center;gap:.3rem;font-size:.75rem;cursor:pointer}
+label.inline input{width:auto}
+.tabs button.rec{border-color:#e6705a;color:#e6705a}
+.tabs button:disabled{opacity:.6;cursor:not-allowed}
+
+#app{display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+header strong{letter-spacing:.02em}
+.tabs{display:flex;gap:.25rem}
+.tabs button{background:transparent;border:1px solid var(--line);color:var(--dim);font-weight:500;
+  padding:.25rem .6rem}
+.tabs button.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
+#status{color:var(--dim);font-size:.8rem}
+
+#prepare{display:flex;align-items:center;gap:.6rem;padding:.4rem .75rem;
+  border-bottom:1px solid var(--line);font-size:.8rem;color:var(--dim);flex:none}
+.bar{flex:1;height:4px;background:#0f1114;border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+
+#cv{display:block;width:100%;flex:1;min-height:0;cursor:crosshair;touch-action:none}
+
+#readout{display:flex;align-items:center;gap:1rem;padding:.35rem .75rem;flex:none;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel)}
+#ro-time{color:var(--accent);font-weight:600;min-width:7rem}
+#ro-gap.bad{color:var(--warn)}
+#ro-gap.good{color:var(--start)}
+.hint{margin:0;color:var(--ghost);font-size:11px;line-height:1.45;max-width:44rem}
+kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 .25rem}
+
+/* tracks | album+art | rip doctor | side.  The track table gives up the width:
+   it was running to ~50% of a wide screen while the album panel was 16rem and
+   scrolling. */
+#lower{display:flex;gap:0;flex:none;height:36vh;min-height:15rem;overflow:hidden;
+  padding:.5rem 0 .5rem .75rem}
+#tracks{flex:1;border-collapse:collapse;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  display:block;overflow:auto}
+#tracks th{position:sticky;top:0;background:var(--bg);text-align:left;color:var(--dim);
+  font-weight:500;padding:.25rem .5rem;border-bottom:1px solid var(--line)}
+#tracks td{padding:.15rem .5rem;border-bottom:1px solid #1f232a}
+#tracks tr.sel td{background:#20262e}
+#tracks input{width:100%;border:0;background:transparent;padding:.1rem .2rem;font:inherit}
+#tracks input:focus{background:#0f1114;outline:1px solid var(--accent)}
+#tracks .num{width:3rem}#tracks .t{width:6rem;text-align:right}
+#tracks .drift{text-align:right}
+.big{color:var(--warn)}
+/* The table was taking half a wide screen while sitting nearly empty and the
+   album panel scrolled at 21rem. Cap the table, let the panels take real width,
+   and reserve the scrollbar gutter so it never crowds an input. */
+#tracks{flex:1 1 0;min-width:20rem;max-width:44rem}
+#album-panel{flex:1 1 25rem;min-width:20rem;max-width:32rem;overflow-y:auto;
+  scrollbar-gutter:stable;border-left:1px solid var(--line);
+  padding:0 1rem 0 1rem;display:flex;flex-direction:column}
+#album-panel label{flex-direction:row;align-items:center;gap:.6rem;margin-bottom:.4rem}
+#album-panel label input{flex:1;min-width:0}
+#album-panel label{font-size:.75rem}
+#side-panel{flex:0 0 15rem;overflow-y:auto;scrollbar-gutter:stable;
+  border-left:1px solid var(--line);padding:0 .75rem 0 1rem;
+  display:flex;flex-direction:column}
+#album-panel .row,#side-panel .row{display:flex;gap:.4rem;margin-bottom:.5rem}
+#album-panel .row button,#side-panel .row button{flex:1}
+#album-panel h3,#side-panel h3{margin:.15rem 0 .35rem;font-size:.8rem;color:var(--dim);font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em}
+#review{flex:1;min-height:0;overflow-y:auto}
+#review a{display:block;color:var(--accent);text-decoration:none;padding:.1rem 0;
+  font:12px/1.5 ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#review a:hover{text-decoration:underline}
+#logwrap{flex:none;background:#0f1114;border-top:1px solid var(--line)}
+#logbar{display:flex;align-items:center;gap:.6rem;padding:.25rem .75rem;
+  font-size:11px;color:var(--dim)}
+#logbar .spacer{flex:1}
+#logbar #logwhat{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ghost);min-width:0}
+#log{margin:0;padding:.5rem .75rem;max-height:9rem;overflow:auto;
+  border-top:1px solid var(--line);font:11px/1.4 ui-monospace,monospace;color:var(--dim)}
+#logwrap.collapsed #log{display:none}
+
+/* ---- rip view ---- */
+#captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
+.ripform{width:30rem;flex:none;display:flex;flex-direction:column;gap:.55rem;min-width:0}
+.ripform h2{margin:0;font-size:1rem;font-weight:600}
+.ripform .row{display:flex;gap:.5rem;margin-top:.2rem}
+/* five buttons sized to their own labels made a ragged line; a fixed three
+   columns keeps the second row aligned under the first */
+.ripform .row.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;
+  margin-top:0}
+.ripform .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
+  overflow:hidden;text-overflow:ellipsis}
+.ripform .fields .wide input{margin-bottom:.35rem}
+/* two columns: the fields are short, and a single 22rem stack of six of them
+   ran taller than the meter beside it while leaving the right half empty */
+.ripform .fields{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .75rem}
+.ripform .fields label{min-width:0}
+.ripform .fields .wide{grid-column:1/-1}
+.ripform .fields input[readonly]{opacity:.7;cursor:not-allowed}
+/* :not(checkbox) matters - this rule outranks label.inline input{width:auto}
+   on specificity, and a stretched checkbox pushes its own caption away */
+.ripform .fields select,
+.ripform .fields input:not([type=checkbox]){min-width:0;width:100%}
+/* the checkbox shares the Side row, aligned to the control not the caption */
+label.autostop{align-self:end;padding-bottom:.5rem;color:var(--fg);font-size:.8rem;
+  gap:.45rem;white-space:nowrap}
+label.autostop input{width:auto;flex:none;margin:0}
+.mono{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+
+.ripmeter{flex:1;min-width:0;display:flex;flex-direction:column;gap:.6rem}
+.ripmeter .row{display:flex;align-items:baseline;gap:1rem}
+.ripmeter .row .spacer{flex:1}
+.big-time{font:600 1.6rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+/* grow into the space instead of leaving a screen of nothing under a 190px box */
+#meter{width:100%;flex:1;min-height:190px;max-height:34rem;display:block;
+  background:#0f1114;border:1px solid var(--line);border-radius:8px}
+
+/* capture lists belong under the form, not above its heading */
+#orphans,#ripsides{border-top:1px solid var(--line);padding-top:.6rem;margin-top:.2rem}
+#orphans h4,#ripsides h4{margin:0 0 .4rem;font-size:.75rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+#ripsides .row{display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem}
+#ripsides .row span{flex:1;font-size:12px}
+#ripsides .row button,#orphans .row button{flex:none}
+
+
+dialog{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+  border-radius:10px;padding:1.25rem;min-width:34rem;max-width:44rem}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h3{margin:0 0 .75rem;font-size:1rem;font-weight:600}
+dialog form{display:flex;flex-direction:column;gap:.6rem}
+dialog .row{display:flex;gap:.5rem}
+#fp-results{max-height:16rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
+#fp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
+  font-weight:500;text-align:left;padding:.4rem .6rem;font:12px/1.4 ui-monospace,monospace}
+#fp-results button:hover{border-color:var(--accent)}
+#fp-results .vinyl{border-left:3px solid var(--start)}
+#fp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
+#fp-report{margin:0;max-height:14rem;overflow:auto;background:#0f1114;padding:.5rem;
+  border-radius:6px;font:11px/1.4 ui-monospace,monospace;color:var(--dim)}
+
+#imp-out{margin:0;max-height:22rem;overflow:auto;background:#0f1114;padding:.5rem;
+  border-radius:6px;font:11px/1.45 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
+#impdlg{min-width:44rem;max-width:60rem}
+#impdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+
+#arc-plan{margin:0;max-height:20rem;overflow:auto;background:#0f1114;padding:.6rem;
+  border-radius:6px;font:11px/1.5 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
+#arcdlg{min-width:40rem}
+#arcdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+.ok{color:var(--start)}
+
+#orphans{border:1px solid var(--warn);border-radius:8px;padding:.6rem;margin-bottom:.6rem;
+  font-size:12px;line-height:1.5}
+#orphans h4{margin:0 0 .3rem;font-size:.8rem;color:var(--warn);text-transform:uppercase;
+  letter-spacing:.04em}
+#orphans .row{margin-top:.4rem}
+
+#imp-done h4{margin:0 0 .3rem;font-size:.8rem;color:var(--start);
+  text-transform:uppercase;letter-spacing:.04em}
+#imp-done{border:1px solid var(--start);border-radius:8px;padding:.7rem}
+#imp-done p{margin:.2rem 0}
+#imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#imp-outwrap summary{cursor:pointer;color:var(--dim);font-size:.8rem;padding:.2rem 0}
+
+#rip-listen.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
+#rip-auto{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);min-height:1.4em}
+
+.vol{flex-direction:row;align-items:center;margin-left:auto}
+.vol input[type=range]{width:5.5rem;accent-color:var(--accent);padding:0;background:none;border:0}
+button.tiny{padding:.15rem .5rem;font-weight:700}
+table.keys{border-collapse:collapse;font-size:12px}
+table.keys td{padding:.22rem .6rem .22rem 0;vertical-align:top}
+table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
+#helpdlg{min-width:34rem}
+
+#imp-results{max-height:12rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
+#imp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
+  font-weight:500;text-align:left;padding:.35rem .6rem;font:12px/1.4 ui-monospace,monospace}
+#imp-results button:hover{border-color:var(--accent)}
+#imp-results .vinyl{border-left:3px solid var(--start)}
+#imp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
+
+#pipeline{display:flex;align-items:center;gap:.15rem;padding:.3rem .75rem;flex:none;
+  border-bottom:1px solid var(--line);background:#101318;font-size:11px}
+#pipeline .st{display:flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:20px;
+  color:var(--ghost);white-space:nowrap}
+#pipeline .st.done{color:var(--start)}
+#pipeline .st.now{background:var(--accent);color:#0b0d10;font-weight:700}
+#pipeline .sep{color:var(--line)}
+#pipeline .why{color:var(--ghost);margin-left:.5rem;font-style:italic}
+
+
+#md-note{font-size:10.5px;line-height:1.4;margin:0 0 .2rem;color:var(--ghost)}
+#art-state{font:11px/1.4 ui-monospace,monospace;margin-bottom:.3rem}
+#art-err{font-size:11px}
+
+/* auto-stop warning: a 20 s decision, so the countdown is the loudest thing in
+   the box and the safe answer is the default button */
+#autostopdlg{min-width:30rem;max-width:34rem}
+#autostopdlg #as-count{margin:.25rem 0 .75rem;font-size:2.4rem;text-align:center}
+#autostopdlg .row{flex-wrap:wrap}
+
+/* replacing a library album deletes files, so the offer looks like a warning
+   and the paths that would go are shown, not summarised */
+.warn{border:1px solid #6a4a2a;background:#241c14;border-radius:8px;
+  padding:.6rem .75rem;display:flex;flex-direction:column;gap:.35rem}
+.warn b{color:#e0a24a}
+#imp-replace-what{color:var(--fg);word-break:break-all}
+
+/* monitor volume sits in the button grid; the peak-hold line is the number you
+   set gain against, so it gets weight the transient meter does not */
+/* labelled, because a bare slider sitting among the transport buttons reads as
+   a record level - which is the one thing it cannot be */
+.ripform .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0}
+.ripform .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--ghost)}
+.ripform .row.btns label.vol input{width:100%;min-width:0}
+#rip-peak{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#rip-peak-reset{flex:none}
+
+/* The capture pane is shared by Rip and Punch, so it hosts the same kinds of
+   control a form does - device selects, a button grid, the monitor slider.
+   These mirror the .ripform rules rather than widening them, because the
+   .ripmeter .row rule above styles the meter's own baseline-aligned rows and
+   must keep doing so. */
+.ripmeter .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem .75rem}
+.ripmeter .fields label{min-width:0}
+.ripmeter .fields select{min-width:0;width:100%}
+.ripmeter .row.btns{display:flex;gap:.5rem;margin-top:.2rem;align-items:center}
+.ripmeter .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
+  flex:1;overflow:hidden;text-overflow:ellipsis}
+.ripmeter .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0;flex:2}
+.ripmeter .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--ghost)}
+.ripmeter .row.btns label.vol input{width:100%;min-width:0}

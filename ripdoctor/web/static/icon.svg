@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="cutAssist: a record with a cut marker">
+  <!-- A record with a cut marker standing on it. The two things this tool is:
+       the groove, and the decision about where to divide it.
+       Colours are the editor's own - #5fd38d is the start marker, #e0a24a the
+       1-3 kHz lane, #5aa9e6 the accent. -->
+  <defs>
+    <clipPath id="disc"><circle cx="32" cy="32" r="30"/></clipPath>
+  </defs>
+
+  <!-- vinyl -->
+  <circle cx="32" cy="32" r="30" fill="#15181d"/>
+
+  <!-- grooves, with a break at the right: the inter-track gap, which is the
+       whole thing this tool exists to find -->
+  <g fill="none" stroke="#39424e" stroke-width="1.7" stroke-linecap="round">
+    <path d="M32 6.5a25.5 25.5 0 1 1 0 51 25.5 25.5 0 0 1 0-51" pathLength="100"
+          stroke-dasharray="46 8 46 0" stroke-dashoffset="-4"/>
+    <path d="M32 11a21 21 0 1 1 0 42 21 21 0 0 1 0-42" pathLength="100"
+          stroke-dasharray="45 10 45 0" stroke-dashoffset="-3"/>
+    <path d="M32 15.5a16.5 16.5 0 1 1 0 33 16.5 16.5 0 0 1 0-33" pathLength="100"
+          stroke-dasharray="47 6 47 0" stroke-dashoffset="-5"/>
+  </g>
+
+  <!-- label -->
+  <circle cx="32" cy="32" r="10" fill="#5aa9e6"/>
+  <circle cx="32" cy="32" r="2.6" fill="#15181d"/>
+
+  <!-- the cut: a marker dropped through the gap in the grooves -->
+  <g clip-path="url(#disc)">
+    <rect x="44.1" y="0" width="5.8" height="64" fill="#15181d"/>
+  </g>
+  <rect x="45.6" y="1.5" width="2.8" height="61" rx="1.4" fill="#5fd38d"/>
+  <!-- marker flag, like the ones on the waveform -->
+  <path d="M48.4 4.5h9.2l-2.6 4 2.6 4h-9.2z" fill="#5fd38d"/>
+
+  <!-- rim -->
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#4a5462" stroke-width="2"/>
+</svg>

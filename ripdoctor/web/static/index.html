@@ -1,0 +1,329 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RipDoctor</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#14161a">
+<link rel="stylesheet" href="/style.css">
+
+<div id="login" hidden>
+  <form id="loginform">
+    <h1>RipDoctor</h1>
+    <label>User <input name="user" autocomplete="username" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button>Sign in</button>
+    <p class="err" id="loginerr"></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <div id="pipeline"></div>
+  <header>
+    <strong>RipDoctor</strong>
+    <span class="tabs" id="modes">
+      <button data-mode="cut" class="on">Cut</button>
+      <button data-mode="rip">Rip</button>
+      <button data-mode="punch">Punch</button>
+    </span>
+    <select id="album"></select>
+    <label class="inline" title="albums already imported and moved to archive/ — cutting one writes into review/ as usual"><input type="checkbox" id="incarch"> archived</label>
+    <span id="sides" class="tabs"></span>
+    <span class="spacer"></span>
+    <span id="status"></span>
+    <button id="firstpass" class="ghost" title="look up the release, assign tracks to sides, and fit boundaries to the measured gaps">First pass</button>
+    <button id="realign" class="ghost" hidden title="this album is already cut and archived — carry those boundaries onto the re-rip instead of starting over">Align from archive</button>
+    <button id="revert" class="ghost" title="discard unsaved changes and reload the saved plan from disk">Revert</button>
+    <button id="save">Save</button>
+    <button id="split" class="ghost">Cut tracks</button>
+    <button id="import" class="ghost" title="tag the cut tracks and place them in the library">Import</button>
+    <button id="archive" class="ghost" disabled title="archive the raw sides and clean up — enabled once the album is in the library">Archive rip</button>
+  </header>
+
+  <div id="prepare" hidden><div class="bar"><i></i></div><span></span></div>
+
+  <canvas id="cv"></canvas>
+
+  <div id="captureview" hidden>
+    <div class="ripform" id="ripform">
+      <h2>Rip a side</h2>
+      <div class="fields">
+        <label class="wide">Re-rip an album already on this box
+          <input id="rip-rerip-q" placeholder="filter by artist or album…" autocomplete="off">
+          <select id="rip-rerip"></select></label>
+        <label>Artist <input id="rip-artist" placeholder="Punch Brothers"></label>
+        <label>Album <input id="rip-album" placeholder="Hell on Church Street"></label>
+        <label>Side <input id="rip-side" value="a" size="6"></label>
+        <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
+          Stop at the run-out</label>
+      </div>
+      <p class="dim mono" id="rip-slug"></p>
+      <div class="row btns">
+        <button id="rip-go">Start recording</button>
+      </div>
+      <div id="orphans" hidden></div>
+      <div id="ripsides" hidden></div>
+    </div>
+
+    <div class="ripform" id="punchform" hidden>
+      <h2>Punch a track</h2>
+      <p class="dim">One track came out dirty &mdash; a skip, a click, a passage
+        the stylus fought. Re-record just that track and swap it into the
+        library. The boundaries are <b>fitted against the archived side</b>, so
+        the replacement starts and ends exactly where the original did.</p>
+      <div class="fields">
+        <label class="wide">Album <select id="punch-album"></select></label>
+        <label class="wide">Track <select id="punch-track"></select></label>
+      </div>
+      <p class="dim mono" id="punch-info"></p>
+      <div class="row btns">
+        <button id="punch-go" disabled>Record punch</button>
+        <button id="punch-locate" class="ghost" hidden>Find the track</button>
+        <button id="punch-discard" class="ghost" hidden>Discard punch</button>
+      </div>
+      <p class="hint" id="punch-hint">Drop the needle a few seconds <b>before</b>
+        the track and lift it <b>after</b> &mdash; the fit needs music on both
+        sides of it. Recording uses the capture controls on the right, and
+        <b>Stop &amp; encode</b> ends it like any other capture.</p>
+      <div id="punch-found" hidden>
+        <p class="mono" id="punch-fit"></p>
+        <div class="fields">
+          <label>Start <input id="punch-start" size="9" inputmode="decimal"></label>
+          <label>End <input id="punch-end" size="9" inputmode="decimal"></label>
+          <label>Length <input id="punch-len" size="9" disabled></label>
+        </div>
+        <div class="row btns">
+          <button type="button" id="punch-play" class="ghost">Hear this cut</button>
+          <button type="button" id="punch-apply">Replace in the library</button>
+        </div>
+        <p class="hint">Replacing moves the old file and the punch capture into
+          <code>archive/&lt;album&gt;/_punched/</code>. Nothing is deleted.</p>
+      </div>
+      <p class="err" id="punch-err"></p>
+      <p class="dim" id="punch-done"></p>
+    </div>
+
+    <!-- Shared by Rip and Punch: one capture device, one transport, one meter.
+         Duplicating these per mode would mean two sources of truth for which
+         device is selected, which is exactly how a rip ends up on the wrong
+         input. -->
+    <div class="ripmeter" id="capturepane">
+      <div class="fields">
+        <label>Device <select id="rip-device"></select></label>
+        <label>Rate <select id="rip-rate"></select></label>
+        <label>Depth <select id="rip-format"></select></label>
+      </div>
+      <div class="row btns">
+        <button id="rip-stop" class="ghost" disabled>Stop &amp; encode</button>
+        <button id="rip-abandon" class="ghost" disabled>Abandon</button>
+        <button id="rip-listen" class="ghost" disabled title="hear the capture live, about 2s behind">Listen</button>
+      </div>
+      <div class="row btns">
+        <button id="rip-test" class="ghost" title="record 20 seconds, report the levels, throw it away — do this after any hardware change">Test 20s</button>
+        <label class="inline vol" title="How loud this sounds in your browser. It cannot change the recording: the UR23 is a S/PDIF receiver and passes the Waxwing's bits through untouched — it exposes no volume control at all. Record level is set in the Waxwing app.">
+          <span>monitor</span>
+          <input type="range" id="rip-vol" min="0" max="100" value="80"></label>
+      </div>
+      <label class="inline" id="rip-force-wrap" hidden
+             title="the selected device does not look like the turntable"><input
+             type="checkbox" id="rip-force"> record from it anyway</label>
+      <p class="err" id="rip-err"></p>
+      <p class="dim" id="rip-done"></p>
+      <div class="row"><span id="rip-elapsed" class="big-time">0:00.00</span>
+        <span id="rip-state" class="dim"></span>
+        <span class="spacer"></span>
+        <span class="dim" id="rip-auto"></span></div>
+      <canvas id="meter"></canvas>
+      <p class="hint">The 1&ndash;3&nbsp;kHz bar is the one to watch. Arm-up handling
+        rumble is loud full-band but dead in this band; silent groove is quiet in
+        both; music is loud in both. Drop the needle when the band bar sits in
+        the <b>groove</b> zone, not below it.</p>
+    </div>
+  </div>
+
+  <div id="readout">
+    <span id="ro-time">&mdash;</span>
+    <span id="ro-track"></span>
+    <span id="ro-gap"></span>
+    <span class="spacer"></span>
+    <label class="vol" title="playback volume"><input type="range" id="vol" min="0" max="100" value="100"></label>
+    <button id="helpbtn" class="ghost tiny" title="keyboard shortcuts">?</button>
+  </div>
+
+  <dialog id="helpdlg">
+    <form method="dialog">
+      <h3>Keyboard</h3>
+      <table class="keys">
+        <tr><td><kbd>space</kbd></td><td>play / pause from the playhead (or 3&nbsp;s before the selected marker)</td></tr>
+        <tr><td><kbd>A</kbd></td><td>audition the selected marker &mdash; plays across it with a 1400&nbsp;Hz tick landing exactly on it</td></tr>
+        <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>nudge the selected marker 0.05&nbsp;s (<kbd>shift</kbd> for 0.5&nbsp;s)</td></tr>
+        <tr><td><kbd>S</kbd></td><td>split the track under the playhead &mdash; snaps to the gap edges if the playhead is inside a detected silence</td></tr>
+        <tr><td><kbd>F</kbd> / <kbd>0</kbd></td><td>zoom to the whole side</td></tr>
+        <tr><td><kbd>Z</kbd></td><td>zoom to the selected track</td></tr>
+        <tr><td><kbd>esc</kbd></td><td>stop playback</td></tr>
+        <tr><td>click</td><td>set the playhead &mdash; and seek there if audio is playing</td></tr>
+        <tr><td>drag</td><td>on a marker moves it; on the background pans</td></tr>
+        <tr><td>wheel</td><td>zoom about the cursor</td></tr>
+        <tr><td>strip</td><td>the bar under the waveform is the whole side &mdash; click or drag to jump</td></tr>
+      </table>
+      <div class="row"><button id="help-close" type="button">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="fpdlg">
+    <form method="dialog" id="fpform">
+      <h3>First pass</h3>
+      <p class="dim">Looks up the release, splits the tracklist across <b>every</b>
+        side by duration, and fits boundaries to the measured gaps. This replaces
+        the plan for the whole album, not just the side you are viewing.</p>
+      <label>Artist <input id="fp-artist" required></label>
+      <label>Album <input id="fp-album" required></label>
+      <div class="row"><button id="fp-search" type="button">Search MusicBrainz</button>
+        <button type="button" class="ghost" id="fp-cancel">Cancel</button>
+        <button type="button" id="fp-done" hidden>Done</button></div>
+      <div id="fp-results"></div>
+      <p class="err" id="fp-err"></p>
+      <pre id="fp-report" hidden></pre>
+    </form>
+  </dialog>
+
+  <dialog id="impdlg">
+    <form method="dialog" id="impform">
+      <h3>Import to library</h3>
+      <p class="dim">Moves the cut tracks out of <code>review/</code> into the
+        library, tagged from the plan you saved.
+        previews first: the match below is what it would apply.</p>
+      <label>Release id <input id="imp-mbid" spellcheck="false" placeholder="pick one below, or paste an id"></label>
+      <div class="row">
+        <label style="flex:1">Artist <input id="imp-artist"></label>
+        <label style="flex:1">Album <input id="imp-album"></label>
+        <button type="button" id="imp-search" class="ghost" style="align-self:end">Search</button>
+      </div>
+      <div id="imp-results"></div>
+      <div id="imp-relabel-wrap" class="warn" hidden>
+        <b>That release has a different tracklist to the one this cut was named from.</b>
+        <p class="hint">Re-labelling applies the new release's titles, numbers and
+          catalogue lengths to the tracks you already cut, and re-pins the release
+          id. <b>No boundary moves.</b> Use this when the LP carries tracks the
+          release picked in First pass did not &mdash; running First pass again
+          would instead refit every edge from scratch.</p>
+        <p class="mono" id="imp-relabel-what"></p>
+        <button type="button" id="imp-relabel">Re-label from this release</button>
+      </div>
+      <div id="imp-replace-wrap" class="warn" hidden>
+        <b>This album is already in the library.</b>
+        <p class="hint">Importing writes into that same directory, so a track
+          with the same name is overwritten. Nothing is deleted, and nothing
+          else in the directory is touched. The import stays disabled until
+          this is ticked.</p>
+        <p class="mono" id="imp-replace-what"></p>
+        <label class="inline"><input type="checkbox" id="imp-replace">
+          I know there is already a copy there</label>
+      </div>
+      <div class="row">
+        <button type="button" id="imp-go">Import into the library</button>
+        <button type="button" id="imp-next" hidden>Archive rip &rarr;</button>
+        <button type="button" class="ghost" id="imp-close">Close</button>
+      </div>
+      <p class="err" id="imp-err"></p>
+      <div id="imp-done" hidden>
+        <h4>Imported</h4>
+        <p id="imp-summary"></p>
+        <div id="imp-art-wrap" class="warn" hidden>
+          <b>This album went into the library with no cover art.</b>
+          <p class="hint">A player set to read <b>embedded</b> art shows nothing
+            until a picture is written into every track, and embedding is what
+            survives a file being moved.</p>
+          <p class="mono" id="imp-art-what"></p>
+          <div class="row">
+            <button type="button" id="imp-art-fetch">Fetch from the release</button>
+            <button type="button" id="imp-art-upload" class="ghost">Upload an image&hellip;</button>
+            <button type="button" id="imp-art-skip" class="ghost">Skip &mdash; no art for now</button>
+          </div>
+          <p class="err" id="imp-art-err"></p>
+        </div>
+        <p class="dim">Whatever watches the library will see it. The raw sides are
+          still in <code>raw/</code> and the cut files have moved out of
+          <code>review/</code> &mdash; archiving puts the sides safely away and
+          clears the working copies.</p>
+      </div>
+      <details id="imp-outwrap" hidden><summary>details</summary>
+        <pre id="imp-out"></pre></details>
+    </form>
+  </dialog>
+
+  <dialog id="autostopdlg">
+    <h3>About to stop &mdash; is this still the record?</h3>
+    <p class="dim">The 1&ndash;3&nbsp;kHz level has been <span id="as-below"></span>&nbsp;dB
+      under the music for <span id="as-quiet"></span>, which normally means the
+      run-out. If this is a quiet passage, say so and the clock restarts.</p>
+    <p class="big-time" id="as-count">20</p>
+    <div class="row">
+      <button id="as-keep">Keep recording</button>
+      <button id="as-off" class="ghost">Keep recording &amp; turn auto-stop off</button>
+      <button id="as-stop" class="ghost">Stop now</button>
+    </div>
+  </dialog>
+
+  <dialog id="arcdlg">
+    <form method="dialog" id="arcform">
+      <h3>Archive rip</h3>
+      <p class="dim">Puts the raw sides in <code>archive/</code> — re-encoding any
+        that are truncated, since a capture ended with Ctrl-C is not a valid FLAC —
+        verifies every one, and only then removes <code>raw/</code>, the review
+        folder and the analysis cache. <b>Nothing in <code>archive/</code> is ever
+        deleted</b>: the raw sides are what make a re-split possible without
+        playing the record again.</p>
+      <pre id="arc-plan"></pre>
+      <div class="row">
+        <button type="button" id="arc-go">Archive and clean up</button>
+        <button type="button" class="ghost" id="arc-close">Close</button>
+      </div>
+      <p class="err" id="arc-err"></p>
+    </form>
+  </dialog>
+
+  <div id="lower">
+    <table id="tracks"><thead><tr>
+      <th>#</th><th>title</th><th>start</th><th>end</th><th>len</th><th>cat &Delta;</th><th></th>
+    </tr></thead><tbody></tbody></table>
+    <div id="album-panel">
+      <h3>Album</h3>
+      <label>Artist <input id="md-artist" placeholder="required"></label>
+      <label>Album <input id="md-album" placeholder="required"></label>
+      <label>Year <input id="md-date" size="6" placeholder="2015"></label>
+      <p class="dim" id="md-note">What you type here is what gets written &mdash;
+        it overrides the release title, qualifiers and all.</p>
+      <h3>Cover art</h3>
+      <div id="art-state" class="dim">&mdash;</div>
+      <div class="row">
+        <button id="art-upload" class="ghost">Upload image</button>
+        <input type="file" id="art-file" accept="image/*" hidden>
+      </div>
+      <p class="err" id="art-err"></p>
+    </div>
+
+    <div id="side-panel">
+      <h3>Side <span id="sp-letter"></span></h3>
+      <p id="sp-meta" class="dim"></p>
+      <div class="row">
+        <button id="addtrack" class="ghost">Add track</button>
+        <button id="splittrack" class="ghost" title="split the track under the playhead in two (S)">Split here</button>
+      </div>
+      <h3>Finished tracks</h3>
+      <div id="review"><p class="dim">nothing cut yet</p></div>
+    </div>
+  </div>
+  <div id="logwrap" hidden>
+    <div id="logbar">
+      <b>console</b>
+      <span id="logwhat">raw output from the pipeline tools &mdash; the finished-tracks
+        list is read back from <code>review/</code>, so the two disagreeing is the signal</span>
+      <span class="spacer"></span>
+      <button id="logclear" class="ghost tiny">clear</button>
+      <button id="logtoggle" class="ghost tiny">hide</button>
+    </div>
+    <pre id="log"></pre>
+  </div>
+</div>
+<script type="module" src="/app.js"></script>

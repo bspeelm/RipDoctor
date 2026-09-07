@@ -52,6 +52,10 @@ class Spec:
     artist: str
     sides: tuple[SpecSide, ...]
     date: str = ""
+    # The release this was fitted against. Kept because everything downstream
+    # that wants to ask the catalogue again - cover art, most obviously - has
+    # no other way to find the same entry.
+    mbid: str = ""
     lead: float = LEAD
     tail: float = TAIL
 
@@ -87,6 +91,7 @@ class Spec:
             artist=str(d.get("artist", "")),
             sides=tuple(sides),
             date=str(d.get("date", "")),
+            mbid=str(d.get("mbid", "")),
             lead=float(d.get("lead", LEAD)),
             tail=float(d.get("tail", TAIL)),
         )
