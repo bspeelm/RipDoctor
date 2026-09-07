@@ -1182,3 +1182,77 @@ one-line fix, including the author's. That is the intended cost. The release
 workflow re-runs the same gates at the tag rather than trusting the branch,
 because a tag can be pushed at any commit - and a tag is the one thing this
 scheme does not require a pull request for.
+
+## ADR-041 — a record's name is written when its first side is captured
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+Identity lived only in the plan, and no plan exists until a first pass has run.
+So capturing a side wrote audio and nothing else: the artist and album typed to
+start the rip lived in the browser form and were thrown away by the next reload.
+The only trace of what a record was became its slug, and reading a slug backwards
+loses the case and the punctuation.
+
+**It goes in the spec**, which already carries slug, album, artist, date and the
+release id, and is the document that says what a record is. A record that has
+only been named is a spec with no sides in it. Nothing new is invented to hold
+the names, and nothing has to be reconciled later.
+
+**Written when a capture starts.** The earliest moment anybody knows, and the
+only one that survives a closed laptop, a crash mid-side and a reload. Only the
+name fields are touched, so a spec that already carries boundaries somebody set
+by ear keeps every one of them. A punch does not write: it is one track of a
+record that already has a name.
+
+**Both documents are read, and the plan wins where it has a value.** A plan's
+names were confirmed against the catalogue; a spec's may be what somebody typed
+in a hurry to get the needle down. The spec fills in the rest and is the only
+source before a cut exists. Reading the spec first would have been the other
+defensible answer; this one cannot change what any existing record displays.
+
+### What takes a name back
+
+Writing an identity earlier means every way out of a capture has to decide what
+becomes of it. The rule:
+
+> Remove the spec only if it has no sides, *and* there is no plan, *and* no file
+> at all sits under that record in raw or archive, *and* nothing is recording it.
+
+Abandon, discard and discard-side apply it. Archiving does not: an archived
+record still exists, and its documents are what let it be listed, re-cut,
+aligned against and punched into. Salvage creates audio rather than removing it.
+
+The rule is deliberately timid, because the two outcomes are not comparable.
+Everything it declines to touch is work somebody would have to redo - a boundary
+set by ear, a release chosen from the catalogue, twenty minutes of a side. A name
+it declines to remove costs a few lines of JSON that nothing lists.
+
+The audio test is "any file at all except a capture log", not a list of the
+names sides are known by. A file under a record that this does not recognise is
+a reason to stop rather than a reason to continue, and the test stays right when
+a new kind of file appears.
+
+### What it turned up
+
+Four defects that were already there and that this rule made unignorable.
+
+*Abandon raced the auto-stop for the same file.* Stopping is only asking; the
+capture loop keeps the file until it has written the outcome. If the auto-stop
+reached the encode first, Abandon deleted a partial that no longer existed and
+reported success over the finished side it had just promised to throw away.
+Abandon now waits for the loop to put the capture down.
+
+*Salvage and discard had nothing stopping them mid-capture.* One encodes what
+has arrived so far and unlinks the file; the other unlinks it. Both took it out
+from under a running arecord.
+
+*The orphan Discard button posted to salvage with a flag salvage ignores*, so
+confirming "this cannot be undone" encoded the take into a finished side and
+emptied the orphan list, which looked exactly like success.
+
+*An interrupted punch was listed among the orphans and neither button under it
+worked*, because both looked for a side by that number.
+
+Separately, saving a plan rebuilt the spec from it and restored only the release
+id - dropping the lead, the tail and the per-side fix map every time, which is
+the spec quietly undoing the ear overrides it exists to hold.
