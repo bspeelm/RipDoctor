@@ -30,6 +30,7 @@ def run(
     runner: FakeRunner | None = None,
     interrupt_after: int | None = None,
     autostop: bool = True,
+    control: S.Control | None = None,
     **limits: float,
 ) -> tuple[S.Outcome, Tape, FakeRunner]:
     fake = runner or FakeRunner()
@@ -41,6 +42,7 @@ def run(
         "a",
         FMT,
         autostop=autostop,
+        control=control,
         now=tape.now,
         sleep=tape.sleep,
         **limits,
@@ -193,3 +195,58 @@ def test_a_capture_with_no_complaints_is_clean(
 ) -> None:
     outcome, _, _ = side
     assert outcome.clean and outcome.overruns == 0
+
+
+# ------------------------------------------------------------- control
+
+
+def test_a_hand_on_stop_ends_the_side_and_keeps_it(tmp_path: Path) -> None:
+    hand = S.Control()
+    tape = Tape(C.partial_path(tmp_path, "a"), "m" * 40)
+    fake = FakeRunner()
+
+    def sleep(seconds: float) -> None:
+        tape.sleep(seconds)
+        if tape.polls >= 5:
+            hand.stop()
+
+    outcome = S.record(
+        fake, "hw:Rx,0", tmp_path, "a", FMT, control=hand, now=tape.now, sleep=sleep
+    )
+    assert outcome.reason == S.BY_HAND
+    assert outcome.path is not None and fake.started[0].interrupted
+
+
+def test_a_snooze_restarts_the_dwell_rather_than_disarming(tmp_path: Path) -> None:
+    """The human says "this is still the song". The side keeps recording with
+    the safety net intact, which is not what turning auto-stop off does."""
+    hand = S.Control()
+    tape = Tape(C.partial_path(tmp_path, "a"), ARMED + "q")
+
+    def sleep(seconds: float) -> None:
+        tape.sleep(seconds)
+        # Press it once, just before the dwell would have expired.
+        if tape.polls == A.ARM_READINGS + 18 and not hand.snoozes:
+            hand.snooze()
+
+    outcome = S.record(
+        FakeRunner(exit_after=A.ARM_READINGS + 30),
+        "hw:Rx,0",
+        tmp_path,
+        "a",
+        FMT,
+        control=hand,
+        dwell=20.0,
+        now=tape.now,
+        sleep=sleep,
+    )
+    assert hand.snoozes == 1
+    assert "run-out" not in outcome.reason, "the snooze did not restart the clock"
+
+
+def test_auto_stop_can_be_turned_off_through_the_control(tmp_path: Path) -> None:
+    hand = S.Control(autostop=False)
+    outcome, _tape, _fake = run(
+        tmp_path, ARMED + "q", dwell=20.0, max_seconds=60.0, control=hand
+    )
+    assert "hard cap" in outcome.reason

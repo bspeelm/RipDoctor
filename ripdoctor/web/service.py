@@ -15,6 +15,7 @@ from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
 from ripdoctor.store.files import Layout
 from ripdoctor.web.auth import Credentials, Sessions, Throttle
+from ripdoctor.work.capture import Recorder
 from ripdoctor.work.jobs import Jobs
 
 
@@ -27,5 +28,6 @@ class Service:
     credentials: Credentials
     sessions: Sessions
     jobs: Jobs = field(default_factory=Jobs)
+    recorder: Recorder = field(default_factory=Recorder)
     throttle: Throttle = field(default_factory=Throttle)
     now: Callable[[], float] = time.time

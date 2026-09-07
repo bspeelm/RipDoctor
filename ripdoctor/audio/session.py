@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ripdoctor.audio import capture as C
@@ -26,6 +26,29 @@ POLL = 1.0
 SETTLE = 0.4
 
 BY_HAND = "stopped by hand"
+
+
+@dataclass
+class Control:
+    """What a person can do to a capture while it is running.
+
+    `snooze` is the exit ramp for the warning: the human says "this is still
+    the song", the dwell clock restarts from now, and the side keeps recording
+    with the safety net intact. Deliberately distinct from turning auto-stop
+    off, which is the answer for a record already known to be quiet throughout.
+    """
+
+    autostop: bool = True
+    stopping: bool = False
+    snoozed: bool = False
+    snoozes: int = 0
+
+    def stop(self) -> None:
+        self.stopping = True
+
+    def snooze(self) -> None:
+        self.snoozed = True
+        self.snoozes += 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +87,7 @@ def record(
     fmt: C.Format,
     *,
     autostop: bool = True,
+    control: Control | None = None,
     on_reading: Callable[[Reading], None] | None = None,
     now: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
@@ -79,6 +103,7 @@ def record(
     the recorder exiting, or a hand on Ctrl-C. Every path out of here encodes
     what is on disk rather than discarding it. ADR-033.
     """
+    hand = control if control is not None else Control(autostop=autostop)
     proc, wav = C.start(runner, device, album_dir, letter, fmt, log=True)
     log = C.log_path(album_dir, letter)
     outcome = Outcome()
@@ -95,6 +120,9 @@ def record(
     try:
         while proc.poll() is None:
             sleep(poll)
+            if hand.stopping:
+                outcome.reason = BY_HAND
+                break
             elapsed = now() - started
             measured = C.meter(wav, fmt)
             if measured is None:
@@ -114,11 +142,16 @@ def record(
                     break
                 continue
             levels, _ = measured
+            if hand.snoozed:
+                # The dwell clock restarts from now rather than from whenever
+                # the quiet stretch began.
+                state = replace(state, quiet_since=None)
+                hand.snoozed = False
             state, reason = A.step(
                 state,
                 levels.band,
                 elapsed,
-                enabled=autostop,
+                enabled=hand.autostop,
                 below=below,
                 dwell=dwell,
                 max_seconds=max_seconds,
