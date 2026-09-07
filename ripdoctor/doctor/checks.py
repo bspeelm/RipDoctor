@@ -42,11 +42,11 @@ REQUIRED = {
     "ffmpeg": "measure levels, cut tracks and build clips",
     "ffprobe": "read a file's sample rate",
     "flac": "verify a written track",
+    "beet": "tag and file a finished record",
+    "metaflac": "write tags and embed cover art",
 }
 OPTIONAL = {
-    "metaflac": "write tags and embed cover art",
     "arecord": "record from a turntable attached to this machine",
-    "beet": "import through beets instead of the built-in tagger",
 }
 
 # What to install to get each one, where that is not the tool's own name.
@@ -56,7 +56,7 @@ PACKAGE = {
     "ffprobe": "ffmpeg",
     "metaflac": "flac",
     "arecord": "alsa-utils",
-    "beet": "beets (pip install ripdoctor[beets])",
+    "beet": "beets - it is a dependency, so a missing one means a broken install",
 }
 
 
@@ -144,10 +144,10 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
     if settings.importer == "beets" and not runner.which("beet"):
         yield Result(
             "importer",
-            Level.WARN,
-            "importer is beets, but beet is not installed - the built-in "
+            Level.FAIL,
+            "importer is beets, but beet is not on the path - the built-in "
             "tagger will be used instead",
-            fix='install beets, or set importer = "tagger" to stop asking',
+            fix="reinstall ripdoctor, which pulls beets in with it",
         )
         return
     yield Result("importer", Level.OK, f"importing with {settings.importer}")

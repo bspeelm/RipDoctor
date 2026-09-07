@@ -48,9 +48,10 @@ class Settings:
     port: int = 8080
     bind: str = "127.0.0.1"
 
-    # Getting a record into the library. "tagger" needs nothing beyond
-    # metaflac; "beets" uses the beets already installed. ADR-007.
-    importer: str = "tagger"
+    # Getting a record into the library. "beets" is the one this ships with
+    # and depends on; "tagger" is metaflac and a directory, kept for when beets
+    # is broken halfway through a record. ADR-038.
+    importer: str = "beets"
 
     # Cutting.
     lead: float = 1.3

@@ -75,9 +75,13 @@ the music?
 pip install ripdoctor
 ```
 
-The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
-`flac` and `metaflac` on the system, plus `arecord` if you want to record.
-`ripdoctor doctor` reports which of those are missing.
+It pulls in [beets](https://beets.io), which does the tagging, the path
+formatting and the album-mode ReplayGain a finished record is filed by. Nothing
+else comes with it.
+
+The system tools it needs are `ffmpeg`, `ffprobe`, `flac` and `metaflac`, plus
+`arecord` if you want to record. `ripdoctor doctor` reports which of those are
+missing and what to install for each.
 
 ## Commands
 
@@ -108,8 +112,8 @@ that is the point of it - and every problem it reports comes with what to do
 about it.
 
 The raw sides are never cleared until the record is provably somewhere else -
-`ripdoctor archive` counts what actually arrived and says so. beets can do the
-tagging instead if you have it, but nothing requires it.
+`ripdoctor archive` counts what actually arrived and says so, asking beets where
+it filed things rather than guessing at a path.
 
 Nothing is cut until a plan validates. A track that would end before it starts,
 overlap its neighbour, collide on a track number or run past the end of the side

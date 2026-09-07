@@ -120,7 +120,7 @@ makes it testable.
 
 ## ADR-007 — beets is one importer, not the importer
 
-**Status:** accepted.
+**Status:** SUPERSEDED by ADR-038. beets is required.
 
 The base install tags with `metaflac` and places files under a configured
 library root. `ripdoctor[beets]` adds beets as an alternative importer behind
@@ -528,6 +528,13 @@ produce:
     TypeError: unsupported operand type(s) for *: 'range_iterator' and 'complex'
     TypeError: 'complex' object does not support item assignment
     TypeError: 'list' object is not an iterator
+
+**The rate is not stable.** Measured on one machine on one day: two runs in ten,
+then five, then nine. It moves with nothing this project does - the C control
+program stayed clean across the same span, including a run six times longer than
+the first. So a local failure says nothing until it repeats, and a local green
+run is a smoke test rather than the authority. CI on 3.11 to 3.13 is the
+authority, and it has never seen any of this.
 
 **What would reverse this.** The same crashes on a second 3.14 build, or on 3.13
 or earlier. Either would mean the fault is in this code after all.
@@ -1065,3 +1072,79 @@ what the ratio was standing in for.
 
 The ratio is still reported every run. It is a trend, not a gate, and this
 record is here so nobody reads a low number as evidence of a tidy repository.
+
+---
+
+## ADR-038 — beets is required
+
+**Status:** accepted. Set by the author, 2026-09-07. Supersedes ADR-007.
+
+beets is a dependency, not an extra. It is part of the flow rather than an
+alternative to part of it, and an install without it is not this application.
+
+**What ADR-007 got wrong.** It reasoned from the coupling: beets was the
+second-largest source of machine-specific assumptions in the predecessor, so it
+should be optional. That is an argument about how to *contain* a dependency, and
+it was answered - beets sits behind an interface now, with the whole application
+above it testable without beets installed. Having contained it, ADR-007 went on
+to make it optional as well, which was a decision about what the tool is, taken
+on the strength of an argument about how it was built.
+
+**What it costs.** The headline "installs with no Python dependencies" is gone.
+It was worth something, and it is not worth this: the fingerprint matching, the
+path formatting, the album-mode ReplayGain - which matters on vinyl, where one
+twelve-second fade scored +20.1 dB track gain against +6.8 for the album - the
+duplicate resolution and the library database are what the finished record is
+tagged and filed by. A record imported without them is one somebody has to fix
+later by hand.
+
+**What is kept.** The `metaflac` importer stays as `importer = "tagger"`. It is
+written, tested, and it satisfies the archive gate on its own, which makes it
+the answer when beets is broken or unavailable at the moment somebody is halfway
+through a record. Keeping working code that costs nothing is cheaper than
+deleting it and wanting it back.
+
+The dependency budget becomes "beets and nothing else" rather than zero. A
+budget of zero was a good discipline for the fourteen weeks it lasted; it is
+also how a project ends up with a worse importer to protect a number.
+
+---
+
+## ADR-039 — Versions come from tags, and 1.0 waits for a turntable
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+**The version is the tag.** `hatch-vcs` writes it from git, so there is no file
+to bump and nothing that can disagree with the tag - which is the failure the
+process this borrows from guards against with a whole step. `make release
+VERSION=x.y.z` checks that the tree is clean, on main, level with the remote and
+green, then tags and pushes. Actions runs the gates again at the tag rather than
+trusting the branch, because a tag can be pushed at any commit, including one CI
+never saw.
+
+Publishing to PyPI is part of cutting a release rather than a separate act. It
+runs last in the workflow, because it is the only step that cannot be undone: a
+release page can be deleted and made again, and a version on PyPI can only be
+yanked.
+
+Trusted publishing rather than an API token, for the same reason the artifacts
+are signed keylessly: there is no secret to store, rotate or leak, and the
+upload is bound to this workflow at this tag.
+
+**This is not 1.0, and here is what 1.0 needs.** Everything is built and tested,
+and none of it has met a turntable. The tests that carry the hardware behaviours
+- ALSA contention, the header a signal leaves behind, overrun counting, the
+auto-stop firing on a real run-out - are named and skipped, which is honest
+about their status and no substitute for running them.
+
+1.0 is when:
+
+- the whole chain has taken real records end to end, on the machine it was
+  written for, without the predecessor running beside it;
+- the hardware tier has actually run rather than been skipped;
+- somebody other than the author has installed it from PyPI and reached the
+  point of cutting a record.
+
+Until then the numbers are 0.x, and the shape of the promise is that the
+interfaces may still move. Calling it 1.0 before a needle has touched a record
+would be claiming something nobody has checked.

@@ -1,0 +1,30 @@
+# One dependency and a handful of actions, all of which move without telling
+# anyone. A pull request that has to pass the same gates as anything else is a
+# reasonable way to hear about it; an automatic merge would not be.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      # Mondays, early. Nothing here is urgent, and weekly is often enough to
+      # catch a release without the tracker becoming wallpaper.
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    groups:
+      # The dev tools move together and are reviewed together; one pull request
+      # for a ruff and a mypy bump is one review, not two.
+      tooling:
+        patterns: ["ruff", "mypy", "pytest*", "hypothesis"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]

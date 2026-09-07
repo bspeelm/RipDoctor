@@ -20,13 +20,14 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-# Deliberately empty, and enforced by scripts/budgets.py.
-# Python 3.11 is the floor because tomllib is in the stdlib from 3.11, which is
-# what lets the config layer read TOML at zero dependency cost. See ADR-004.
-dependencies = []
+# One, and enforced by scripts/budgets.py. beets does the tagging, the path
+# formatting and the album-mode ReplayGain that a finished record is filed by;
+# ADR-038 says why it stopped being optional. Python 3.11 is the floor because
+# tomllib is in the stdlib from 3.11, which is what lets the config layer read
+# TOML with nothing else. See ADR-004.
+dependencies = ["beets>=2.0"]
 
 [project.optional-dependencies]
-beets = ["beets>=2.0"]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "hypothesis>=6"]
 
 [project.scripts]
@@ -77,6 +78,7 @@ testpaths = ["tests"]
 addopts = "--strict-markers -W error"
 markers = [
   "needs_ffmpeg: requires a real ffmpeg binary on PATH",
+  "needs_beets: requires the real beet binary, not the fake runner",
   "needs_hardware: requires a real capture device; never run in CI",
 ]
 

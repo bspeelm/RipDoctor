@@ -40,9 +40,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # flac carries metaflac; beets arrives as a dependency of the package.
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg flac
       - run: pip install -e ".[dev]"
-      - run: python -m pytest -q --require=needs_ffmpeg
+      - run: python -m pytest -q --require=needs_ffmpeg --require=needs_beets
 
   # Python's failure mode is not a compile error, it is a wheel that will not
   # install. Build it, check it, install it clean, and run the binary.
@@ -64,9 +65,12 @@ jobs:
           /tmp/clean/bin/pip install dist/*.whl
           /tmp/clean/bin/ripdoctor --version
           /tmp/clean/bin/ripdoctor doctor --json > /dev/null || true
-      - name: the base install must pull in nothing
+      # The install is allowed beets and whatever beets itself needs. What it
+      # is not allowed is a dependency of this project's own that nobody
+      # decided on - scripts/budgets.py holds that line against pyproject.toml,
+      # and this checks the thing pip actually resolved.
+      - name: the install pulls in what it says it does
         run: |
-          n=$(/tmp/clean/bin/pip list --not-required --format=freeze \
-              | grep -vc -E '^(ripdoctor|pip|setuptools|wheel)=' || true)
-          test "$n" -eq 0 || { /tmp/clean/bin/pip list; \
-            echo "base install gained dependencies"; exit 1; }
+          /tmp/clean/bin/pip show ripdoctor | grep -q '^Requires: beets$' || {
+            /tmp/clean/bin/pip show ripdoctor; echo "unexpected requirements"; exit 1; }
+          /tmp/clean/bin/beet version

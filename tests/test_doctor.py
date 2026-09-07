@@ -255,16 +255,18 @@ def test_the_doctor_never_raises_however_broken_the_machine(
 
 def test_the_importer_in_use_is_reported() -> None:
     r = find(list(D.importing(Settings(), everything())), "importer")
-    assert r.level is D.Level.OK and "tagger" in r.summary
+    assert r.level is D.Level.OK and "beets" in r.summary
 
 
-def test_asking_for_beets_without_it_is_a_warning_not_a_silent_swap() -> None:
+def test_beets_missing_is_a_broken_install_rather_than_a_silent_swap() -> None:
     """`choose` falls back rather than refusing, and a silent fallback is
-    exactly what this exists to say out loud."""
+    exactly what this exists to say out loud. beets is a dependency, so its
+    absence is not a configuration problem - it is a broken install."""
     s = replace(Settings(), importer="beets")
     r = find(list(D.importing(s, FakeRunner(installed={"ffmpeg"}))), "importer")
-    assert r.level is D.Level.WARN
+    assert r.level is D.Level.FAIL
     assert "built-in tagger will be used" in r.summary
+    assert "reinstall" in r.fix
 
 
 def test_an_importer_nobody_has_heard_of_is_named() -> None:

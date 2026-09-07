@@ -22,6 +22,7 @@ Changing any number requires a decision record saying why it moved.
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 import tomllib
@@ -33,6 +34,11 @@ MAX_CODE_LINES = 7000  # ADR-036
 MAX_COMMENT_RATIO = 25
 MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
+
+# What the install is allowed to pull in. It was empty for fourteen weeks and
+# that was a good discipline; it is also how a project ends up with a worse
+# importer to protect a number. ADR-038.
+ALLOWED_DEPS = {"beets"}
 
 # The prose ratio is a trend rather than a gate. It was chosen as the measure of
 # whether the documentation revision happened, and it stopped measuring that the
@@ -142,9 +148,11 @@ def main() -> int:
 
     with (ROOT / "pyproject.toml").open("rb") as fh:
         deps = tomllib.load(fh)["project"]["dependencies"]
-    print(f"deps:     {len(deps)} runtime dependencies (budget 0)")
-    if deps:
-        print("\nthe base install must pull in nothing.")
+    names = sorted(re.split(r"[<>=!~ \[]", d)[0].lower() for d in deps)
+    print(f"deps:     {names} (budget {sorted(ALLOWED_DEPS)})")
+    if set(names) - ALLOWED_DEPS:
+        print(f"\nunexpected dependencies: {sorted(set(names) - ALLOWED_DEPS)}")
+        print("Adding one is a decision, not a convenience. Write a record.")
         failed = True
 
     if failed:

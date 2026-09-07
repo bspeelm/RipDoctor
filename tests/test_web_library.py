@@ -224,9 +224,17 @@ def a_plan_dict() -> dict:
 
 
 def with_library(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """A pool and a library, filed by the built-in tagger.
+
+    These are about the archive gate and the import step rather than about
+    beets, so the importer that puts files where this project would put them is
+    the one to ask.
+    """
     service = a_service(tmp_path)
     library = tmp_path / "music"
-    service.settings = replace(service.settings, library=str(library))
+    service.settings = replace(
+        service.settings, library=str(library), importer="tagger"
+    )
     F.write_json(service.layout.plan_file("album"), a_plan_dict())
     return service, library
 

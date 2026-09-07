@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  # Trusted publishing and keyless signing both work the same way: id-token
+  # mints an OIDC token that binds the upload to this workflow, and there is no
+  # API token to store, rotate or leak. attestations writes the provenance.
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # hatch-vcs derives the version from tags
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The gates run again here rather than trusting the branch: a tag can be
+      # pushed at any commit, including one CI never saw.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg flac
+      - run: pip install -e ".[dev]"
+      - run: python -m ruff format --check .
+      - run: python -m ruff check .
+      - run: python -m mypy
+      - run: python -m pytest -q --require=needs_ffmpeg --require=needs_beets
+      - run: python scripts/budgets.py
+
+      - run: pip install build twine
+      - run: python -m build
+
+      # hatch-vcs writes the version from the tag, so a mismatch means the tree
+      # was dirty or the tags did not arrive - either way the artifact is not
+      # the thing the tag names, and it is cheaper to find that out here than
+      # from a release nobody can reproduce.
+      - name: the artifact matches the tag
+        run: |
+          built=$(ls dist/*.whl | sed -E 's/.*ripdoctor-([^-]+)-py3.*/\1/')
+          want="${GITHUB_REF_NAME#v}"
+          test "$built" = "$want" || {
+            echo "::error::tag ${GITHUB_REF_NAME} but the wheel says $built"
+            exit 1; }
+
+      - run: python -m twine check dist/*
+
+      # Python's failure mode is not a compile error, it is a wheel that will
+      # not install. Prove it does, from the artifact about to be published.
+      - name: install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/ripdoctor --version
+          /tmp/clean/bin/beet version
+
+      - name: sign the artifacts
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+
+      # Published beside the artifacts so verifying needs no GitHub account:
+      # `gh attestation verify` without --bundle asks the API, which requires a
+      # login; with one it reads from disk.
+      - name: publish the release
+        run: |
+          cp "${{ steps.attest.outputs.bundle-path }}" attestation.jsonl
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/* attestation.jsonl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Last, because it is the only step that cannot be undone. Everything
+      # above can be deleted and done again; a version on PyPI cannot be
+      # replaced, only yanked.
+      - uses: pypa/gh-action-pypi-publish@release/v1
