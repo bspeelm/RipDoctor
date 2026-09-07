@@ -11,7 +11,7 @@ from ripdoctor.integrations import tagger as T
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
-from ripdoctor.web.routes.records import slug_of
+from ripdoctor.web.routes.records import named, slug_of
 from ripdoctor.web.service import Service
 
 # The same ceiling the request body has. An original from the archive is
@@ -29,17 +29,19 @@ def _album(service: Service, slug: str) -> Path:
     where = service.layout.plan_file(slug)
     if not where.is_file():
         raise H.HttpError(404, f"no plan for {slug}")
-    plan = F.read_plan(where)
+    # The decided names, not one document's. A library path built from whichever
+    # of the two happened to be read points at Unknown Artist the moment that
+    # one is blank, and the record is then reported as not being in a library it
+    # is plainly in.
+    album, artist, _date, _old = named(service.layout, slug)
     if service.settings.library:
-        filed = T.album_dir(service.settings.library, plan.artist, plan.album)
+        filed = T.album_dir(service.settings.library, artist, album)
         if filed.is_dir():
             return filed
     cut = service.layout.review_dir(slug)
     if cut.is_dir() and any(cut.glob("*.flac")):
         return cut
-    raise H.HttpError(
-        409, f"{plan.album} has no cut tracks and is not in the library yet"
-    )
+    raise H.HttpError(409, f"{album or slug} has no cut tracks and is not filed yet")
 
 
 def add(app: App, service: Service) -> None:

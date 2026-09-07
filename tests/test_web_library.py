@@ -399,7 +399,7 @@ def uploading(service, body: bytes = b""):  # type: ignore[no-untyped-def]
 def test_asking_about_a_record_with_nothing_cut_says_so(tmp_path: Path) -> None:
     service, _library = with_library(tmp_path)
     r = get(build(service), "/api/artwork/album", service)
-    assert r.status == 409 and "not in the library yet" in r.json()["error"]
+    assert r.status == 409 and "not filed yet" in r.json()["error"]
 
 
 def test_art_can_be_given_to_a_record_before_it_is_imported(tmp_path: Path) -> None:
@@ -623,3 +623,23 @@ def test_re_labelling_a_record_with_only_a_name_is_refused(tmp_path: Path) -> No
     r = post(build(service), "/api/relabel/album", service, {"mbid": "x"})
     assert r.status == 409 and "no saved cut" in r.json()["error"]
     assert json.loads(service.layout.spec_file("album").read_text())["sides"] == []
+
+
+def test_art_finds_the_album_when_only_the_spec_carries_its_name(
+    tmp_path: Path,
+) -> None:
+    """A library path built from whichever document happened to be read points
+    at Unknown Artist the moment that one is blank, and the record is then
+    reported as not being in a library it is plainly in."""
+    service, library = with_library(tmp_path)
+    album = library / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    (album / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
+    F.write_json(
+        service.layout.plan_file("album"),
+        {"slug": "album", "album": "", "artist": "", "date": "", "sides": []},
+    )
+    F.remember(service.layout, "album", album="A Record", artist="A Band")
+    service.runner = Imaging().expect("ffprobe", stdout=probed())
+    assert uploading(service, JPEG).status == 200
+    assert (album / "cover.jpg").is_file()
