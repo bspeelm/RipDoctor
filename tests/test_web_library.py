@@ -548,3 +548,18 @@ def test_a_record_that_is_not_there_reports_nothing(tmp_path: Path) -> None:
     service, _library = with_library(tmp_path)
     body = get(build(service), "/api/library/existing/album", service).json()
     assert body["existing"] is None
+
+
+def test_a_record_with_no_cut_is_not_ready_rather_than_missing(
+    tmp_path: Path,
+) -> None:
+    """A record captured and not yet cut is the ordinary state. The gate
+    answers "no, and here is why" rather than a 404 the page has to swallow -
+    which it does silently, so the reason never reaches anybody."""
+    service, _library = with_library(tmp_path)
+    service.layout.plan_file("album").unlink()
+    r = get(build(service), "/api/archive/album", service)
+    assert r.status == 200
+    body = r.json()
+    assert body["ready"] is False and "first pass" in body["why"]
+    assert body["sides"] == [] and body["will_remove"] == []

@@ -52,8 +52,34 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/albums")
     def albums(r: H.Request) -> H.Response:
+        """Every record, with the two things that decide what can be done to it.
+
+        Where it lives, because an archived record is finished and a raw one is
+        work in progress; and whether its saved plan is the superseded format,
+        because that one cannot be edited here and saying so beats a record
+        that silently refuses to open.
+        """
         include = r.query.get("archive") == "1"
-        return H.ok({"albums": layout.albums(include_archive=include)})
+        found = []
+        for slug in layout.albums(include_archive=include):
+            named = _named(layout, slug)
+            found.append(
+                {
+                    "slug": slug,
+                    "where": "raw" if (layout.raw / slug).is_dir() else "archive",
+                    "old_format": named is None,
+                    # What a record is called, so re-ripping one can fill the
+                    # fields in from what was decided last time rather than
+                    # from somebody retyping it.
+                    "album": "" if named is None else named[0],
+                    "artist": "" if named is None else named[1],
+                    "date": "" if named is None else named[2],
+                    # Which sides exist, so re-ripping one can say what is
+                    # already there rather than making somebody look.
+                    "sides": layout.sides_on_disk(slug),
+                }
+            )
+        return H.ok({"albums": found})
 
     @app.route("GET", "/api/album/([^/]+)")
     def album(r: H.Request) -> H.Response:
@@ -240,6 +266,25 @@ def add(app: App, service: Service) -> None:
         spec = replace(F.spec_of(plan), mbid=str(body.get("mbid", "")))
         spec_path, plan_path = F.save(layout, slug, spec, plan)
         return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
+
+
+def _named(layout: F.Layout, slug: str) -> tuple[str, str, str] | None:
+    """What a record is called, or nothing if its plan cannot be read here.
+
+    Refusing the superseded `cuts` format is deliberate - re-fit rather than
+    convert - so a listing says which records that applies to rather than
+    letting each one fail when somebody opens it.
+    """
+    where = layout.plan_file(slug)
+    if not where.is_file():
+        return "", "", ""
+    try:
+        plan = F.read_plan(where)
+    except OldFormat:
+        return None
+    except (BadPlan, OSError, ValueError):
+        return "", "", ""
+    return plan.album, plan.artist, plan.date
 
 
 def _version(stamp: str) -> str:

@@ -91,6 +91,8 @@ class Live:
             out["overruns"] = self.outcome.overruns
             out["overrun_ms"] = self.outcome.overrun_ms
             out["path"] = None if not self.outcome.path else str(self.outcome.path)
+            out["bytes"] = self.outcome.bytes
+            out["duration"] = self.outcome.seconds
             out["error"] = self.outcome.error or self.error
         return out
 
@@ -164,8 +166,9 @@ class Recorder:
     def status(self) -> dict[str, Any]:
         live = self.live
         if live is None:
-            # Not recording is a state, not an absence: the page shows it.
-            return {"running": False}
+            # Not recording is a state, not an absence: the page shows it, and
+            # it polls the stage whether or not anything has ever run.
+            return {"running": False, "stage": "idle"}
         return live.as_dict(self.now(), self.dwell, self.below)
 
     def _running(self) -> Live:

@@ -254,7 +254,21 @@ def add(app: App, service: Service) -> None:
 
     def _survey(r: H.Request, read: bool) -> dict[str, Any]:
         slug = slug_of(r)
-        plan = _plan_of(service, slug)
+        plan = _maybe_plan(service, slug)
+        if plan is None:
+            # A record that has been captured and not yet cut is the ordinary
+            # state, not a missing one. The gate's answer is "no, and here is
+            # why" rather than a 404 the page has to swallow.
+            return {
+                "ready": False,
+                "why": "no saved cut yet - run a first pass",
+                "library_path": None,
+                "library_tracks": 0,
+                "expected": 0,
+                "will_archive_to": str(layout.archive / slug),
+                "sides": [],
+                "will_remove": [],
+            }
         return AR.survey(
             service.runner,
             layout,
@@ -347,6 +361,13 @@ def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
 
 def _isdir(path: str) -> bool:
     return Path(path).is_dir()
+
+
+def _maybe_plan(service: Service, slug: str):  # type: ignore[no-untyped-def]
+    """The saved cut, or nothing when a record has not been cut yet."""
+    if not service.layout.plan_file(slug).is_file():
+        return None
+    return _plan_of(service, slug)
 
 
 def _plan_of(service: Service, slug: str):  # type: ignore[no-untyped-def]

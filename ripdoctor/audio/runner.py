@@ -68,6 +68,10 @@ class Process(Protocol):
     def stdout(self) -> IO[bytes] | None:
         """What it is writing, when it was started to be read from."""
 
+    @property
+    def stdin(self) -> IO[bytes] | None:
+        """What it is reading, when it was started to be written to."""
+
     def poll(self) -> int | None: ...
 
     def interrupt(self) -> None: ...
@@ -94,6 +98,7 @@ class Runner(Protocol):
         *,
         stderr_path: str | None = ...,
         reading: bool = ...,
+        writing: bool = ...,
     ) -> Process: ...
 
     def which(self, tool: str) -> str | None: ...
@@ -136,6 +141,7 @@ class RealRunner:
         *,
         stderr_path: str | None = None,
         reading: bool = False,
+        writing: bool = False,
     ) -> Process:
         """Begin a program and return while it runs.
 
@@ -153,6 +159,7 @@ class RealRunner:
         try:
             proc = subprocess.Popen(  # noqa: S603 - argv list, never shell=True
                 args,
+                stdin=subprocess.PIPE if writing else None,
                 stdout=subprocess.PIPE if reading else subprocess.DEVNULL,
                 stderr=errors,
             )
@@ -182,6 +189,10 @@ class Started:
     @property
     def stdout(self) -> IO[bytes] | None:
         return self.proc.stdout
+
+    @property
+    def stdin(self) -> IO[bytes] | None:
+        return self.proc.stdin
 
     def poll(self) -> int | None:
         return self.proc.poll()
@@ -263,6 +274,7 @@ class FakeRunner:
         *,
         stderr_path: str | None = None,
         reading: bool = False,
+        writing: bool = False,
     ) -> Process:
         args = tuple(str(a) for a in argv)
         if not args:
@@ -270,7 +282,11 @@ class FakeRunner:
         self.calls.append(args)
         if self.installed is not None and args[0] not in self.installed:
             raise ToolMissing(args[0])
-        proc = FakeProcess(self.exit_after, reading=io.BytesIO(self.output))
+        proc = FakeProcess(
+            self.exit_after,
+            reading=io.BytesIO(self.output),
+            writing=Kept(),
+        )
         self.started.append(proc)
         return proc
 
@@ -287,12 +303,24 @@ class FakeRunner:
         return hits[0]
 
 
+class Kept(io.BytesIO):
+    """A pipe that keeps what was written to it.
+
+    A real one is closed when the writer is done and the bytes are gone. A test
+    needs to look at them afterwards, so closing this is a no-op.
+    """
+
+    def close(self) -> None:
+        pass
+
+
 @dataclass
 class FakeProcess:
     """A started program that never existed."""
 
     exit_after: int | None = None
     reading: IO[bytes] | None = None
+    writing: IO[bytes] | None = None
     polls: int = 0
     returncode: int | None = None
     interrupted: bool = False
@@ -311,6 +339,10 @@ class FakeProcess:
     @property
     def stdout(self) -> IO[bytes] | None:
         return self.reading
+
+    @property
+    def stdin(self) -> IO[bytes] | None:
+        return self.writing
 
     def interrupt(self) -> None:
         self.interrupted = True

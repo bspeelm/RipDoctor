@@ -44,7 +44,7 @@ def recording_service(tmp_path: Path, script: str = "m" * 8):  # type: ignore[no
 def test_nothing_recording_is_reported_as_a_state(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     body = get(build(service), "/api/rip/status", service).json()
-    assert body == {"running": False}
+    assert body == {"running": False, "stage": "idle"}
 
 
 def test_a_side_records_and_reports_how_it_ended(tmp_path: Path) -> None:
@@ -215,7 +215,11 @@ def test_interrupted_captures_are_found_across_every_record(tmp_path: Path) -> N
     service = a_service(tmp_path)
     a_partial(service)
     body = get(build(service), "/api/rip/orphans", service).json()
-    assert body["orphans"] == [{"slug": "album", "side": "b", "bytes": 8004}]
+    found = body["orphans"][0]
+    assert (found["slug"], found["side"], found["bytes"]) == ("album", "b", 8004)
+    # How long it is, which is what says whether it is most of a side or a
+    # false start. A WAV that was never closed has no length in its header.
+    assert found["seconds"] >= 0 and found["recording"] is False
 
 
 def test_salvaging_finishes_the_capture(tmp_path: Path) -> None:
@@ -263,7 +267,16 @@ def test_the_sides_of_a_record_show_what_is_finished_and_what_is_not(
     service = a_service(tmp_path)
     a_partial(service)
     body = get(build(service), "/api/rip/sides/album", service).json()
-    assert body["sides"] == ["side-a.flac"] and body["capturing"] == ["b"]
+    by_side = {x["side"]: x for x in body["sides"]}
+    assert by_side["a"]["finished"] and by_side["a"]["bytes"] > 0
+    assert not by_side["b"]["finished"], "a capture in progress is not a side"
+    assert by_side["b"]["slug"] == "album"
+
+
+def test_a_record_with_nothing_captured_lists_nothing(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    body = get(build(service), "/api/rip/sides/missing", service).json()
+    assert body["sides"] == []
 
 
 def test_every_capture_route_needs_a_session(tmp_path: Path) -> None:
@@ -303,3 +316,152 @@ def test_a_side_in_the_archive_is_not_reachable_from_there(tmp_path: Path) -> No
     )
     assert r.status == 404
     assert (archived / "side-z.flac").is_file()
+
+
+# ------------------------------------------------- the device is agreed on
+
+
+def test_the_configured_device_is_used_when_none_is_asked_for(
+    tmp_path: Path,
+) -> None:
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    r = post(build(service), "/api/rip/start", service, {"slug": "album", "side": "b"})
+    assert r.status == 202 and r.json()["device"] == "hw:Rx,0"
+
+
+def test_a_device_that_is_not_the_configured_one_is_refused(tmp_path: Path) -> None:
+    """The mistake this exists to prevent. On 2026-08-23 a rip ran for 162
+    seconds against an onboard codec whose input was set to Rear Mic, and
+    everything needed to catch it was already known and used only to sort a
+    dropdown - which is exactly what happened again the first time somebody
+    pressed Start on this page.
+    """
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    r = post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "b", "device": "hw:PCH,0"},
+    )
+    assert r.status == 409
+    assert "hw:Rx,0" in r.json()["error"] and "hw:PCH,0" in r.json()["error"]
+    assert service.recorder.live is None, "it started anyway"
+
+
+def test_another_device_is_allowed_when_it_is_asked_for_twice(
+    tmp_path: Path,
+) -> None:
+    """A refusal that cannot be overridden is a refusal that gets worked around
+    by editing the configuration mid-session."""
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    r = post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {
+            "slug": "album",
+            "side": "b",
+            "device": "hw:PCH,0",
+            "force_device": True,
+        },
+    )
+    assert r.status == 202 and r.json()["device"] == "hw:PCH,0"
+
+
+def test_a_format_the_card_cannot_take_is_refused_before_the_needle_is_down(
+    tmp_path: Path,
+) -> None:
+    """It otherwise fails inside arecord, seconds after somebody set the arm
+    down - and the message comes back as `audio open error`."""
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    r = post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "b", "format": "S24_LE"},
+    )
+    assert r.status == 400 and "S24_LE" in r.json()["error"]
+
+
+def test_the_rate_and_format_asked_for_are_the_ones_recorded(
+    tmp_path: Path,
+) -> None:
+    """The form shows them, so the form has to mean something."""
+    service, tape = recording_service(tmp_path)
+    service.recorder = a_recorder(tape)
+    post(
+        build(service),
+        "/api/rip/start",
+        service,
+        {"slug": "album", "side": "b", "rate": 44100, "format": "S16_LE"},
+    )
+    started = " ".join(service.runner.calls[0])
+    assert "44100" in started and "S16_LE" in started
+
+
+def test_the_listing_says_which_one_is_configured(tmp_path: Path) -> None:
+    """The page picked the first in the list, which is whatever the
+    motherboard calls its own audio."""
+    service = a_service(tmp_path)
+    service.settings = __import__("dataclasses").replace(
+        service.settings, capture_device="hw:Rx,0"
+    )
+    service.runner = FakeRunner().expect(
+        "-l",
+        stdout=b"card 0: PCH [HDA Intel PCH], device 0: ALC1150 [ALC1150]\n"
+        b"card 1: Rx [SAVITECH], device 0: USB Audio [USB Audio]\n",
+    )
+    body = get(build(service), "/api/rip/devices", service).json()
+    assert [d["id"] for d in body["devices"]] == ["hw:PCH,0", "hw:Rx,0"]
+    assert [d["configured"] for d in body["devices"]] == [False, True]
+    assert body["rate"] and body["format"]
+
+
+# ------------------------------------------------ what the page reads after
+
+
+def test_a_finished_capture_reports_what_it_wrote(tmp_path: Path) -> None:
+    """Stopping is not finishing. Encoding a twenty-minute side takes most of a
+    minute, and the page has to be able to wait for it and then say what
+    landed - not report `NaN MB` for a file that does not exist yet."""
+    service, _tape = recording_service(tmp_path, "m" * 6)
+
+    class Encoding(FakeRunner):
+        """A fake ffmpeg that leaves the side it was told to write."""
+
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "ffmpeg" and args[-1].endswith(".flac"):
+                Path(args[-1]).write_bytes(b"fLaC" + b"\x00" * 5000)
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    service.runner = Encoding(exit_after=6)
+    app = build(service)
+    post(app, "/api/rip/start", service, {"slug": "album", "side": "b"})
+    st = get(app, "/api/rip/status", service).json()
+    assert st["stage"] == "done", st.get("error")
+    assert st["path"] and st["path"].endswith("side-b.flac")
+    assert st["bytes"] > 0 and st["duration"] > 0
+    assert "overruns" in st
+
+
+def test_the_stage_says_when_it_is_still_encoding(tmp_path: Path) -> None:
+    """What the page polls on. Without it, a stop looks finished the moment it
+    is asked for, and the capture is still on disk as a WAV - which is how a
+    completed rip gets offered back as wreckage to salvage."""
+    from ripdoctor.audio import session as S
+
+    service, _tape = recording_service(tmp_path)
+    service.recorder = Recorder(spawn=lambda _w: None, now=lambda: 1000.0)
+    live = service.recorder.start(
+        FakeRunner(), "hw:Rx,0", tmp_path, "album", "b", C.Format()
+    )
+    assert live.stage == "recording"
+    live.outcome = S.Outcome(path=None, reason="stopped by hand")
+    assert live.stage == "encoding"
+    live.outcome = S.Outcome(path=tmp_path / "side-b.flac", reason="stopped by hand")
+    assert live.stage == "done"

@@ -1009,7 +1009,11 @@ let ripAlbums = [];
 async function loadRerip() {
   try {
     const { albums } = await api("/api/albums?archive=1");
-    ripAlbums = albums.filter((a) => a.artist || a.album);   // nothing to pre-fill from otherwise
+    // Every record on disk, not only the ones with a saved cut. A side just
+    // captured has no plan yet and therefore no artist or album anywhere but
+    // in the form somebody typed them into - which a reload throws away. That
+    // is exactly the record you want to offer, because side b comes next.
+    ripAlbums = albums.map((a) => ({ ...a, ...named(a) }));
   } catch { ripAlbums = []; }
   renderRerip();
 }
@@ -1017,21 +1021,36 @@ async function loadRerip() {
 // A <select> cannot be typed into, and this list only grows. The filter narrows
 // the options rather than replacing the control, so the select stays the single
 // source of truth for what is pinned.
+// What to call a record. The plan when there is one, and otherwise the slug
+// read backwards - it was built from an artist and an album, so it gives them
+// back, give or take the punctuation. A guess offered for correction, in a
+// field that can be corrected.
+function named(a) {
+  if (a.artist || a.album) return { artist: a.artist, album: a.album };
+  return guessFromSlug(a.slug);
+}
+
 function renderRerip() {
   const sel = $("#rip-rerip");
   const q = $("#rip-rerip-q").value.trim().toLowerCase();
   const keep = ripPinned;
   sel.innerHTML = "";
-  sel.appendChild(el("option", "", "— new album —"));
+  // The value has to be set explicitly: an option without one takes its own
+  // label as its value, so `sel.value = ""` below matches nothing and the
+  // control renders blank rather than showing this.
+  const fresh = el("option", "", "— new album —");
+  fresh.value = "";
+  sel.appendChild(fresh);
   let shown = 0;
   for (const a of ripAlbums) {
-    const label = `${a.artist} — ${a.album}  (${a.where}: ${a.sides.join(" ")})`;
+    const sides = (a.sides || []).join(" ") || "no sides yet";
+    const label = `${a.artist} — ${a.album}  (${a.where}: ${sides})`;
     if (q && !label.toLowerCase().includes(q) && !a.slug.toLowerCase().includes(q)) continue;
     const o = el("option", "", label);
     o.value = a.slug;
     o.dataset.artist = a.artist || "";
     o.dataset.album = a.album || "";
-    o.dataset.sides = a.sides.join(" ");
+    o.dataset.sides = (a.sides || []).join(" ");
     sel.appendChild(o);
     shown++;
   }
@@ -1041,7 +1060,7 @@ function renderRerip() {
     if (a) {
       const o = el("option", "", `${a.artist} — ${a.album}  (pinned)`);
       o.value = a.slug; o.dataset.artist = a.artist; o.dataset.album = a.album;
-      o.dataset.sides = a.sides.join(" ");
+      o.dataset.sides = (a.sides || []).join(" ");
       sel.appendChild(o); shown++;
     }
   }
@@ -1178,7 +1197,7 @@ function updateAutostopWarning(st, running) {
 
 let ripDevices = [];
 
-function fillRates() {
+function fillRates(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-rate");
   const prev = sel.value || localStorage.getItem("ripdoctor:rip:rate") || "48000";
@@ -1186,13 +1205,18 @@ function fillRates() {
   // what the device actually accepts — offering 96k on hardware that cannot do
   // it just moves the failure into the middle of a side
   const rates = (d && d.rates && d.rates.length) ? d.rates : [44100, 48000, 96000];
+  // The configured rate, when this machine has one - it is the rate the
+  // thresholds were measured at and the one the chain is actually running.
+  const want = info && info.rate ? String(info.rate) : prev;
   for (const r of rates) {
-    const o = el("option", "", `${r} Hz${r === 48000 ? "  (current setup)" : ""}`);
+    const o = el("option", "", `${r} Hz${String(r) === want ? "  (configured)" : ""}`);
     o.value = String(r);
     sel.appendChild(o);
   }
-  sel.value = rates.map(String).includes(prev) ? prev : String(rates.includes(48000) ? 48000 : rates[0]);
-  fillFormats();
+  sel.value = rates.map(String).includes(want)
+    ? want
+    : String(rates.includes(48000) ? 48000 : rates[0]);
+  fillFormats(info);
 }
 
 const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
@@ -1200,10 +1224,13 @@ const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
 // Default to the WIDEST the device offers, not the narrowest. The Waxwing sends
 // 24-bit and capturing it as 16 throws the low 8 bits away, which is most of
 // the reason for the optical path in the first place.
-function fillFormats() {
+function fillFormats(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-format");
-  const prev = sel.value || localStorage.getItem("ripdoctor:rip:format") || "";
+  const prev = (info && info.format)
+    || sel.value
+    || localStorage.getItem("ripdoctor:rip:format")
+    || "";
   sel.innerHTML = "";
   const formats = (d && d.formats && d.formats.length) ? d.formats : ["S16_LE"];
   for (const f of formats) {
@@ -1216,18 +1243,30 @@ function fillFormats() {
 
 async function loadDevices() {
   try {
-    const { devices } = await api("/api/rip/devices");
+    const info = await api("/api/rip/devices");
+    const devices = info.devices;
     ripDevices = devices;
     const sel = $("#rip-device"); sel.innerHTML = "";
     for (const d of devices) {
-      const o = el("option", "", `${d.id} — ${d.name}${d.likely_turntable ? "  (turntable)" : ""}`);
+      const o = el("option", "", `${d.id} — ${d.name}${d.configured ? "  (configured)" : ""}`);
       o.value = d.id;
       sel.appendChild(o);
     }
-    if (devices.length) sel.value = devices[0].id;
-    else $("#rip-err").textContent = "no capture device found — is the interface plugged in?";
-    fillRates();
-    sel.onchange = fillRates;
+    // The configured one, never simply the first. Sorted by card number, the
+    // first is whatever the motherboard calls its own audio - which is how a
+    // rip runs against an onboard codec with its input set to Rear Mic.
+    if (devices.some((d) => d.id === info.configured)) {
+      sel.value = info.configured;
+    } else if (!devices.length) {
+      $("#rip-err").textContent = "no capture device found — is the interface plugged in?";
+    } else {
+      sel.value = "";
+      $("#rip-err").textContent = info.configured
+        ? `${info.configured} is configured but this machine cannot see it — check the cable`
+        : "no capture device is configured — set capture_device, or pick one below";
+    }
+    fillRates(info);
+    sel.onchange = () => fillRates(info);
     const remember = () => {
       try {
         localStorage.setItem("ripdoctor:rip:rate", $("#rip-rate").value);
@@ -1598,11 +1637,30 @@ async function ripStart() {
   }
 }
 
+// Stopping is not finishing. The request only asks the capture to stop; the
+// side then has to be encoded, which for a twenty-minute WAV is most of a
+// minute. Reporting at the moment of asking showed `NaN MB` for a file that
+// did not exist yet, and - worse - looked for unfinished captures while the
+// one just made was still on disk, so a completed rip was offered back as
+// wreckage to salvage.
+async function whenCaptureSettles(limit = 600) {
+  for (let i = 0; i < limit; i++) {
+    const st = await api("/api/rip/status");
+    if (!st.running && st.stage !== "encoding") return st;
+    $("#rip-state").textContent = st.stage === "encoding" ? "encoding…" : "stopping…";
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new Error("the capture is taking longer than expected to finish");
+}
+
 async function ripStop() {
   $("#rip-err").textContent = "";
   $("#rip-state").textContent = "encoding…";
+  $("#rip-stop").disabled = true;
   try {
-    const r = await postJSON("/api/rip/stop", {});
+    await postJSON("/api/rip/stop", {});
+    const r = await whenCaptureSettles();
+    if (r.error) throw new Error(r.error);
     if (r.kind === "punch") {
       // Not a side: no letter to bump, and the next step is Find the track.
       $("#rip-done").textContent =
@@ -1612,7 +1670,8 @@ async function ripStop() {
       return;
     }
     $("#rip-done").textContent =
-      `wrote side-${r.side}.flac — ${fmt(r.duration)}, ${(r.bytes / 1e6).toFixed(0)} MB, valid FLAC`;
+      `wrote side-${r.side}.flac — ${fmt(r.duration)}, ${(r.bytes / 1e6).toFixed(0)} MB`
+      + (r.overruns ? `   ·   ${r.overruns} overruns, ${r.overrun_ms} ms lost` : "");
     // bump the side letter so the next one is ready to go
     const sv = $("#rip-side").value.trim();
     if (/^[a-z]$/.test(sv)) $("#rip-side").value = String.fromCharCode(sv.charCodeAt(0) + 1);

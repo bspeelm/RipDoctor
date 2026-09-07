@@ -49,10 +49,12 @@ def test_every_track_says_whether_it_can_be_punched(tmp_path: Path) -> None:
     assert body["tracks"][0]["punch"] and body["tracks"][1]["punch"] is None
 
 
-def test_a_record_with_no_plan_is_a_404(tmp_path: Path) -> None:
-
+def test_a_record_with_no_plan_has_nothing_to_punch(tmp_path: Path) -> None:
+    """Not a 404. A record captured and not yet cut is the ordinary state, and
+    the page swallows a 404 silently - so the reason would reach nobody."""
     service = a_service(tmp_path)
-    assert get(build(service), "/api/punch/album", service).status == 404
+    body = get(build(service), "/api/punch/album", service).json()
+    assert body["tracks"] == [] and "no saved cut" in body["why"]
 
 
 # ---------------------------------------------------------------- locate

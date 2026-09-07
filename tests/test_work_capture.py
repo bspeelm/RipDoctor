@@ -50,7 +50,7 @@ def a_capture(
 
 def test_nothing_recording_is_a_state_not_an_absence() -> None:
     """The page shows it rather than treating it as an error."""
-    assert a_recorder().status() == {"running": False}
+    assert a_recorder().status() == {"running": False, "stage": "idle"}
 
 
 def test_a_finished_capture_reports_how_it_ended(tmp_path: Path) -> None:

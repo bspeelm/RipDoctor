@@ -118,6 +118,32 @@ the boundary by counting seconds does not work, and is not their job.
 
 ## Traps that are not about detection
 
+**Stopping a capture is not finishing it.** Asking a twenty-minute side to
+stop returns at once; encoding it takes most of a minute, during which the
+capture is still on disk as a WAV. A page that reports at the moment of asking
+shows a size for a file that does not exist yet, and - worse - looks for
+unfinished captures while the one just made is still lying there, so a
+completed rip is offered back as wreckage to salvage. Report when it has
+landed, not when it was asked for.
+
+**Listening to a capture means waiting for it, not racing it.** A monitor that
+hands the growing file to a decoder runs at the same speed as the writer, so it
+sits at the end of the file and every jitter in either direction is an
+end-of-stream. A decoder resyncing after one sounds like a burst of loud static
+- a fault in the monitoring, on a recording that is perfect, which is the worst
+shape a fault can take.
+
+A larger head start only delays that. The fix is a reader that waits at the end
+of the file and continues when more arrives, feeding the encoder through a pipe:
+then the lag is a choice rather than a defence, and half a second is enough.
+
+**A capture device is chosen, never defaulted to.** The first device a machine
+lists is whatever the motherboard calls its own audio, and its input is
+whatever some other program last selected. Recording from it produces a file
+that looks like a quiet record: signal present, nothing musical in it. Name the
+device, check the name against what the machine can currently see, and refuse a
+different one unless it is asked for twice.
+
 **The side's loudest moment is often the needle drop**, not music — a brief
 impulse in the lead-in that can reach full scale. Reading a peak measurement
 without checking *where* it falls will convince you a clean record is clipped.

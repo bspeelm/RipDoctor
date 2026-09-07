@@ -28,6 +28,9 @@ FINISHED = "{stem}-{letter}.flac"
 # A side, or a punch - a re-recording of one track. They are captured the same
 # way and must never be confused afterwards, so the stem is part of the name:
 # `punch-7.flac` does not match `side-*.flac` and no side scan can see it.
+# A WAV header, before the samples start.
+HEADER_BYTES = 44
+
 STEMS = ("side", "punch")
 SUFFIX = ".capturing.wav"
 
@@ -249,7 +252,7 @@ def wav_format(path: str | Path, fallback: Format) -> Format:
     """
     try:
         with Path(path).open("rb") as f:
-            header = f.read(44)
+            header = f.read(HEADER_BYTES)
     except OSError:
         return fallback
     if len(header) < 40 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
@@ -269,7 +272,7 @@ def meter(path: str | Path, fallback: Format) -> tuple[Levels, Format] | None:
     try:
         with Path(path).open("rb") as f:
             f.seek(0, 2)
-            if f.tell() < need + 44:
+            if f.tell() < need + HEADER_BYTES:
                 return None
             f.seek(-need, 2)
             raw = f.read(need)
