@@ -5,11 +5,11 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# A slug or side identifier must start alphanumeric and contain only
-# alphanumerics, dot, underscore and hyphen. Leading dot and leading hyphen are
-# both excluded: one hides a file, the other is read as an option by anything
-# that later passes the name to a command.
-_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Alphanumerics, dot, underscore and hyphen, and the first character may not be
+# a dot or a hyphen: one hides the file, the other is read as an option by
+# anything that later passes the name to a command. A leading underscore is
+# allowed, because it does neither and marks a directory as not being a record.
+_SAFE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 MAX_COMPONENT = 200
 

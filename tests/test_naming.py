@@ -24,6 +24,7 @@ from ripdoctor.core import naming as N
         "Punch-Brothers---Hell-On-Church-Street",
         "album.2022",
         "hidden_track",
+        "_clips-album",
         "1",
     ],
 )
@@ -54,6 +55,13 @@ def test_dangerous_or_malformed_names_are_refused(bad: str, why: str) -> None:
     with pytest.raises(N.Unsafe):
         N.token(bad)
     assert not N.is_token(bad), why
+
+
+def test_a_leading_underscore_is_allowed_and_a_leading_dot_is_not() -> None:
+    """One marks a directory as not a record; the other hides it."""
+    assert N.is_token("_clips-album")
+    assert not N.is_token(".clips-album")
+    assert not N.is_token("-clips-album")
 
 
 def test_refusal_names_the_offending_value() -> None:

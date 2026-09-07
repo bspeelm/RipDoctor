@@ -485,8 +485,26 @@ affected, so this does not reach anyone else. Contorting the code around an
 interpreter bug that a point release will fix would cost more than re-running a
 failed check.
 
-**How it shows up.** `make check` exits 139 with no test failure reported. Run it
-again. If it fails twice with an actual assertion, that is a real failure.
+**How it shows up, and this is the dangerous part.** It is not only crashes.
+The same suite, unchanged, has in consecutive runs: passed completely, died with
+a segmentation fault, and reported six failures with errors that cannot happen -
+
+    SystemError: unknown opcode 220
+    NameError: name 'exp' is not defined      (in a module that imports cmath)
+    TypeError: cannot unpack non-iterable int object
+
+A suite that invents failures is worse than one that crashes, because it sends
+somebody chasing a defect that is not there.
+
+**Telling one from the other.** A real failure is an assertion with a message
+that makes sense for the thing being tested. Interpreter corruption produces
+errors that are *impossible*: an unknown opcode, a NameError for a name that is
+imported at the top of the file, a TypeError about a type that cannot be there.
+Anything in the second category means run it again.
+
+`PYTHONMALLOC=malloc` was tried and did not clearly help; the rate is low enough
+that a handful of runs cannot discriminate, and chasing it further costs more
+than it saves.
 
 **What would reverse this.** The same crash on 3.13 or earlier, or on a second
 3.14 build. Either would mean the fault is in this code after all.

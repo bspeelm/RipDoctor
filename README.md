@@ -130,6 +130,12 @@ subprocess, no filesystem, no clock — so the whole algorithm is testable with
 no ffmpeg, no sound card and no audio files. That boundary is enforced by
 `tests/test_architecture.py`, not by convention.
 
+On Python 3.14 specifically, this suite is occasionally unreliable through no
+fault of its own - see ADR-019. A failure whose error is *impossible* (an
+unknown opcode, a NameError for something imported at the top of the file) is
+the interpreter, not the code. Run it again. CI uses 3.11 to 3.13 and is not
+affected.
+
 Size budgets are failing checks. The comment ratio is hard and is never raised;
 the others are the author's call. Never write less code to fit a number.
 
