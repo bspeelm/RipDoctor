@@ -524,3 +524,52 @@ def test_clips_land_beside_the_album_not_inside_it(tmp_path: Path) -> None:
     app = build(service)
     post(app, "/api/clips/album", service)
     assert get(app, "/api/review/album", service).json()["tracks"] == []
+
+
+# ----------------------------------------------------------------- align
+
+
+def test_an_archived_cut_is_carried_onto_a_re_rip(tmp_path: Path, monkeypatch) -> None:
+    """The boundaries were right; the capture was replaced. Fitting again from
+    the catalogue would throw away work somebody did by listening."""
+    from ripdoctor.core.xcorr import Transform
+    from ripdoctor.web.routes import records as R
+
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    F.save(
+        service.layout,
+        "album",
+        F.spec_of(Plan.from_dict(a_plan_body())),
+        Plan.from_dict(a_plan_body()),
+    )
+
+    monkeypatch.setattr(
+        R, "fit_side", lambda *a, **k: (Transform(offset=2.0, scale=1.0), (), 0.01)
+    )
+    monkeypatch.setattr(R, "true_duration", lambda *a, **k: 60.0)
+    body = post(build(service), "/api/align/album", service).json()
+    assert not body["error"], body["error"]
+    moved = body["result"]["aligned"][0]["tracks"][0]
+    assert moved["start"] == 3.0 and moved["end"] == 11.0
+
+
+def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:
+    """One side that will not carry is not a failed record."""
+    service = a_service(tmp_path)
+    F.save(
+        service.layout,
+        "album",
+        F.spec_of(Plan.from_dict(a_plan_body())),
+        Plan.from_dict(a_plan_body()),
+    )
+    body = post(build(service), "/api/align/album", service).json()
+    assert body["result"]["problems"][0]["side"] == "a"
+    assert "archived" in body["result"]["problems"][0]["why"]
+
+
+def test_aligning_without_a_saved_cut_is_refused(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    assert post(build(service), "/api/align/album", service).status == 409
