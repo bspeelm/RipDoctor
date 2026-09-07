@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.plan import Plan, Spec
+from ripdoctor.core.plan import Plan, Spec, SpecSide, SpecTrack
 from ripdoctor.store.safety import under
 
 # Side files are named by letter, and the letter is opaque - a single-track
@@ -55,6 +55,22 @@ class Layout:
             if candidate.is_dir():
                 return under(base, slug)
         raise FileNotFoundError(f"no album {slug!r} in {self.raw} or {self.archive}")
+
+    def albums(self, include_archive: bool = False) -> list[str]:
+        """Records with sides on disk, raw first and never listed twice."""
+        found: list[str] = []
+        roots = (self.raw, self.archive) if include_archive else (self.raw,)
+        for base in roots:
+            if not base.is_dir():
+                continue
+            for d in sorted(base.iterdir()):
+                if (
+                    d.is_dir()
+                    and d.name not in found
+                    and any(p.name.startswith("side-") for p in d.iterdir())
+                ):
+                    found.append(d.name)
+        return found
 
     def side_file(self, slug: str, letter: str) -> Path:
         where = self.album_dir(slug) / SIDE.format(letter=letter)
@@ -160,6 +176,43 @@ def _spec_to_dict(spec: Spec) -> dict[str, Any]:
             for s in spec.sides
         ],
     }
+
+
+def letter_of(filename: str) -> str:
+    stem = filename.rsplit("/", 1)[-1]
+    return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
+
+
+def spec_of(plan: Plan) -> Spec:
+    """A spec derived from a plan, with every edge ear-set.
+
+    Used when a record is saved before it has a spec at all. A plan that was
+    saved is a decision somebody made about where the cuts go, so the next fit
+    passes those edges through rather than recomputing over them.
+    """
+    sides = []
+    for side in plan.sides:
+        tracks = tuple(
+            SpecTrack(
+                number=t.number, title=t.title, cat=t.cat, start=t.start, end=t.end
+            )
+            for t in side.tracks
+        )
+        sides.append(
+            SpecSide(
+                letter=letter_of(side.file),
+                start=side.tracks[0].start if side.tracks else 0.0,
+                end=side.tracks[-1].end if side.tracks else 0.0,
+                tracks=tracks,
+            )
+        )
+    return Spec(
+        slug=plan.slug,
+        album=plan.album,
+        artist=plan.artist,
+        date=plan.date,
+        sides=tuple(sides),
+    )
 
 
 def spec_from_plan(spec: Spec, plan: Plan) -> Spec:

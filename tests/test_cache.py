@@ -16,52 +16,7 @@ from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.envelope import FormatError
 from ripdoctor.store import cache as C
 from ripdoctor.store.files import Layout
-
-SECONDS = 2.0
-WINDOWS = int(SECONDS / C.WINDOW)
-
-
-class Encoding(FakeRunner):
-    """A fake ffmpeg that leaves behind the file it was told to write."""
-
-    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
-        args = [str(a) for a in argv]
-        if args[0] == "ffmpeg" and args[-1].endswith(".tmp"):
-            Path(args[-1]).write_bytes(b"OggS" + b"\x00" * 500)
-        return super().run(argv, stdin=stdin, timeout=timeout)
-
-
-def frames(count: int, *, rms: float = -25.0, peak: float = -9.0) -> bytes:
-    rows = []
-    for i in range(count):
-        rows.append(f"frame:{i} pts:{i} pts_time:{i * 0.05}")
-        rows.append(f"lavfi.astats.Overall.RMS_level={rms}")
-        rows.append(f"lavfi.astats.Overall.Peak_level={peak}")
-    return "\n".join(rows).encode()
-
-
-def a_runner(
-    *, windows: int = WINDOWS, seconds: float = SECONDS, encodes: bool = True
-) -> FakeRunner:
-    fake = Encoding() if encodes else FakeRunner()
-    return (
-        fake.expect("ffprobe", stdout=b"48000\n")
-        .expect(
-            lambda a: "-progress" in a,
-            stdout=f"out_time_us={int(seconds * 1e6)}\n".encode(),
-        )
-        .expect(lambda a: any("highpass" in x for x in a), stdout=frames(windows))
-        .expect("ametadata", stdout=frames(windows))
-    )
-
-
-def a_layout(tmp_path: Path) -> Layout:
-    layout = Layout(tmp_path / "vinyl")
-    layout.ensure()
-    album = layout.raw / "album"
-    album.mkdir()
-    (album / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
-    return layout
+from tests.pool import SECONDS, WINDOWS, a_layout, a_runner
 
 
 def built(
