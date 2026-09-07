@@ -14,6 +14,11 @@ MUSIC_PCT = 0.85
 HISTORY_MAX = 5400  # about 90 minutes of one-second readings
 
 
+def _length(seconds: float) -> str:
+    """A duration a person reads. Rounding a short one to minutes says zero."""
+    return f"{seconds / 60:.0f} min" if seconds >= 60 else f"{seconds:.0f}s"
+
+
 @dataclass(frozen=True, slots=True)
 class State:
     """What the detector has seen. `quiet_since` is elapsed time, not a clock."""
@@ -51,7 +56,7 @@ def step(
     `enabled` holds only the silence gate; the hard cap still applies.
     """
     if elapsed > max_seconds:
-        return state, f"hard cap: {max_seconds / 60:.0f} minutes"
+        return state, f"hard cap: {_length(max_seconds)}"
 
     history = (*state.history, band_db)[-HISTORY_MAX:]
     ordered = sorted(history)
@@ -82,7 +87,7 @@ def step(
         state = replace(state, quiet_since=since)
         if elapsed - since >= dwell:
             return state, (
-                f"{dwell / 60:.0f} min of run-out ({below:.0f} dB below the music)"
+                f"{_length(dwell)} of run-out ({below:.0f} dB below the music)"
             )
         return state, None
 

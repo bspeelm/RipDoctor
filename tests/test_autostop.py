@@ -210,3 +210,17 @@ def test_no_archived_side_trips_the_detector_before_its_music_ends() -> None:
 
     assert checked >= 15, "no sides were examined; the pattern has drifted"
     assert early == 0, f"{early} of {checked} sides would have been cut short"
+
+
+def test_a_short_cap_is_not_reported_as_zero_minutes() -> None:
+    """Found by setting a twenty-four second cap to test a capture: it stopped
+    correctly and said "hard cap: 0 minutes", which reads as a bug in the thing
+    that just worked."""
+    _state, reason = A.step(A.State(), -30.0, 25.0, max_seconds=24.0)
+    assert reason is not None and "0 minutes" not in reason
+    assert "24s" in reason
+
+
+def test_a_real_cap_is_still_read_in_minutes() -> None:
+    _state, reason = A.step(A.State(), -30.0, 2200.0, max_seconds=2100.0)
+    assert reason is not None and "35 min" in reason
