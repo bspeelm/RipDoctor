@@ -35,3 +35,6 @@ class Service:
     fetcher: Fetcher = field(default_factory=HttpFetcher)
     throttle: Throttle = field(default_factory=Throttle)
     now: Callable[[], float] = time.time
+    # Where this project keeps what it generates. The beets override lives
+    # here rather than in a shared temporary directory.
+    state_dir: str = ""

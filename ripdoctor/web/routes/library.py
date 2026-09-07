@@ -198,7 +198,9 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         plan = _plan_of(service, slug)
-        importer = IMP.choose(service.runner, service.settings.importer)
+        importer = IMP.choose(
+            service.runner, service.settings.importer, service.state_dir
+        )
         where, count = importer.locate(
             service.runner, service.settings.library, plan.artist, plan.album
         )
@@ -223,7 +225,9 @@ def add(app: App, service: Service) -> None:
         if not root:
             raise H.HttpError(409, "no library directory is configured")
 
-        importer = IMP.choose(service.runner, service.settings.importer)
+        importer = IMP.choose(
+            service.runner, service.settings.importer, service.state_dir
+        )
         spec_file = layout.spec_file(slug)
         mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
 
@@ -254,7 +258,7 @@ def add(app: App, service: Service) -> None:
         return AR.survey(
             service.runner,
             layout,
-            IMP.choose(service.runner, service.settings.importer),
+            IMP.choose(service.runner, service.settings.importer, service.state_dir),
             service.settings.library,
             slug,
             plan.artist,

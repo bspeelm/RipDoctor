@@ -214,3 +214,45 @@ def test_an_imported_album_is_left_readable_by_the_group(tmp_path: Path) -> None
     for f in placed.glob("*.flac"):
         assert stat.S_IMODE(f.stat().st_mode) == 0o664
     assert done.notes and "modes" in done.notes[0]
+
+
+# ------------------------------------------------------- the one override
+
+
+def test_the_prompt_is_turned_back_on(tmp_path: Path) -> None:
+    """Under `quiet: yes` - what an unattended import is configured with -
+    beets never asks. It applies anything above the match threshold and skips
+    anything below it without a word, so there is no such thing as a preview:
+    the command meant to show a candidate has already moved the files.
+    """
+    beets = I.Beets.with_override(tmp_path)
+    written = (tmp_path / I.OVERRIDE_FILE).read_text()
+    assert "quiet: no" in written and "timid: no" in written
+    assert beets.config.endswith(I.OVERRIDE_FILE)
+
+
+def test_the_override_changes_one_thing_and_leaves_the_rest(tmp_path: Path) -> None:
+    """A single `-c` adds to the user's configuration rather than replacing it.
+    Two do not layer - the last simply wins - so there is exactly one."""
+    written = I.Beets.with_override(tmp_path)
+    fake = beets_runner()
+    written.preview(fake, a_plan(), str(tmp_path), "/music", mbid="aaa")
+    argv = fake.argv_for("import")
+    assert argv.count("--config") == 1
+    for setting in ("directory", "library", "plugins", "strong_rec_thresh"):
+        assert setting not in (tmp_path / I.OVERRIDE_FILE).read_text()
+
+
+def test_every_beets_command_carries_it(tmp_path: Path) -> None:
+    """Including the listing: a query answered under a different configuration
+    is a query against a different library."""
+    beets = I.Beets.with_override(tmp_path)
+    fake = beets_runner()
+    beets.locate(fake, "/music", "A Band", "A Record")
+    assert "--config" in fake.argv_for("ls")
+
+
+def test_choosing_beets_without_somewhere_to_write_still_works() -> None:
+    """The command line has no state directory in every context."""
+    chosen = I.choose(FakeRunner(installed={"beet"}), "beets")
+    assert chosen.name == "beets"

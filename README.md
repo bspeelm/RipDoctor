@@ -79,6 +79,13 @@ It pulls in [beets](https://beets.io), which does the tagging, the path
 formatting and the album-mode ReplayGain a finished record is filed by. Nothing
 else comes with it.
 
+beets keeps its own configuration, and RipDoctor uses whatever it finds -
+`BEETSDIR` and the default location are beets' own, and a service that sets one
+passes it down like any other environment variable. The single thing RipDoctor
+adds is a layer that turns the import prompt back on, because under `quiet: yes`
+beets never asks: it applies anything above the match threshold and skips
+anything below it without a word, and there is then no such thing as a preview.
+
 The system tools it needs are `ffmpeg`, `ffprobe`, `flac` and `metaflac`, plus
 `arecord` if you want to record. `ripdoctor doctor` reports which of those are
 missing and what to install for each.

@@ -125,13 +125,40 @@ _SEP = "\x1f"
 # What is typed at beets' matcher to accept the candidate it printed.
 _ACCEPT = b"A\n"
 
+# Layered on top of whatever beets is configured with. A single `-c` adds to the
+# user's own configuration rather than replacing it - two of them do not layer,
+# the last simply wins - so this changes one thing and leaves the rest alone.
+#
+# The one thing matters. Under `quiet: yes`, which is what an unattended import
+# is configured with, beets never asks: it applies anything above the match
+# threshold and skips anything below it without a word. There is then no such
+# thing as a preview, because the command that was meant to show a candidate
+# has already moved the files. Turning the prompt back on is what makes the
+# preview a preview and the answer an answer.
+OVERRIDE = "import:\n  quiet: no\n  timid: no\n"
+OVERRIDE_FILE = "beets-override.yaml"
+
 
 @dataclass(frozen=True, slots=True)
 class Beets:
-    """The extra. Runs the beets already installed, with its own config."""
+    """Runs the beets already installed, with the user's own configuration.
+
+    Where that configuration lives is beets' business, not this project's:
+    `BEETSDIR` and the default path are beets' own, and a server that sets one
+    passes it down like any other environment. What is added here is a single
+    override, and only because a preview is otherwise impossible.
+    """
 
     name: str = "beets"
     config: str = ""
+
+    @classmethod
+    def with_override(cls, state_dir: str | Path) -> Beets:
+        """Write the override beside this project's other state, and use it."""
+        where = Path(state_dir) / OVERRIDE_FILE
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_text(OVERRIDE)
+        return cls(config=str(where))
 
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
@@ -244,7 +271,7 @@ def _normalise(where: Path, file_mode: int, dir_mode: int) -> int:
     return changed
 
 
-def choose(runner: Runner, name: str) -> Importer:
+def choose(runner: Runner, name: str, state_dir: str | Path = "") -> Importer:
     """The importer to use, falling back rather than refusing.
 
     A machine configured for beets that no longer has it should still be able
@@ -252,7 +279,7 @@ def choose(runner: Runner, name: str) -> Importer:
     twenty-minute job is not a useful answer.
     """
     if name == "beets":
-        beets = Beets()
+        beets = Beets.with_override(state_dir) if state_dir else Beets()
         if beets.available(runner):
             return beets
     return Tagger()

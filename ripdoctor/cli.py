@@ -331,6 +331,7 @@ def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
         runner=ctx.runner,
         credentials=credentials,
         sessions=AUTH.Sessions(secret=credentials.secret),
+        state_dir=str(ctx.machine.state_dir),
     )
     # Checked against None rather than truthiness: port 0 means "any free
     # port", and `or` turns that into the configured one without a word.
