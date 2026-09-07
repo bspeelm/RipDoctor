@@ -758,3 +758,27 @@ def test_saving_keeps_what_the_plan_does_not_carry(tmp_path: Path) -> None:
     spec = F.read_spec(service.layout.spec_file("album"))
     assert (spec.lead, spec.tail, spec.mbid) == (3.5, 7.5, "chosen")
     assert spec.sides[0].fix == kept.sides[0].fix
+
+
+def test_saving_never_replaces_a_name_with_an_empty_one(tmp_path: Path) -> None:
+    """The page falls back to what it last loaded, so a record that opened
+    badly sends two empty strings. Saving then wiped what the record was called
+    out of both documents while keeping every boundary - which reads as the fit
+    being broken rather than the name being gone."""
+    service = a_service(tmp_path)
+    F.save(service.layout, "album", a_spec(), a_plan())
+    blank = {**a_plan_body(), "album": "", "artist": "", "date": ""}
+    assert post(build(service), "/api/plan/album", service, blank).status == 200
+    spec = F.read_spec(service.layout.spec_file("album"))
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert (spec.album, spec.artist, spec.date) == ("A", "B", "2022")
+    assert (plan.album, plan.artist, plan.date) == ("A", "B", "2022")
+
+
+def test_a_name_can_still_be_changed_to_a_different_one(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    F.save(service.layout, "album", a_spec(), a_plan())
+    renamed = {**a_plan_body(), "album": "Other", "artist": "Someone"}
+    post(build(service), "/api/plan/album", service, renamed)
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert (spec.album, spec.artist) == ("Other", "Someone")

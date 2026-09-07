@@ -265,6 +265,15 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         body = r.json()
+        # A name already on disk is never replaced by an empty one. The page
+        # falls back to what it last loaded, so a record that opened badly
+        # sends two empty strings - and saving then wiped what the record was
+        # called out of both documents while keeping every boundary, which
+        # looks like the fit is broken rather than the name is gone.
+        known = named(layout, slug)
+        for i, field in enumerate(("album", "artist", "date")):
+            if not str(body.get(field, "")).strip() and known[i]:
+                body[field] = known[i]
         try:
             plan = _plan_from(slug, body)
         except (OldFormat, BadPlan, KeyError, TypeError, ValueError) as e:
