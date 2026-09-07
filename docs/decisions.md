@@ -1148,3 +1148,37 @@ about their status and no substitute for running them.
 Until then the numbers are 0.x, and the shape of the promise is that the
 interfaces may still move. Calling it 1.0 before a needle has touched a record
 would be claiming something nobody has checked.
+
+---
+
+## ADR-040 — main is protected, and nobody bypasses it
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+`main` takes changes through a pull request whose checks have all passed. No
+force-push, no deletion, linear history, and `bypass_actors` is empty - the
+maintainer included. A gate with an exception for the person most likely to be
+in a hurry is not a gate, and the person most likely to be in a hurry is the one
+who wrote it.
+
+**Zero approvals are required**, because there is one maintainer and a review he
+gives himself is a rubber stamp. What is not optional is the checks: the three
+supported Python versions, the tier that needs a real ffmpeg and a real beets,
+and the packaging job that installs the wheel into a clean environment and runs
+the binary. They are strict, so a pull request has to be current with main before
+it merges - a green run against a stale base says nothing about the merge.
+
+CodeQL blocks on high-or-higher security alerts. It covers the front end as well
+as the package: 2,700 lines of hand-written JavaScript that had no static
+analysis of any kind, and no test that runs it in a browser.
+
+**The rules live in `.github/rulesets/main.json`**, not only in a settings page.
+A protection scheme that exists solely in a web form is one nobody can review, no
+one can restore after a mistake, and nothing records the reasoning for. This one
+is read, changed and explained the way the rest of the project is.
+
+**What it costs.** Every change is a branch and a pull request, including a
+one-line fix, including the author's. That is the intended cost. The release
+workflow re-runs the same gates at the tag rather than trusting the branch,
+because a tag can be pushed at any commit - and a tag is the one thing this
+scheme does not require a pull request for.
