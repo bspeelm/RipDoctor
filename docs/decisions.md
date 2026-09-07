@@ -1256,3 +1256,69 @@ worked*, because both looked for a side by that number.
 Separately, saving a plan rebuilt the spec from it and restored only the release
 id - dropping the lead, the tail and the per-side fix map every time, which is
 the spec quietly undoing the ear overrides it exists to hold.
+
+## ADR-042 — beets moves, and the two settings that name a library
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+The first real import failed with `10 of the tracks are still in review - beets
+did not take them`, and the import had in fact worked perfectly. Three faults
+sat behind that one message.
+
+**beets copies by default.** So a finished import left every track in the review
+directory as well as in the library. Since what is still in review is how this
+tells a refused import from a finished one, a successful import reported itself
+as a failure — with the whole candidate listing attached, which made a working
+match look like a rejected one.
+
+The override now asks for `move: yes`. That is not a preference being
+overridden. The review directory belongs to this project rather than to the
+person running it: tracks are cut into it so they can be looked at, and once
+they are in the library there is nothing left for a copy of them to be for.
+Copying also wrote a twenty-minute side twice.
+
+**Two settings name the library and nothing made them agree.** beets keeps its
+own configuration and this project uses whatever it finds — which is the right
+arrangement, and it means a machine with no beets configuration at all files a
+record into beets' default. It imports cleanly, lands somewhere nobody chose,
+and the archive gate then refuses to clear the raw sides of a record that is
+safely filed, because it asks beets where the record went and compares that
+against the configured library.
+
+`ripdoctor doctor` now asks beets where it files things and reports when the
+answer is not the configured library. A warning rather than a failure: either of
+the two could be the one that is wrong, and only the person who set them knows
+which. The override still never names a library itself — a second place naming
+it would be a second thing to keep in step, which is the fault being reported
+rather than one to repeat.
+
+**A low match percentage is not a fault.** Freshly cut tracks carry no tags at
+all, so artist, album and track number all read as missing and the right release
+scores around a third. That is why the release is pinned with `--search-id`
+rather than guessed, and why the number in the listing should not be read as a
+verdict on the cut.
+
+### Cover art for a pressing
+
+The Cover Art Archive holds a scan for a release group far more often than for
+one edition of it, and a twelve-inch is exactly the edition least likely to have
+its own. `candidates` had taken a release group since it was written and nothing
+ever supplied one — it could only arrive in a request body, and nothing sends
+it — so the fetch found nothing whenever the pressing had no art of its own,
+which for the records this exists to rip is the ordinary case.
+
+The group is looked up rather than stored, for the same reason the library is
+not named twice: it is derived from the release id, and a kept copy is a second
+thing to hold in step. A stale one points at another record's sleeve.
+
+**Art can be attached before an import.** Every artwork route required the album
+to be in the library already, so a record with no release in the catalogue —
+exactly the record somebody has to supply a cover for by hand — could not be
+given one until after it was filed. The library copy still wins where there is
+one, and after an import there is no other, because beets moves the cuts out of
+review. Art applied early is embedded in each track and travels with it; the
+cover file does not, so such a record is worth giving art again once filed.
+
+A cover that misses the size floor is reported with its size and a suggestion to
+upload one instead. Twenty pixels under is a judgement somebody can overrule
+with a better scan of their own, and reading it as a failure helps nobody.

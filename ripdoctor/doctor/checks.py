@@ -159,15 +159,9 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
 def _agree(settings: Settings, runner: Runner) -> Iterator[Result]:
     """Whether beets files a record where this expects to find one.
 
-    Two settings name the library and nothing makes them agree. beets keeps its
-    own configuration and this project uses whatever it finds, so with no beets
-    configuration at all a record is filed into beets' default - and the archive
-    gate, which asks beets where the record went and compares that against the
-    configured library, then refuses to clear the raw sides of a record that
-    imported perfectly well.
-
-    It is a warning rather than a failure because either could be the one that
-    is wrong, and only the person who set them knows which.
+    Two settings name the library and nothing makes them agree. A warning
+    rather than a failure: only the person who set them knows which is the one
+    that is wrong. ADR-042.
     """
     try:
         theirs = Beets().files_into(runner)

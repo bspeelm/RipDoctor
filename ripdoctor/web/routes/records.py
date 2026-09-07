@@ -282,15 +282,9 @@ def add(app: App, service: Service) -> None:
 def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
     """What a record is called, and whether its plan can be read here.
 
-    Two documents carry the names and both can be missing. A capture writes
-    the spec, so it is the only source before a first pass; a plan is written
-    from names confirmed against the catalogue, so where it has a value that
-    value wins. The spec fills in the rest.
-
-    Refusing the superseded `cuts` format is deliberate - re-fit rather than
-    convert - so a listing says which records that applies to rather than
-    letting each one fail when somebody opens it. Such a record is still named
-    from its spec: knowing what it is called is what makes it findable.
+    Both documents carry the names and either can be missing; the plan wins
+    where it has one, because its were confirmed against the catalogue. An
+    old-format record is still named - that is what makes it findable. ADR-041.
     """
     spec = _saved_spec(layout, slug)
     album, artist, date = (spec.album, spec.artist, spec.date) if spec else ("", "", "")
@@ -307,11 +301,7 @@ def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
 
 
 def _saved_spec(layout: F.Layout, slug: str) -> Spec | None:
-    """The spec, or nothing at all if it is missing or will not parse.
-
-    Half of what this reads was written before the record was cut, so a spec
-    that is not there is the ordinary case rather than a fault.
-    """
+    """The spec, or nothing at all if it is missing or will not parse."""
     try:
         return F.read_spec(layout.spec_file(slug))
     except (OSError, ValueError, KeyError):

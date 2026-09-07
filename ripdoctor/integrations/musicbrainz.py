@@ -168,9 +168,7 @@ def _phrase(value: str) -> str:
 def release_group(fetcher: Fetcher, mbid: str, **kw: Any) -> str:
     """The group a pressing belongs to, which is where its cover usually is.
 
-    Not stored anywhere. It is derived from the release id and asking is one
-    request, where keeping a copy would be a second thing to hold in step with
-    the first - and a stale one points at the wrong record's sleeve.
+    Derived rather than stored: a kept copy is a second thing to hold in step.
     """
     quoted = urllib.parse.quote(mbid, safe="")
     data = _request(

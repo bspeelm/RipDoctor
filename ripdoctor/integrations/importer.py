@@ -127,24 +127,11 @@ _SEP = "\x1f"
 _ACCEPT = b"A\n"
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
-# user's own configuration rather than replacing it - two of them do not layer,
-# the last simply wins - so this changes as little as it can and leaves the rest
-# alone.
-#
-# Under `quiet: yes`, which is what an unattended import is configured with,
-# beets never asks: it applies anything above the match threshold and skips
-# anything below it without a word. There is then no such thing as a preview,
-# because the command that was meant to show a candidate has already moved the
-# files. Turning the prompt back on is what makes the preview a preview and the
-# answer an answer.
-#
-# `move` is the other one, and it is not a preference being overridden. The
-# review directory belongs to this project rather than to the person running
-# it: tracks are cut into it so they can be looked at, and once they are in the
-# library there is nothing left for a copy to be for. beets copies by default,
-# which wrote every track twice and left the originals behind - and since what
-# is still in review is how this tells a refused import from a finished one, a
-# successful import reported itself as a failure.
+# user's own configuration rather than replacing it - two do not layer, the last
+# simply wins - so this changes as little as it can. Two settings: the prompt,
+# without which a preview has already moved the files, and the move, without
+# which every track is written twice and a finished import cannot be told from
+# a refused one. ADR-042.
 OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
 OVERRIDE_FILE = "beets-override.yaml"
 
@@ -176,11 +163,8 @@ class Beets:
     def files_into(self, runner: Runner) -> str:
         """Where beets says it will put a record, defaults included.
 
-        beets keeps its own configuration and this project uses whatever it
-        finds, which means the two can disagree without either being wrong in
-        itself. Asking is the only way to know: with no configuration at all
-        beets files into its own default, and a record then lands somewhere
-        nobody set and nothing afterwards can find.
+        Asking is the only way to know, and the two can disagree without either
+        being wrong in itself. ADR-042.
         """
         result = runner.run(self._argv(["config", "-d"]), timeout=60)
         for line in (result.text + result.err).splitlines():

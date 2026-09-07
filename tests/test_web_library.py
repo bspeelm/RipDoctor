@@ -384,9 +384,47 @@ def test_the_art_a_record_already_has_is_reported(tmp_path: Path) -> None:
     assert len(body["tracks"]) == 1
 
 
-def test_asking_about_a_record_not_in_the_library_says_so(tmp_path: Path) -> None:
+def uploading(service, body: bytes = b""):  # type: ignore[no-untyped-def]
+    """The image is the body itself, so this cannot go through `post`."""
+    return build(service).dispatch(
+        H.Request.of(
+            "POST",
+            "/api/artwork/album/upload",
+            headers={"Cookie": f"{A.COOKIE}={service.sessions.issue('listener')}"},
+            body=body,
+        )
+    )
+
+
+def test_asking_about_a_record_with_nothing_cut_says_so(tmp_path: Path) -> None:
     service, _library = with_library(tmp_path)
-    assert get(build(service), "/api/artwork/album", service).status == 409
+    r = get(build(service), "/api/artwork/album", service)
+    assert r.status == 409 and "not in the library yet" in r.json()["error"]
+
+
+def test_art_can_be_given_to_a_record_before_it_is_imported(tmp_path: Path) -> None:
+    """A record with no release in the catalogue gets no cover automatically,
+    which is exactly the record somebody has to supply one for. Requiring the
+    library copy meant that could only be done after an import."""
+    service, _library = with_library(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True)
+    (review / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
+    service.runner = Imaging().expect("ffprobe", stdout=probed())
+    r = uploading(service, JPEG)
+    assert r.status == 200, r.json()
+    assert (review / "cover.jpg").is_file()
+
+
+def test_the_library_copy_wins_when_there_is_one(tmp_path: Path) -> None:
+    """After an import there is no other: beets moves the cuts out of review."""
+    service, album = in_the_library(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True)
+    (review / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
+    assert uploading(service, JPEG).status == 200
+    assert (album / "cover.jpg").is_file()
+    assert not (review / "cover.jpg").exists()
 
 
 def test_candidates_are_offered_with_their_sizes(tmp_path: Path) -> None:

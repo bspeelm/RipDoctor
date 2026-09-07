@@ -86,9 +86,7 @@ def _forget(service: Service, slug: str, ended: Live | None = None) -> bool:
     """Drop the record's name if nothing at all is left under it.
 
     The store decides what is left; this only refuses while some other capture
-    for the same record is running, because a partial that has not reached
-    disk yet is still a take. The capture a back-out has just ended is not
-    that, so abandon names it here.
+    for the same record is running. Abandon names the one it just ended.
     """
     live = service.recorder.live
     if live is not None and live is not ended and live.running and live.slug == slug:
@@ -103,8 +101,7 @@ def _note(forgotten: bool) -> str:
 def _not_while_recording(service: Service, slug: str, side: str, kind: str) -> None:
     """A capture being written is not one to finish or throw away.
 
-    Both of these take the file out from under arecord: salvage encodes what
-    has arrived so far and unlinks it, and discard simply unlinks it.
+    Both take the file out from under arecord. ADR-041.
     """
     live = service.recorder.live
     if not live or not live.running:

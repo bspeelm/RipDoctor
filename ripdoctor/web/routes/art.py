@@ -20,16 +20,26 @@ MAX_IMAGE = 32 * 1024 * 1024
 
 
 def _album(service: Service, slug: str) -> Path:
+    """Where the tracks this art belongs to are: the library, then review.
+
+    A record with no release in the catalogue is exactly the one somebody has
+    to supply a cover for, and requiring the library copy meant that could only
+    be done after an import. ADR-042.
+    """
     where = service.layout.plan_file(slug)
     if not where.is_file():
         raise H.HttpError(404, f"no plan for {slug}")
     plan = F.read_plan(where)
-    if not service.settings.library:
-        raise H.HttpError(409, "no library directory is configured")
-    directory = T.album_dir(service.settings.library, plan.artist, plan.album)
-    if not directory.is_dir():
-        raise H.HttpError(409, f"{plan.album} is not in the library yet")
-    return directory
+    if service.settings.library:
+        filed = T.album_dir(service.settings.library, plan.artist, plan.album)
+        if filed.is_dir():
+            return filed
+    cut = service.layout.review_dir(slug)
+    if cut.is_dir() and any(cut.glob("*.flac")):
+        return cut
+    raise H.HttpError(
+        409, f"{plan.album} has no cut tracks and is not in the library yet"
+    )
 
 
 def add(app: App, service: Service) -> None:
@@ -89,8 +99,16 @@ def add(app: App, service: Service) -> None:
             c for c in found if c.ok and c.image is not None and c.image.big_enough
         ]
         if not usable:
-            why = "; ".join(f"{c.source}: {c.why or c.image}" for c in found)
-            raise H.HttpError(404, f"nothing usable was found - {why}")
+            # Naming the sizes matters: "too small" for a cover that missed the
+            # floor by twenty pixels reads as a fault rather than as a judgement
+            # somebody can overrule with a better scan of their own.
+            why = "; ".join(
+                f"{c.source}: {c.why or f'{c.image} is under {ART.MIN_EDGE}px'}"
+                for c in found
+            )
+            raise H.HttpError(
+                404, f"nothing usable was found - {why}. Upload an image instead."
+            )
         best = max(usable, key=lambda c: c.image.edge if c.image else 0)
         data = service.fetcher.get(best.url, {"Accept": "image/*"})
         installed = _install(service, album, data)

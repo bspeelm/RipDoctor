@@ -198,15 +198,8 @@ def remember(
 ) -> Path:
     """Record what a record is called, before anything has been cut from it.
 
-    A capture writes audio and nothing else, so until now the only trace of
-    what it was has been the slug - and reading a slug backwards is a guess
-    that loses the punctuation and the case. Those names were typed into a form
-    and lived nowhere but the browser: a reload threw them away, which is not a
-    thing a person should have to know.
-
-    The spec is where a record's identity already lives, so this writes one
-    with no tracks in it. Only the names are touched: a spec that already
-    carries boundaries somebody set by ear keeps every one of them.
+    A spec with no tracks in it. Only the names are touched, so one that
+    already carries boundaries somebody set by ear keeps every one. ADR-041.
     """
     where = layout.spec_file(slug)
     if where.is_file():
@@ -226,15 +219,8 @@ def remember(
 def forget(layout: Layout, slug: str) -> bool:
     """Remove a name that turned out to belong to nothing.
 
-    The counterpart to remember, and deliberately timid: it refuses unless the
-    spec is a placeholder, there is no plan, and nothing was captured under
-    that slug anywhere. Everything it declines to touch is work somebody would
-    have to redo - a boundary set by ear, a release chosen from the catalogue,
-    twenty minutes of a side. A leaked name costs a few lines of JSON.
-
-    The audio test is "any file at all except a capture log", rather than a
-    list of the names sides are known by. A file under a record that this does
-    not recognise is a reason to stop, not a reason to continue.
+    Deliberately timid, and the audio test is "any file at all except a capture
+    log" rather than a list of the names sides are known by. ADR-041.
     """
     where = layout.spec_file(slug)
     if not where.is_file() or layout.plan_file(slug).is_file():
@@ -270,10 +256,9 @@ def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     A plan that was saved is a decision somebody made about where the cuts go,
     so the next fit passes those edges through rather than recomputing them.
 
-    The plan does not carry everything the spec does. `keep` is the spec being
-    replaced, and its lead, tail and per-side fix map come across, because a
-    save that dropped them would quietly undo the overrides the spec exists to
-    hold and the next re-fit would land somewhere else.
+    `keep` is the spec being replaced: its lead, tail and per-side fix map come
+    across, because the plan carries none of them and a save that dropped them
+    would undo the overrides the spec exists to hold. ADR-041.
     """
     fixes = {s.letter: s.fix for s in keep.sides} if keep else {}
     sides = []
