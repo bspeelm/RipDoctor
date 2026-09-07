@@ -49,6 +49,20 @@ OPTIONAL = {
     "beet": "import through beets instead of the built-in tagger",
 }
 
+# What to install to get each one, where that is not the tool's own name.
+# "install arecord" is not a command anybody can run, and a fix line that
+# cannot be typed is half a fix.
+PACKAGE = {
+    "ffprobe": "ffmpeg",
+    "metaflac": "flac",
+    "arecord": "alsa-utils",
+    "beet": "beets (pip install ripdoctor[beets])",
+}
+
+
+def _install(tool: str) -> str:
+    return PACKAGE.get(tool, tool)
+
 
 def tools(runner: Runner) -> Iterator[Result]:
     for tool, purpose in REQUIRED.items():
@@ -59,7 +73,7 @@ def tools(runner: Runner) -> Iterator[Result]:
                 tool,
                 Level.FAIL,
                 f"{tool} is not installed - needed to {purpose}",
-                fix=f"install {tool}",
+                fix=f"install {_install(tool)}",
             )
     for tool, purpose in OPTIONAL.items():
         if runner.which(tool):
@@ -69,7 +83,7 @@ def tools(runner: Runner) -> Iterator[Result]:
                 tool,
                 Level.WARN,
                 f"{tool} is not installed - {purpose} is unavailable",
-                fix=f"install {tool} if you want to {purpose}",
+                fix=f"install {_install(tool)} if you want to {purpose}",
             )
 
 

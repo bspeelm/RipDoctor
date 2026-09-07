@@ -34,11 +34,10 @@ MAX_COMMENT_RATIO = 25
 MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
 
-# The prose ratio is over budget and stays that way for now by decision: the
-# documentation is a draft, written ahead of the code it describes, and it is
-# more useful to keep it and cut later than to ration it now. It is reported
-# every run so the trend stays visible, and a revision pass once the code is
-# complete is a scheduled step rather than an intention. ADR-023.
+# The prose ratio is a trend rather than a gate. It was chosen as the measure of
+# whether the documentation revision happened, and it stopped measuring that the
+# moment the code trebled underneath it - a low number here is not evidence of
+# anything. What holds documentation true is a set of tests. ADR-037.
 
 # Append-only records are the only prose exempt, because the remedy this budget
 # asks for - retire something - cannot be applied to them.

@@ -271,3 +271,19 @@ def test_an_importer_nobody_has_heard_of_is_named() -> None:
     s = replace(Settings(), importer="picard")
     r = find(list(D.importing(s, everything())), "importer")
     assert r.level is D.Level.FAIL and "tagger" in r.fix
+
+
+def test_a_fix_line_names_something_that_can_be_installed() -> None:
+    """ "install arecord" is not a command anybody can run, and a fix line that
+    cannot be typed is half a fix."""
+    results = list(D.tools(FakeRunner(installed=set())))
+    fixes = {r.check: r.fix for r in results}
+    assert "alsa-utils" in fixes["arecord"]
+    assert "ffmpeg" in fixes["ffprobe"], "ffprobe does not ship on its own"
+    assert "flac" in fixes["metaflac"]
+    assert "beets" in fixes["beet"]
+
+
+def test_a_tool_named_after_its_own_package_says_just_that() -> None:
+    fixes = {r.check: r.fix for r in D.tools(FakeRunner(installed=set()))}
+    assert fixes["ffmpeg"] == "install ffmpeg"
