@@ -655,3 +655,40 @@ def test_an_explicit_port_of_zero_is_not_read_as_no_port(
     )
     cmd_serve(ctx, argparse.Namespace(port=0, bind=None, user="ripdoctor"))
     assert asked == [("127.0.0.1", 0)]
+
+
+def test_naming_a_record_writes_what_it_is_called(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    """The supported way to name a record captured before anything recorded
+    one, rather than editing the JSON by hand."""
+    import argparse
+    from dataclasses import replace
+
+    from ripdoctor.cli import Context, cmd_name
+    from ripdoctor.store import files as F
+    from ripdoctor.store.files import Layout
+
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    ctx = Context(everything())
+    ctx.settings = replace(ctx.settings, vinyl=str(tmp_path / "vinyl"))
+    args = argparse.Namespace(slug="album", artist="First", album="Second", date="2019")
+    assert cmd_name(ctx, args) == 0
+    spec = F.read_spec(Layout(tmp_path / "vinyl").spec_file("album"))
+    assert (spec.artist, spec.album, spec.date) == ("First", "Second", "2019")
+    assert "First - Second" in capsys.readouterr().out
+
+
+def test_naming_without_a_pool_says_where_to_look(monkeypatch, tmp_path: Path) -> None:
+    import argparse
+    from dataclasses import replace
+
+    from ripdoctor.cli import Context, cmd_name
+
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    ctx = Context(everything())
+    ctx.settings = replace(ctx.settings, vinyl="")
+    args = argparse.Namespace(slug="album", artist="", album="", date="")
+    assert cmd_name(ctx, args) == 2

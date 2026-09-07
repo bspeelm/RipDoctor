@@ -101,6 +101,7 @@ ripdoctor measure       compare this signal chain against the shipped thresholds
 ripdoctor record        record one side, metered, stopping itself at the run-out
 ripdoctor serve         run the web interface
 ripdoctor salvage       finish a capture an interrupted session left behind
+ripdoctor name          say what a record is, for one ripped before it was
 ripdoctor lookup        find a release in the catalogue, usable entries first
 ripdoctor fit           place track boundaries from a spec and measured levels
 ripdoctor split         cut a plan into tracks
