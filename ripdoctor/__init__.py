@@ -8,7 +8,7 @@ Layered, and the layering is enforced by tests rather than convention:
     config/ machine detection, settings, measured thresholds
     doctor/ turns a missing tool or permission into an actionable problem
     web/    routes as pure request-to-response functions
-    work/   the job runner and per-slug locks
+    work/   the job runner, the live capture, and the punch
 
 See docs/decisions.md for why each boundary is where it is.
 """

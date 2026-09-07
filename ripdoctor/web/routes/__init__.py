@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from ripdoctor.web.app import App
-from ripdoctor.web.routes import art, capture, cutting, library, records, session
+from ripdoctor.web.routes import (
+    art,
+    capture,
+    cutting,
+    library,
+    punching,
+    records,
+    session,
+)
 from ripdoctor.web.service import Service
 
 
@@ -15,4 +23,5 @@ def build(service: Service, *, static: object = None) -> App:
     capture.add(app, service)
     library.add(app, service)
     art.add(app, service)
+    punching.add(app, service)
     return app

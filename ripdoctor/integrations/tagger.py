@@ -88,6 +88,43 @@ def embed_art(runner: Runner, path: str, art: str, width: int, height: int) -> N
     runner.run(embed_art_argv(path, art, width, height), timeout=60).require()
 
 
+def carry_tags(runner: Runner, source: str, dest: str) -> bool:
+    """Copy every tag and the cover from one file onto another.
+
+    Used when a track's audio is replaced and nothing else about it should
+    change. The tags come from the file being replaced rather than from the
+    plan or the catalogue: a replacement that also re-tags is not a replacement,
+    it is a partial re-import with a different set of failure modes.
+
+    Comments and the picture move separately because metaflac exports them
+    through different switches, and a freshly cut file has neither.
+    """
+    tags = Path(dest + ".tags")
+    picture = Path(dest + ".pic")
+    try:
+        runner.run(["metaflac", f"--export-tags-to={tags}", source], timeout=120)
+        if tags.is_file():
+            runner.run(
+                [
+                    "metaflac",
+                    "--remove-all-tags",
+                    f"--import-tags-from={tags}",
+                    dest,
+                ],
+                timeout=120,
+            )
+        runner.run(["metaflac", f"--export-picture-to={picture}", source], timeout=120)
+        carried = picture.is_file() and picture.stat().st_size > 0
+        if carried:
+            runner.run(
+                ["metaflac", f"--import-picture-from={picture}", dest], timeout=120
+            )
+        return carried
+    finally:
+        tags.unlink(missing_ok=True)
+        picture.unlink(missing_ok=True)
+
+
 def has_art(runner: Runner, path: str) -> bool:
     result = runner.run(
         ["metaflac", "--list", "--block-type=PICTURE", path], timeout=60

@@ -77,6 +77,9 @@ def add(app: App, service: Service) -> None:
         if not slug or not side:
             raise H.HttpError(400, "a record and a side are needed")
         device = str(body.get("device") or service.settings.capture_device)
+        # A punch is a capture of one track, recorded to replace a dirty take.
+        # It is written under a stem no side scan matches.
+        stem = str(body.get("kind", "side"))
         album = layout.raw / slug
         try:
             live = service.recorder.start(
@@ -87,6 +90,7 @@ def add(app: App, service: Service) -> None:
                 side,
                 _format(service),
                 autostop=bool(body.get("autostop", True)),
+                stem=stem,
             )
         except Busy as e:
             raise H.HttpError(409, str(e)) from e

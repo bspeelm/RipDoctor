@@ -40,6 +40,7 @@ class Live:
     device: str
     started: float
     control: S.Control
+    stem: str = "side"
     reading: S.Reading | None = None
     outcome: S.Outcome | None = None
     error: str = ""
@@ -53,6 +54,7 @@ class Live:
             "running": self.running,
             "slug": self.slug,
             "side": self.side,
+            "kind": self.stem,
             "device": self.device,
             "elapsed": round(now - self.started, 1),
             "autostop": self.control.autostop,
@@ -103,6 +105,7 @@ class Recorder:
         fmt: C.Format,
         *,
         autostop: bool = True,
+        stem: str = "side",
         below: float = A.BELOW,
         max_seconds: float = A.MAX_SECONDS,
     ) -> Live:
@@ -112,6 +115,7 @@ class Recorder:
                 raise Busy(f"already recording {self.live.slug} side {self.live.side}")
             live = Live(
                 slug=slug,
+                stem=stem,
                 side=side,
                 device=device,
                 started=self.now(),
@@ -127,6 +131,7 @@ class Recorder:
                     album_dir,
                     side,
                     fmt,
+                    stem=stem,
                     control=live.control,
                     on_reading=lambda r: setattr(live, "reading", r),
                     dwell=self.dwell,

@@ -93,6 +93,7 @@ def record(
     sleep: Callable[[float], None] = time.sleep,
     poll: float = POLL,
     settle: float = SETTLE,
+    stem: str = "side",
     below: float = A.BELOW,
     dwell: float = A.DWELL,
     max_seconds: float = A.MAX_SECONDS,
@@ -104,8 +105,8 @@ def record(
     what is on disk rather than discarding it. ADR-033.
     """
     hand = control if control is not None else Control(autostop=autostop)
-    proc, wav = C.start(runner, device, album_dir, letter, fmt, log=True)
-    log = C.log_path(album_dir, letter)
+    proc, wav = C.start(runner, device, album_dir, letter, fmt, log=True, stem=stem)
+    log = C.log_path(album_dir, letter, stem)
     outcome = Outcome()
 
     sleep(settle)
@@ -180,7 +181,7 @@ def record(
     C.stop(proc)
     outcome.overruns, outcome.overrun_ms = C.overruns(log)
     try:
-        outcome.path = C.finish(runner, album_dir, letter)
+        outcome.path = C.finish(runner, album_dir, letter, stem)
     except C.CaptureError as e:
         # Not raised. A capture that ended with nothing on disk still has a
         # reason it ended, and that reason is what the human needs to see.

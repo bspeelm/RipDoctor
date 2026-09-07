@@ -22,8 +22,14 @@ MIN_TEST_SECONDS, MAX_TEST_SECONDS = 3.0, 60.0
 # A capture in progress is written under a name nothing else will pick up: tools
 # scan for side-*.flac, and a partial file matching that pattern is one an
 # analysis pass will read as a whole side.
-PARTIAL = ".side-{letter}.capturing.wav"
-FINISHED = "side-{letter}.flac"
+PARTIAL = ".{stem}-{letter}.capturing.wav"
+FINISHED = "{stem}-{letter}.flac"
+
+# A side, or a punch - a re-recording of one track. They are captured the same
+# way and must never be confused afterwards, so the stem is part of the name:
+# `punch-7.flac` does not match `side-*.flac` and no side scan can see it.
+STEMS = ("side", "punch")
+SUFFIX = ".capturing.wav"
 
 
 class CaptureError(Exception):
@@ -97,12 +103,18 @@ def encode_argv(wav: str, flac: str) -> list[str]:
     ]
 
 
-def partial_path(album_dir: str | Path, letter: str) -> Path:
-    return Path(album_dir) / PARTIAL.format(letter=letter)
+def _stem(stem: str) -> str:
+    if stem not in STEMS:
+        raise CaptureError(f"unknown capture kind: {stem!r}")
+    return stem
 
 
-def finished_path(album_dir: str | Path, letter: str) -> Path:
-    return Path(album_dir) / FINISHED.format(letter=letter)
+def partial_path(album_dir: str | Path, letter: str, stem: str = "side") -> Path:
+    return Path(album_dir) / PARTIAL.format(stem=_stem(stem), letter=letter)
+
+
+def finished_path(album_dir: str | Path, letter: str, stem: str = "side") -> Path:
+    return Path(album_dir) / FINISHED.format(stem=_stem(stem), letter=letter)
 
 
 def start(
@@ -113,24 +125,27 @@ def start(
     fmt: Format,
     *,
     log: bool = False,
+    stem: str = "side",
 ) -> tuple[Process, Path]:
     """Begin recording one side. Returns the running process and its file."""
     check_device(device)
     Path(album_dir).mkdir(parents=True, exist_ok=True)
-    dest = partial_path(album_dir, letter)
-    if finished_path(album_dir, letter).exists():
-        raise CaptureError(f"side {letter} already exists; move it first")
-    errors = str(log_path(album_dir, letter)) if log else None
+    dest = partial_path(album_dir, letter, stem)
+    if finished_path(album_dir, letter, stem).exists():
+        raise CaptureError(f"{stem} {letter} already exists; move it first")
+    errors = str(log_path(album_dir, letter, stem)) if log else None
     argv = capture_argv(device, str(dest), fmt)
     return runner.start(argv, stderr_path=errors), dest
 
 
-def finish(runner: Runner, album_dir: str | Path, letter: str) -> Path:
+def finish(
+    runner: Runner, album_dir: str | Path, letter: str, stem: str = "side"
+) -> Path:
     """Encode a finished capture and remove the partial file."""
-    wav = partial_path(album_dir, letter)
+    wav = partial_path(album_dir, letter, stem)
     if not wav.is_file() or wav.stat().st_size < 1024:
         raise CaptureError(f"nothing was captured to {wav}")
-    flac = finished_path(album_dir, letter)
+    flac = finished_path(album_dir, letter, stem)
     runner.run(encode_argv(str(wav), str(flac)), timeout=1800).require()
     wav.unlink()
     return flac
@@ -149,14 +164,18 @@ def salvageable(album_dir: str | Path) -> list[Path]:
     return sorted(
         p
         for p in directory.iterdir()
-        if p.name.startswith(".side-")
-        and p.name.endswith(".capturing.wav")
+        if any(p.name.startswith(f".{stem}-") for stem in STEMS)
+        and p.name.endswith(SUFFIX)
         and p.stat().st_size >= 1024
     )
 
 
+def stem_of(partial: Path) -> str:
+    return partial.name[1:].split("-", 1)[0]
+
+
 def letter_of(partial: Path) -> str:
-    return partial.name[len(".side-") : -len(".capturing.wav")]
+    return partial.name[len(f".{stem_of(partial)}-") : -len(SUFFIX)]
 
 
 def test_capture_argv(device: str, dest: str, fmt: Format, seconds: float) -> list[str]:
@@ -215,11 +234,11 @@ def judge(runner: Runner, path: str) -> Verdict:
     )
 
 
-LOG = ".side-{letter}.capturing.log"
+LOG = ".{stem}-{letter}.capturing.log"
 
 
-def log_path(album_dir: str | Path, letter: str) -> Path:
-    return Path(album_dir) / LOG.format(letter=letter)
+def log_path(album_dir: str | Path, letter: str, stem: str = "side") -> Path:
+    return Path(album_dir) / LOG.format(stem=_stem(stem), letter=letter)
 
 
 def wav_format(path: str | Path, fallback: Format) -> Format:
