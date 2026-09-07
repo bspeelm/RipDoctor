@@ -5,23 +5,14 @@ downstream - gap detection, edge refinement, fitting, alignment - takes one of
 these rather than audio. That boundary is what lets the algorithm be tested with
 no decoder, no sound card and no files. See ADR-005.
 
-Three lanes are measured over the same grid, and the middle one is the reason
-this project exists:
+Three lanes are measured over the same grid:
 
     full   RMS across the whole spectrum
     peak   the largest sample in each window
     band   RMS restricted to 1-3 kHz
 
-On a sparse pressing the full lane cannot tell an inter-track gap from a quiet
-passage; both land near -43 dB and no threshold separates them. In the band lane
-the same two things sit about 20 dB apart, because vinyl's noise - plinth
-rumble, arm handling, warp - is bass-heavy, and above 8 kHz a quiet pressing has
-nothing at all. The band lane is where music is and noise is not.
-
-Peak exists as a separate lane because RMS cannot find a fade. RMS averages a
-decaying tail into its own window, so the end it reports is where the tail stops
-dominating rather than where the music stops - typically three to four seconds
-early.
+Why the band lane exists, and why peak is separate from RMS, is in core.gaps -
+the two facts belong with the code that acts on them.
 """
 
 from __future__ import annotations
@@ -102,11 +93,9 @@ class Envelope:
     def percentile(self, p: float) -> float:
         """The p-th percentile reading, 0.0 to 1.0.
 
-        Detection anchors on the 85th percentile - the music - and never on the
-        minimum. A side has at least three distinct floors: the electrical noise
-        of the converter, the lead-in and run-out groove, and the inter-track
-        gaps, and they differ by tens of decibels. Anchoring low picks whichever
-        floor happens to be quietest on that side and finds nothing.
+        A side has at least three distinct floors tens of decibels apart, so
+        which percentile a detector anchors on decides what it can see at all.
+        See core.gaps.
         """
         if not self.levels:
             raise ValueError("empty envelope")

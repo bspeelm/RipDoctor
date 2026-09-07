@@ -10,6 +10,7 @@ three things a synthetic fixture would not think to include.
 from __future__ import annotations
 
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -85,7 +86,7 @@ def test_tracks_do_not_share_boundaries() -> None:
     plan = load_plan()
     shared = adjacent = 0
     for side in plan.sides:
-        for a, b in zip(side.tracks, side.tracks[1:], strict=False):
+        for a, b in pairwise(side.tracks):
             adjacent += 1
             if abs(b.start - a.end) < 1e-9:
                 shared += 1
@@ -103,11 +104,7 @@ def test_the_discarded_groove_is_what_is_left_after_padding() -> None:
     belongs to neither track, and nothing more.
     """
     plan = load_plan()
-    gaps = [
-        b.start - a.end
-        for side in plan.sides
-        for a, b in zip(side.tracks, side.tracks[1:], strict=False)
-    ]
+    gaps = [b.start - a.end for side in plan.sides for a, b in pairwise(side.tracks)]
     assert len(gaps) >= 7, "too few adjacent pairs; the fixture has drifted"
     assert min(gaps) > 0, "tracks never overlap"
     assert max(gaps) < P.LEAD + P.TAIL, (

@@ -1,23 +1,13 @@
 """Finding the quiet places, and judging whether a cut is in one.
 
-A gap is a sustained quiet run. Finding them is the whole job, and the only
-subtle part is choosing what to measure "quiet" against.
+A gap is a sustained quiet run. The only subtle part is what "quiet" is measured
+against, and the two lanes need OPPOSITE anchors: the full lane thresholds down
+from the music, the band lane up from its floor. Get them the wrong way round
+and detection does not degrade, it inverts - one finds nothing, the other finds
+dozens of quiet musical passages.
 
-**The two lanes need opposite anchors, and this is not a detail.**
-
-The full lane thresholds *down from the music*: the 85th percentile minus a
-margin. It cannot anchor on the floor, because the quietest reading on a vinyl
-side is the needle-up electrical noise, well below actual groove noise, and
-anchoring there reports no gaps at all on any side.
-
-The band lane has to anchor *up from the floor*, because its dynamic range is
-much wider - music around -35 and floor around -85, against -24 to -50 full
-band. Thresholding at music-minus-16 in the band lane lands near -51 and
-swallows every quiet passage: on one measured side that produced 57 gaps where
-the record has a handful. Floor-plus-12 keeps only what is genuinely silent,
-which is what a snap target has to be.
-
-Get these the wrong way round and detection does not degrade, it inverts.
+RMS locates gaps; peak judges their edges. See docs/method.md for why, and for
+the measurements behind the constants below.
 """
 
 from __future__ import annotations

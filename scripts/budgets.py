@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # Budgets. Each is a ceiling, and each was chosen deliberately.
 MAX_CORE_LINES = 2000  # the published algorithm; it should stay small
 MAX_TOTAL_LINES = 8000  # everything under ripdoctor/
-MAX_COMMENT_RATIO = 40  # per cent of code lines
+MAX_CORE_COMMENT_RATIO = 60  # core carries the findings; see ADR-018
+MAX_OTHER_COMMENT_RATIO = 35  # plumbing does not
 MAX_DOC_RATIO = 75  # markdown lines as a per cent of code lines
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
 
@@ -39,11 +40,17 @@ MAX_WHEEL_BYTES = 2 * 1024 * 1024
 # ADR-012.
 RATIO_FLOOR_LINES = 500
 
-# The comment ceiling is higher than is conventional, and that is deliberate.
-# In this codebase the comments carry the experimental record - which threshold
-# came from which measurement, and which approach was tried and abandoned. That
-# is the most valuable content here. The cap exists to stop it becoming an
-# essay, not to discourage it. See ADR-005 for the kind of note meant.
+# Two ceilings, because these are two kinds of code. core/ is the published
+# algorithm and its comments are the experimental record - which threshold came
+# from which measurement, which approach was tried and abandoned. Measured with
+# this same counter, the predecessor modules core was ported from run 55.0 per
+# cent and RipDoctor's core runs 52.6. Everything outside core is subprocess
+# plumbing, routing and file handling, where that density would be noise; the
+# predecessor's application as a whole runs 32.8 per cent. ADR-018.
+
+# A layer needs this much code before its ratio means anything. Lower than the
+# whole-project floor because a layer is smaller by definition.
+LAYER_FLOOR_LINES = 250
 
 
 def count_python(path: Path) -> tuple[int, int]:
@@ -88,11 +95,23 @@ def tally(where: Path) -> tuple[int, int]:
     return code, comment
 
 
+# Prose that is append-only by design is exempt, because the remedy this budget
+# demands - retire something - cannot be applied to it. docs/decisions.md says so
+# in its own header: superseded entries stay in place with a note. Deleting an
+# ADR to fit a cap destroys the record the cap exists to keep honest. ADR-017.
+DOC_EXEMPT = {"decisions.md"}
+
+
 def markdown_lines() -> int:
+    """Living prose only: no build artifacts, no append-only records."""
     total = 0
     for f in sorted(ROOT.rglob("*.md")):
         parts = f.relative_to(ROOT).parts
-        if parts[0] in {".git", ".venv", "venv"} or "history" in parts:
+        if any(p.startswith(".") for p in parts):
+            continue  # .venv, .git, .pytest_cache and friends
+        if parts[0] in {"venv", "node_modules"} or "history" in parts:
+            continue
+        if f.name in DOC_EXEMPT:
             continue
         total += len(f.read_text(encoding="utf-8").splitlines())
     return total
@@ -117,19 +136,26 @@ def main() -> int:
         check("total lines", all_code, MAX_TOTAL_LINES),
     ]
 
+    core_c, core_m = tally(pkg / "core")
+    other_c, other_m = all_code - core_c, all_comment - core_m
+    for label, code, comment, ceiling in (
+        ("core comment ratio", core_c, core_m, MAX_CORE_COMMENT_RATIO),
+        ("other comment ratio", other_c, other_m, MAX_OTHER_COMMENT_RATIO),
+    ):
+        if code >= LAYER_FLOOR_LINES:
+            results.append(check(label, 100 * comment / code, ceiling, "%"))
+        elif code:
+            print(
+                f"  info  {label:<28} {100 * comment / code:>7.0f}% / {ceiling}%"
+                f"   (under {LAYER_FLOOR_LINES} lines, at {code})"
+            )
+
     if all_code >= RATIO_FLOOR_LINES:
-        results.append(
-            check("comment ratio", 100 * all_comment / all_code, MAX_COMMENT_RATIO, "%")
-        )
         results.append(check("doc ratio", 100 * docs / all_code, MAX_DOC_RATIO, "%"))
     elif all_code:
-        cr = 100 * all_comment / all_code
-        dr = 100 * docs / all_code
-        print(f"  info  comment ratio               {cr:>7.0f}% / {MAX_COMMENT_RATIO}%")
-        print(f"  info  doc ratio                   {dr:>7.0f}% / {MAX_DOC_RATIO}%")
         print(
-            f"        (not enforced below {RATIO_FLOOR_LINES} lines of code; "
-            f"at {all_code})"
+            f"  info  doc ratio                   {100 * docs / all_code:>7.0f}%"
+            f" / {MAX_DOC_RATIO}%   (under {RATIO_FLOOR_LINES} lines)"
         )
 
     # web/ must not outgrow the algorithm it presents. In the predecessor a

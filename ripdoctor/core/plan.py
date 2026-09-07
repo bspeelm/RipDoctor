@@ -1,24 +1,17 @@
 """The spec and the plan: intent in, decision out.
 
-Two documents, deliberately not one.
+A **spec** is what a person wants - catalogue tracklist, the side's music bounds,
+and any edges set by ear. A **plan** is what the fitter decided: every track with
+its own start and end.
 
-A **spec** is what a person wants. It carries the catalogue tracklist, the
-side's music start and end, and - crucially - any edges set by ear. It is the
-input to fitting.
+They are separate so that fitting is repeatable without losing human
+corrections. Editing a boundary writes it back into the spec as an ear-set edge,
+so re-running the fit passes it through instead of recomputing over it. Collapse
+the two and every re-fit silently discards the listening that produced the last
+one.
 
-A **plan** is what the fitter decided: every track with its own start and end.
-It is the input to cutting.
-
-The reason they are separate is that fitting must be repeatable without losing
-human corrections. Editing a boundary writes it back into the *spec* as an
-ear-set edge, so re-running the fit passes it straight through instead of
-recomputing over it. Collapse the two and every re-fit silently discards the
-listening that produced the last one.
-
-**A track's own start and end always win.** Nothing here overrides them - not a
-detected gap, not the catalogue duration, not a manual gap override. The ear is
-the only instrument that hears where a fade actually stops, and detector-chosen
-edges measured two to ten seconds short at almost every track end on one record.
+**A track's own start and end always win.** Nothing overrides them - not a
+detected gap, not the catalogue, not a manual override. See docs/method.md.
 """
 
 from __future__ import annotations

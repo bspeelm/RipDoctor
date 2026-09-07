@@ -347,3 +347,104 @@ window in twenty-five thousand, against detection that requires a run of at
 least twenty-four consecutive quiet windows to call a gap, the exposure is
 negligible - but it is exposure, and it is written down rather than assumed
 away.
+
+---
+
+## ADR-016 — A gap too small for both paddings is divided, not clamped twice
+
+**Status:** accepted. Fixes a defect inherited from the predecessor.
+
+Each track keeps `tail` seconds after its last note and the next keeps `lead`
+before its first. When the gap between them is shorter than `lead + tail` there
+is not enough room for both, and the two have to be reconciled against each
+other rather than clamped independently.
+
+**The defect.** The predecessor computed them separately:
+
+```
+end = min(music_end + tail, next_start - 0.2)
+nxt = max(next_start - lead, music_end + 0.2)
+```
+
+Neither expression can see the other, so on any gap shorter than `lead + tail`
+- 2.8 seconds with the shipped values - `end` lands after `nxt`. Measured on a
+1.6 second gap: the first track ended at 71.35 and the second began at 70.25.
+The tracks overlapped by 1.1 seconds and the same audio was written into both
+files. Nothing downstream objected; the cutter wrote what it was told.
+
+**The fix.** When the gap cannot hold both paddings, divide it in proportion to
+what each side asked for, so both give up the same fraction and the two cuts
+meet at a single point. There is then no groove left over, which is correct - a
+gap that short has none to discard.
+
+**Why it was not noticed.** The record this logic was developed on has gaps of
+4.8 to 14.2 seconds, comfortably above the threshold. It would have appeared on
+the first tightly-cut side.
+
+**How it is held.** A test reproduces the overlap directly, and another runs the
+fitter across gap widths from 0.5 to 9 seconds and validates every resulting
+plan. `validate()` would also have caught it, but only for someone who called it.
+
+---
+
+## ADR-017 — Append-only records are exempt from the prose budget
+
+**Status:** accepted.
+
+`docs/decisions.md` is not counted in the documentation-ratio budget.
+
+**Why.** That budget's stated remedy is "retire something". It cannot be applied
+to this file: its own header says superseded entries stay in place with a note,
+and deleting a decision record to fit a ceiling destroys the record the ceiling
+exists to keep honest. bothy exempts `docs/history/` for the same reason.
+
+Fixed at the same time: the budget was counting `.pytest_cache/README.md` as
+project prose. Build artifacts are not documentation, and any path with a
+dot-prefixed component is now skipped.
+
+**What it costs.** Nothing bounds the number of ADRs. The discipline has to come
+from only writing one when a decision is actually made, which is what the file's
+header asks for.
+
+---
+
+## ADR-018 — The comment budget is split between core and everything else
+
+**Status:** accepted. Replaces the single 40 per cent ceiling.
+
+`ripdoctor/core` may run to 60 per cent comment lines. Everything outside it is
+capped at 35.
+
+**Why.** The single ceiling was set at 40 without measuring anything, which the
+budget script's own comment had explicitly warned against - it says to set the
+number from a measured baseline rather than by taste. Measured with the same
+counter:
+
+| | code | comment | ratio |
+|---|---:|---:|---:|
+| the four predecessor modules core was ported from | 424 | 233 | **55.0%** |
+| the three live predecessor tools | 179 | 92 | 51.4% |
+| RipDoctor's core | 494 | 260 | **52.6%** |
+| the predecessor's whole application | 3828 | 1257 | **32.8%** |
+
+Two kinds of code are being measured with one number. In `core` the comments are
+the experimental record - which threshold came from which measurement, which
+approach was tried and abandoned - and that is the thing being published. Outside
+core it is subprocess plumbing, routing and file handling, where the same density
+would be noise. The predecessor shows both figures clearly, and RipDoctor's core
+is already slightly leaner than the code it came from.
+
+**What was done before changing the number**, because a budget that is raised
+whenever it bites is not a budget: the duplicated 1-3 kHz explanation was
+retired from `envelope.py` (it is stated once, in `core.gaps`), and the
+long-form findings moved out of module docstrings into `docs/method.md`, where
+they belong. That took the whole-project ratio from 64 to 56 per cent on its
+own. 40 was still unreachable without deleting measurements.
+
+**What it costs.** `core` can carry more prose than the rest of the project, and
+the honest risk is that new code is put in `core` to get the looser ceiling. The
+existing `core lines` cap of 2000 is what bounds that, and the layering test
+stops anything impure being moved there to qualify.
+
+**What would reverse this.** Core drifting above 60 would mean the findings have
+outgrown the code that acts on them, and belong in `docs/method.md` instead.
