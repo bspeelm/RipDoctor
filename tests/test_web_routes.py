@@ -7,6 +7,7 @@ three in the predecessor.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from ripdoctor.audio.runner import FakeRunner
@@ -22,6 +23,7 @@ from ripdoctor.web.routes import records as R
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Jobs
 from tests.pool import WINDOWS, a_layout, a_runner, quiet_then_loud
+from tests.test_store import a_plan, a_spec
 
 SECRET = b"0" * 32
 FAST = 1000
@@ -743,3 +745,16 @@ def test_aligning_a_record_with_only_a_name_is_refused(tmp_path: Path) -> None:
     F.remember(service.layout, "album", album="Second", artist="First")
     r = post(build(service), "/api/align/album", service, {})
     assert r.status == 409 and "no saved cut" in r.json()["error"]
+
+
+def test_saving_keeps_what_the_plan_does_not_carry(tmp_path: Path) -> None:
+    """A plan has no lead, no tail and no fix map. Rebuilding the spec from
+    one dropped all three on every save, which is the spec undoing the
+    overrides it exists to hold - and the next re-fit landing elsewhere."""
+    service = a_service(tmp_path)
+    kept = replace(a_spec(), mbid="chosen", lead=3.5, tail=7.5)
+    F.save(service.layout, "album", kept, a_plan())
+    post(build(service), "/api/plan/album", service, {**a_plan_body(), "mbid": ""})
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert (spec.lead, spec.tail, spec.mbid) == (3.5, 7.5, "chosen")
+    assert spec.sides[0].fix == kept.sides[0].fix

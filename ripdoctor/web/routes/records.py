@@ -269,7 +269,12 @@ def add(app: App, service: Service) -> None:
             plan = _plan_from(slug, body)
         except (OldFormat, BadPlan, KeyError, TypeError, ValueError) as e:
             raise H.HttpError(400, str(e)) from e
-        spec = replace(F.spec_of(plan), mbid=str(body.get("mbid", "")))
+        # Built on the spec being replaced, not from the plan alone: the plan
+        # carries no lead, no tail and no fix map, and a save that rebuilt from
+        # it dropped every one of them.
+        current = _saved_spec(layout, slug)
+        mbid = str(body.get("mbid", "")) or (current.mbid if current else "")
+        spec = replace(F.spec_of(plan, current), mbid=mbid)
         spec_path, plan_path = F.save(layout, slug, spec, plan)
         return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.plan import Plan, Spec, SpecSide, SpecTrack
+from ripdoctor.core.plan import LEAD, TAIL, Plan, Spec, SpecSide, SpecTrack
 from ripdoctor.store.safety import under
 
 # Side files are named by letter, and the letter is opaque - a single-track
@@ -264,13 +264,18 @@ def letter_of(filename: str) -> str:
     return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
 
 
-def spec_of(plan: Plan) -> Spec:
+def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     """A spec derived from a plan, with every edge ear-set.
 
-    Used when a record is saved before it has a spec at all. A plan that was
-    saved is a decision somebody made about where the cuts go, so the next fit
-    passes those edges through rather than recomputing over them.
+    A plan that was saved is a decision somebody made about where the cuts go,
+    so the next fit passes those edges through rather than recomputing them.
+
+    The plan does not carry everything the spec does. `keep` is the spec being
+    replaced, and its lead, tail and per-side fix map come across, because a
+    save that dropped them would quietly undo the overrides the spec exists to
+    hold and the next re-fit would land somewhere else.
     """
+    fixes = {s.letter: s.fix for s in keep.sides} if keep else {}
     sides = []
     for side in plan.sides:
         tracks = tuple(
@@ -279,12 +284,14 @@ def spec_of(plan: Plan) -> Spec:
             )
             for t in side.tracks
         )
+        letter = letter_of(side.file)
         sides.append(
             SpecSide(
-                letter=letter_of(side.file),
+                letter=letter,
                 start=side.tracks[0].start if side.tracks else 0.0,
                 end=side.tracks[-1].end if side.tracks else 0.0,
                 tracks=tracks,
+                fix=dict(fixes.get(letter, {})),
             )
         )
     return Spec(
@@ -293,6 +300,8 @@ def spec_of(plan: Plan) -> Spec:
         artist=plan.artist,
         date=plan.date,
         sides=tuple(sides),
+        lead=keep.lead if keep else LEAD,
+        tail=keep.tail if keep else TAIL,
     )
 
 
