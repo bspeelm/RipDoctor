@@ -1,26 +1,15 @@
-"""Laying out a side: where its music runs, and which tracks are on it.
-
-`music_span` must measure on the band lane - full band, the needle-down
-transient and arm-handling rumble are louder than quiet music, so a level gate
-lands in the middle of the handling noise rather than at the first note.
-
-`assign_sides` decides what is on which side by arithmetic, because vinyl
-releases rarely record side breaks. See docs/method.md.
-"""
+"""Where a side's music runs, and which tracks are on it. docs/method.md."""
 
 from __future__ import annotations
 
 from ripdoctor.core.envelope import Envelope
 
-# How far below the music level still counts as music, when looking for the
-# first and last sustained run on a side. Wider than the gap threshold because
-# this only has to separate music from the run-in and run-out groove, not music
-# from an inter-track silence.
+# Below the music level. Wider than the gap threshold: this separates music
+# from groove, not from a silence between tracks.
 SPAN_BELOW = 20.0
 
-# A run must last this long to count as music. A needle drop that skids into a
-# groove makes a second or so of real audio before the arm is lifted; that
-# accident is not the start of side one.
+# A run must last this long to count as music: a needle drop that skids makes a
+# second of real audio, and that accident is not the start of side one.
 SPAN_RUN = 1.5
 
 MUSIC_PCT = 0.85
@@ -40,15 +29,7 @@ def _run_start(levels: tuple[float, ...], threshold: float, need: int) -> int | 
 
 
 def music_span(env: Envelope) -> tuple[float, float]:
-    """(start, end) of the music on one side, measured on the band lane.
-
-    Both ends are found the same way - the first sustained run of music, scanning
-    inward from each end of the side - so the answer is symmetric. Everything
-    outside is run-in groove, run-out groove, the needle drop and the lift.
-
-    Returns the whole side if no sustained music is found at all, which is the
-    honest answer for an envelope that is silent or too short to judge.
-    """
+    """(start, end) of the music, from the band lane, scanned inward."""
     if not len(env):
         return 0.0, 0.0
 
@@ -72,17 +53,9 @@ def music_span(env: Envelope) -> tuple[float, float]:
 
 
 def assign_sides(spans: list[float], lengths: list[float]) -> list[tuple[int, int]]:
-    """Split a tracklist into one contiguous run per side.
+    """One contiguous run of tracks per side, as [(first, last_exclusive), ...].
 
-    Returns [(first, last_exclusive), ...], one pair per side, chosen to
-    minimise the total mismatch between each side's catalogue sum and the music
-    actually measured on it.
-
-    Exhaustive rather than greedy. A greedy walk commits to the first split that
-    looks reasonable, and one bad split displaces every side after it - the same
-    failure the fitter avoids by not walking forward. The search is small enough
-    that there is no reason to guess: a handful of sides against a dozen or two
-    tracks.
+    Exhaustive: a greedy split displaces every side after it.
     """
     n, k = len(lengths), len(spans)
     if k == 0 or n == 0:
@@ -124,12 +97,7 @@ def assign_sides(spans: list[float], lengths: list[float]) -> list[tuple[int, in
 def side_mismatch(
     spans: list[float], lengths: list[float], cuts: list[tuple[int, int]]
 ) -> list[float]:
-    """Per side, catalogue total minus measured music.
-
-    Reported rather than hidden. A side that is out by seconds is normal - quiet
-    heads and tails fall below any threshold. A side out by a whole track is the
-    signal that the release is wrong, or that a track is missing from it.
-    """
+    """Catalogue total minus measured music, per side."""
     out = []
     for span, (lo, hi) in zip(spans, cuts, strict=False):
         out.append(sum(lengths[lo:hi]) - span)

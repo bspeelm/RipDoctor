@@ -1,44 +1,18 @@
-"""The spec and the plan: intent in, decision out.
-
-A **spec** is what a person wants - catalogue tracklist, the side's music bounds,
-and any edges set by ear. A **plan** is what the fitter decided: every track with
-its own start and end.
-
-They are separate so that fitting is repeatable without losing human
-corrections. Editing a boundary writes it back into the spec as an ear-set edge,
-so re-running the fit passes it through instead of recomputing over it. Collapse
-the two and every re-fit silently discards the listening that produced the last
-one.
-
-**A track's own start and end always win.** Nothing overrides them - not a
-detected gap, not the catalogue, not a manual override. See docs/method.md.
-"""
+"""The spec and the plan: intent in, decision out. docs/method.md."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-# Silence kept before a track's first note and after its last. The repeated
-# human correction that produced these was "it cuts the lead-in and starts right
-# before the first notes" - a boundary placed exactly at the music is audibly
-# abrupt.
+# Silence kept before a track's first note and after its last. A boundary placed
+# exactly at the music is audibly abrupt.
 LEAD = 1.3
 TAIL = 1.5
 
 
 class OldFormat(Exception):
-    """A plan in the superseded contiguous-cuts format.
-
-    The predecessor's first plan format was one `cuts` list per side, where each
-    boundary was a single point shared by two tracks - so the whole inter-track
-    groove had to land inside one track or the other. On gaps running fourteen
-    seconds that is a track ending in blank groove.
-
-    These are refused rather than converted. Converting would guess which side of
-    the boundary the groove belonged to, which is the question the format could
-    not answer; and other tools still read the old format from disk.
-    """
+    """A superseded contiguous-cuts plan. Refused, never converted."""
 
 
 class BadPlan(ValueError):
@@ -62,16 +36,7 @@ class SpecTrack:
 
 @dataclass(frozen=True, slots=True)
 class SpecSide:
-    """One side: where its music runs, and what is on it.
-
-    `letter` is opaque and case-sensitive. It is usually a, b, c, d, but a
-    single-track re-rip of a botched side is kept as its own side under its own
-    name, so nothing may assume one character or an alphabet.
-
-    `fix` overrides one gap's two edges by track number: the value is
-    (music_end, next_music_start), measured by hand when a detector cannot see a
-    gap it should have.
-    """
+    """One side. `letter` is opaque - nothing may assume one character."""
 
     letter: str
     start: float
@@ -129,12 +94,7 @@ class Spec:
 
 @dataclass(frozen=True, slots=True)
 class PlanTrack:
-    """One track as decided: its own start and end, and the catalogue it was
-    checked against.
-
-    `start` and `end` are not shared with neighbours. Whatever lies between one
-    track's end and the next one's start is groove, and is not written.
-    """
+    """One track as decided. Edges are not shared with neighbours."""
 
     number: int
     title: str
@@ -148,13 +108,7 @@ class PlanTrack:
 
     @property
     def delta(self) -> float:
-        """Measured minus catalogue.
-
-        A consistent negative bias across a side is normal - quiet heads and
-        tails fall below any threshold. An outlier is the bug signal, and equal
-        and opposite deltas on adjacent tracks point straight at the boundary
-        between them.
-        """
+        """Measured minus catalogue. A steady bias is normal; an outlier is not."""
         return self.length - self.cat
 
 
@@ -230,13 +184,7 @@ class Plan:
 
 
 def validate(plan: Plan, durations: dict[str, float] | None = None) -> None:
-    """Refuse a plan that cannot be cut. Raises BadPlan with the reason.
-
-    Every check here corresponds to a way a cut goes wrong silently: a track
-    that ends before it starts writes nothing, overlapping tracks write the same
-    audio twice, a duplicate number collides on import, and an end past the side
-    writes a truncated final track.
-    """
+    """Refuse a plan that cannot be cut, with the reason."""
     seen: dict[int, str] = {}
     for side in plan.sides:
         prev: PlanTrack | None = None

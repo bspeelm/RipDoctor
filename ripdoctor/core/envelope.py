@@ -1,19 +1,4 @@
-"""Level envelopes: the unit the whole algorithm computes over.
-
-An envelope is a list of decibel readings on a uniform time grid. Everything
-downstream - gap detection, edge refinement, fitting, alignment - takes one of
-these rather than audio. That boundary is what lets the algorithm be tested with
-no decoder, no sound card and no files. See ADR-005.
-
-Three lanes are measured over the same grid:
-
-    full   RMS across the whole spectrum
-    peak   the largest sample in each window
-    band   RMS restricted to 1-3 kHz
-
-Why the band lane exists, and why peak is separate from RMS, is in core.gaps -
-the two facts belong with the code that acts on them.
-"""
+"""Level envelopes: the unit the algorithm computes over. ADR-005."""
 
 from __future__ import annotations
 
@@ -21,15 +6,14 @@ import math
 from dataclasses import dataclass
 from typing import NamedTuple
 
-# On-disk envelope cache format. The magic and version are part of the file, so
-# a reader can refuse a format it does not understand rather than misreading it.
+# On-disk cache format. Magic and version are in the file so a reader can refuse
+# what it does not understand rather than misread it.
 MAGIC = b"CAE1"
 VERSION = 1
 HEADER_BYTES = 16
 DEFAULT_WINDOW_MS = 50
 
-# One byte per window per lane: half-decibel steps across -127.5..0 dB. Far
-# finer than any judgement made from these numbers, and 26 kB per side per lane.
+# One byte per window per lane: half-decibel steps across -127.5..0 dB.
 DB_MIN = -127.5
 DB_STEP = 0.5
 DB_OFFSET = 127.5
@@ -40,12 +24,7 @@ class FormatError(ValueError):
 
 
 def q_db(db: float | None) -> int:
-    """Quantise one decibel reading to a byte.
-
-    None, NaN and -inf all mean "nothing measurable here" and collapse to the
-    floor. ffmpeg emits all three: a silent window gives -inf, and astats prints
-    `-nan` for a window it could not measure.
-    """
+    """Quantise one reading to a byte. None, NaN and -inf all mean the floor."""
     if db is None or db != db or db == float("-inf"):
         db = DB_MIN
     v = round((max(DB_MIN, min(0.0, db)) + DB_OFFSET) / DB_STEP)
@@ -57,10 +36,7 @@ def deq_db(v: int) -> float:
     return v * DB_STEP - DB_OFFSET
 
 
-# A stored reading is one byte, so there are exactly 256 possible values. Decode
-# is a lookup rather than arithmetic per sample: a 22-minute side is 26,500
-# readings per lane, and computing the same 256 answers over and over is work
-# nobody asked for.
+# A reading is one byte, so there are 256 possible values; decode is a lookup.
 _DEQ = tuple(deq_db(v) for v in range(256))
 
 
@@ -80,8 +56,7 @@ class Envelope:
 
     @property
     def duration(self) -> float:
-        """Seconds covered. This is the envelope's own view of the side, which
-        is not necessarily the audio's true length - see rescaled()."""
+        """Seconds covered, by this envelope's own grid. See rescaled()."""
         return len(self.levels) * self.window
 
     def index(self, t: float) -> int:
@@ -96,11 +71,8 @@ class Envelope:
         return self.levels[self.index(lo) : self.index(hi)]
 
     def percentile(self, p: float) -> float:
-        """The p-th percentile reading, 0.0 to 1.0.
-
-        A side has at least three distinct floors tens of decibels apart, so
-        which percentile a detector anchors on decides what it can see at all.
-        See core.gaps.
+        """The p-th percentile reading. Which one is anchored on decides what a
+        detector can see at all - see core.gaps.
         """
         if not self.levels:
             raise ValueError("empty envelope")
@@ -108,11 +80,8 @@ class Envelope:
         return ordered[min(len(ordered) - 1, max(0, int(p * len(ordered))))]
 
     def rescaled(self, true_duration: float) -> Envelope:
-        """Stretch the grid onto the audio's real length.
-
-        The readings do not move; only the spacing between them changes. A
-        decoder's timebase runs slightly long, and uncorrected that drifts every
-        cut late by a growing amount. See docs/method.md.
+        """Stretch the grid onto the audio's real length; spacing moves, not
+        readings. See docs/method.md.
         """
         if true_duration <= 0 or not self.levels:
             return self
@@ -144,9 +113,7 @@ def window_count_is_plausible(
 ) -> bool:
     """Does this many readings match a side of this length?
 
-    An envelope that does not line up with its audio is worse than none: every
-    cut from it is confidently wrong. A ratio rather than a difference, so it
-    holds for a thirty-second re-rip and a full side alike.
+    One that does not line up is worse than none: every cut from it is wrong.
     """
     if duration <= 0 or window <= 0:
         return False
@@ -157,8 +124,8 @@ def window_count_is_plausible(
 def decode(blob: bytes) -> Lanes:
     """Read a cache file into three envelopes.
 
-    Refuses anything it does not recognise rather than guessing. A truncated or
-    foreign file read as an envelope produces plausible-looking decibels.
+    Refuses what it does not recognise; a foreign file decodes to plausible
+    decibels.
     """
     if len(blob) < HEADER_BYTES or blob[:4] != MAGIC:
         raise FormatError("not an envelope file")
@@ -209,11 +176,7 @@ def encode(lanes: Lanes) -> bytes:
 def from_readings(
     full: list[float], peak: list[float], band: list[float], window: float
 ) -> Lanes:
-    """Build lanes from raw measurements, trimming to the shortest.
-
-    A measuring pass can return lanes that differ by a window at the end. The
-    shortest is the one every lane actually covers.
-    """
+    """Build lanes from raw measurements, trimmed to the shortest."""
     n = min(len(full), len(peak), len(band))
     if n == 0:
         raise ValueError("no readings")
@@ -225,7 +188,7 @@ def from_readings(
 
 
 def db_of_rms(rms: float, full_scale: float = 1.0) -> float:
-    """Decibels relative to full scale, with a floor instead of -inf."""
+    """Decibels relative to full scale, floored instead of -inf."""
     if rms <= 0 or full_scale <= 0:
         return DB_MIN
     return max(DB_MIN, 20.0 * math.log10(rms / full_scale))

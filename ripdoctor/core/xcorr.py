@@ -1,26 +1,4 @@
-"""Carrying a verified cut across a re-rip.
-
-Ripping a record again - a better converter, or replacing a bad take - does not
-invalidate boundaries someone already listened to. Needle-drop timing drifts by
-seconds between sessions; timing *within* a side does not, because it is the
-same record on the same platter. So an approved cut is a template needing a
-transform, not work to be thrown away.
-
-The transform is fitted rather than assumed:
-
-    new_time = offset + scale * old_time
-
-Scale matters. A belt running 0.1 per cent different between sessions drifts
-about a second across a sixteen-minute side, which is audible at a boundary.
-
-Correlation is used to LOCATE, never to judge. Pearson r collapses on dense
-material and falls as a probe gets longer, while the lag it picks stays correct
-- so probes are short and r is only asked one question, "is this the same music
-at all", which it answers well. Correctness is established separately, by
-fitting on two probes and predicting a third the fit has never seen.
-
-docs/method.md carries the measurements behind all of that.
-"""
+"""Carrying a verified cut across a re-rip. docs/method.md."""
 
 from __future__ import annotations
 
@@ -31,16 +9,13 @@ from dataclasses import dataclass
 # music" (0.38 to 0.39), measured across a real library. docs/method.md.
 MIN_R = 0.65
 
-# A platter differing by more than this between sessions is not credible; the
-# fit is more likely wrong than the turntable.
+# Beyond this the fit is likelier wrong than the turntable.
 MAX_DRIFT = 0.02
 
-# How far the predicted midpoint may land from where it actually is before the
-# transform is refused.
+# How far the predicted midpoint may miss before the transform is refused.
 CHECK_TOLERANCE = 0.20
 
-# Probes sit inside the music, never in lead-in or run-out, where every record
-# sounds like every other record and correlation means nothing.
+# Inside the music: in lead-in or run-out every record correlates with any other.
 PROBE_AT = (0.20, 0.50, 0.80)
 
 
@@ -78,11 +53,7 @@ class Transform:
 
 
 def best_lag(hay: list[float], needle: list[float]) -> tuple[float, int]:
-    """Pearson r of `needle` at every offset in `hay`. Returns (r, index).
-
-    Prefix sums keep each window's mean and variance O(1), so only the dot
-    product is per-lag and the whole search stays linear in the search range.
-    """
+    """Pearson r of `needle` at every offset in `hay`. Returns (r, index)."""
     m, n = len(needle), len(hay)
     if m < 8 or n < m:
         raise AlignError("not enough audio to correlate")
@@ -136,11 +107,7 @@ def require_match(probe: Probe, what: str, min_r: float = MIN_R) -> None:
 
 
 def fit(a: Probe, b: Probe, max_drift: float = MAX_DRIFT) -> Transform:
-    """Fit offset and scale through two probes.
-
-    Two probes always produce *a* line. The drift check is the only thing
-    between a nonsense pair and every boundary on the side moving with it.
-    """
+    """Fit offset and scale through two probes, refusing incredible drift."""
     if b.old_t == a.old_t:
         raise AlignError("both probes were taken at the same moment")
 
@@ -156,12 +123,7 @@ def fit(a: Probe, b: Probe, max_drift: float = MAX_DRIFT) -> Transform:
 def verify(
     transform: Transform, check: Probe, tolerance: float = CHECK_TOLERANCE
 ) -> float:
-    """Test a fit against a probe it has never seen. Returns the miss.
-
-    Any two points define a line, including two wrong ones, so two probes can
-    only agree with themselves. A third the fit has never seen is the first real
-    test of it.
-    """
+    """Test a fit against a probe it has never seen. Returns the miss."""
     miss = check.new_t - transform.apply(check.old_t)
     if abs(miss) > tolerance:
         raise AlignError(

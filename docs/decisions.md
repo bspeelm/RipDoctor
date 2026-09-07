@@ -224,6 +224,8 @@ notice a new album waits for that player's own scan.
 
 **Status:** accepted.
 
+> **Superseded by ADR-021.** There is no floor; the budgets apply from the first line.
+
 `scripts/budgets.py` enforces absolute line counts from the first commit, but
 the comment-ratio and documentation-ratio budgets are printed and not enforced
 until the package reaches 500 lines of code.
@@ -391,6 +393,8 @@ plan. `validate()` would also have caught it, but only for someone who called it
 
 **Status:** accepted.
 
+> **Superseded by ADR-021.** The decision log is counted like any other live prose.
+
 `docs/decisions.md` is not counted in the documentation-ratio budget.
 
 **Why.** That budget's stated remedy is "retire something". It cannot be applied
@@ -411,6 +415,8 @@ header asks for.
 ## ADR-018 — The comment budget is split between core and everything else
 
 **Status:** accepted. Replaces the single 40 per cent ceiling.
+
+> **Superseded by ADR-021.** One comment ratio, not one per layer.
 
 `ripdoctor/core` may run to 60 per cent comment lines. Everything outside it is
 capped at 35.
@@ -514,3 +520,41 @@ comment budget bounds how much is *said about* what it does, and past a point
 that is displacement rather than documentation - the writing becomes the work.
 Nobody needs to be consulted about moving a paragraph into the file written to
 hold paragraphs.
+
+---
+
+## ADR-021 — The budgets match the scheme they were taken from
+
+**Status:** accepted. Supersedes ADR-012, ADR-017 and ADR-018.
+
+Four numbers, one of each kind, exactly as in the project this process came
+from: a code-line cap, one comment ratio at 25 per cent, one prose ratio at 75
+per cent, and a build-artifact size. Plus a zero on runtime dependencies, which
+is this project's own.
+
+**What this reverses.** Three accommodations had accumulated, each reasonable on
+its own and wrong together:
+
+* a floor below which the ratios did not apply (ADR-012)
+* an exemption for the decision log (ADR-017)
+* separate comment ratios for `core` and everything else, at 60 and 35 (ADR-018)
+
+All three are gone. The budgets apply from the first line, every live document
+counts, and there is one comment ratio. Only genuinely append-only directories
+are exempt, because the remedy a budget asks for cannot be applied to them.
+
+**Why the accommodations were wrong.** Each was introduced when a budget fired,
+and each made the next firing easier to absorb. A cap on one directory is one
+the prose walks out of; a cap that does not apply yet is one that never starts;
+a cap split by layer is two caps, each easier to argue about than the one it
+replaced. The comment ratio had reached 59 per cent under those rules and read
+as compliant.
+
+**What it cost to comply.** 286 lines of comment came out of the package, taking
+the ratio from 59 to 18. Nothing was deleted that is not written down elsewhere:
+the findings were already in `docs/method.md` and the decisions here, and what
+came out of the modules was the second telling. Module docstrings are now one
+line and point at the file that holds the reasoning.
+
+**What is still over.** The prose ratio, at 109 per cent against 75. That is a
+soft ceiling and therefore the author's call - see ADR-020.

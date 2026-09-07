@@ -1,14 +1,4 @@
-"""Finding the quiet places, and judging whether a cut is in one.
-
-A gap is a sustained quiet run. The only subtle part is what "quiet" is measured
-against, and the two lanes need OPPOSITE anchors: the full lane thresholds down
-from the music, the band lane up from its floor. Get them the wrong way round
-and detection does not degrade, it inverts - one finds nothing, the other finds
-dozens of quiet musical passages.
-
-RMS locates gaps; peak judges their edges. See docs/method.md for why, and for
-the measurements behind the constants below.
-"""
+"""Sustained quiet runs, and whether a cut is in one. docs/method.md."""
 
 from __future__ import annotations
 
@@ -16,18 +6,15 @@ from dataclasses import dataclass
 
 from ripdoctor.core.envelope import Envelope
 
-# Measured on the 48 kHz/16-bit chain. They are real measurements rather than
-# preferences, but they are one chain's measurements - see docs/thresholds.md
-# before treating any of them as universal.
+# Measured on one signal chain. See docs/method.md before assuming they carry.
 BELOW = 16.0  # full lane: dB below the music level
 ABOVE = 12.0  # band lane: dB above the measured floor
 MINGAP = 1.2  # seconds; shorter runs are not inter-track gaps
 MUSIC_PCT = 0.85
 FLOOR_PCT = 0.02
 
-# How far above a gap's own floor still counts as music, when refining its
-# edges. Deliberately tighter than BELOW: by this point the gap has been
-# located, and the question is where the fade actually stops.
+# Above a gap's own floor, when refining its edges. Tighter than BELOW: the gap
+# is already located, and the question is only where the fade stops.
 REFINE_ABOVE = 8.0
 
 
@@ -47,12 +34,7 @@ class Gap:
 
 @dataclass(frozen=True, slots=True)
 class GapSet:
-    """Gaps, plus the levels they were judged against.
-
-    The thresholds are reported rather than discarded because a gap list on its
-    own cannot be argued with. Knowing that music sat at -26 and the threshold
-    at -42 is what makes a wrong answer diagnosable.
-    """
+    """Gaps, plus the levels they were judged against."""
 
     gaps: tuple[Gap, ...]
     threshold: float
@@ -74,12 +56,7 @@ class GapSet:
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
-    """Where a proposed cut sits relative to the gaps.
-
-    `margin` is how far the cut is from the nearer edge of the gap it is in -
-    the number that says whether a boundary is comfortable or marginal.
-    `distance` is how far outside the nearest gap it is, when it is not in one.
-    """
+    """Where a proposed cut sits: `margin` inside a gap, `distance` outside."""
 
     inside: bool
     lo: float | None = None
@@ -104,10 +81,7 @@ def find(
 ) -> GapSet:
     """Sustained quiet runs in one lane.
 
-    Pass exactly one of `below` (anchor down from the music, for the full lane)
-    or `above` (anchor up from the floor, for the band lane). Requiring the
-    caller to choose is deliberate: a default would silently be wrong for one of
-    the two lanes, and the failure is not obvious in the output.
+    Pass exactly one of `below` (full lane) or `above` (band lane).
     """
     if (below is None) == (above is None):
         raise ValueError("pass exactly one of below= (full lane) or above= (band lane)")
@@ -142,19 +116,8 @@ def find(
 
 
 def refine(env: Envelope, lo: float, hi: float) -> tuple[float, float]:
-    """Where the music really stops and starts, inside a located gap.
-
-    Returns (music_end, music_start). The gap has already been found; this asks
-    a narrower question, and answers it against *the gap's own floor* rather
-    than the side-wide threshold.
-
-    That distinction is what preserves a fade. A decaying tail drops below the
-    side-wide threshold well before it stops being music, so a side-wide answer
-    truncates it - measured at three to four seconds early, on six track ends in
-    a single pass. Judging against the floor of this particular gap keeps it.
-
-    The middle half of the gap is used to establish that floor, so the fade at
-    one end and the lead-in at the other do not contaminate the measurement.
+    """Where the music stops and starts inside a located gap, judged against
+    that gap's own floor so a fade survives.
     """
     if hi <= lo or not len(env):
         return lo, hi
@@ -182,12 +145,7 @@ def refine(env: Envelope, lo: float, hi: float) -> tuple[float, float]:
 
 
 def verdict(t: float, gapset: GapSet) -> Verdict:
-    """Judge a proposed cut against the detected gaps.
-
-    This is the number the ear check is answering. A cut inside a gap with a
-    healthy margin is safe to leave alone; one outside a gap, or inside with a
-    margin of a tenth of a second, is one to listen to.
-    """
+    """Judge a proposed cut against the detected gaps."""
     inside = gapset.containing(t)
     if inside is not None:
         return Verdict(

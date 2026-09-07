@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """Size budgets, enforced as a failing check.
 
-Budgets are not style. They are the mechanism that keeps this project the size
-it claims to be: a small algorithm with a thin application around it. Each one
-fails the build when exceeded.
+Four numbers, one of each kind, matching the scheme this project's process was
+taken from. No per-layer ceilings, no floor below which they stop applying, and
+no file exempted for being inconvenient: a cap on one directory is one the prose
+walks out of, and moving a section from the README into the decision log would
+otherwise read as an improvement while nothing was retired.
 
-Two kinds of ceiling, and they are not treated alike.
+**The comment ratio is hard.** Never exceeded, never raised. If prose has
+outgrown it, move findings into docs/method.md - that is what the file is for.
+Over budget means retiring, not raising.
 
-**The comment ratio is hard.** It is never exceeded and never raised. If prose
-has outgrown it, move findings into docs/method.md - that is where they belong
-anyway.
+**The other three are soft**, and soft does not mean ignore. It means the choice
+between raising a ceiling and writing worse code belongs to the author. Never
+quietly trim a function, drop a guard or skip a case to fit a number: stop and
+say the ceiling is in the way.
 
-**Every other ceiling is soft**, and soft does not mean ignore. It means the
-choice between raising it and writing worse code belongs to the author, not to
-whoever is at the keyboard. Never quietly trim a function, drop a guard or skip
-a case to fit a number: stop and say the ceiling is in the way.
-
-The prose budget exists for the same reason as the comment budget. Documentation
-about this project grows faster than the project does, and past a point the
-writing becomes the work. Every markdown file counts; only docs/history/ is
-exempt, being append-only by design.
+Changing any number requires a decision record saying why it moved.
 """
 
 from __future__ import annotations
@@ -32,41 +29,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Budgets. Each is a ceiling, and each was chosen deliberately.
-MAX_CORE_LINES = 2000  # the published algorithm; it should stay small
-MAX_TOTAL_LINES = 8000  # everything under ripdoctor/
-MAX_CORE_COMMENT_RATIO = 60  # core carries the findings; see ADR-018
-MAX_OTHER_COMMENT_RATIO = 35  # plumbing does not
-MAX_DOC_RATIO = 75  # markdown lines as a per cent of code lines
+MAX_CODE_LINES = 4000
+MAX_COMMENT_RATIO = 25
+MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
 
-# Ratios need a denominator worth dividing by. Below this many lines of code a
-# percentage says nothing about the project - a skeleton is almost entirely
-# docstring, and would fail a cap that is correct for a finished codebase. Below
-# the floor the ratios are printed but not enforced, so they stay visible and
-# the point at which they start biting is predictable rather than a surprise.
-# ADR-012.
-RATIO_FLOOR_LINES = 500
-
-# Two ceilings, because these are two kinds of code. core/ is the published
-# algorithm and its comments are the experimental record - which threshold came
-# from which measurement, which approach was tried and abandoned. Measured with
-# this same counter, the predecessor modules core was ported from run 55.0 per
-# cent and RipDoctor's core runs 52.6. Everything outside core is subprocess
-# plumbing, routing and file handling, where that density would be noise; the
-# predecessor's application as a whole runs 32.8 per cent. ADR-018.
-
-# A layer needs this much code before its ratio means anything. Lower than the
-# whole-project floor because a layer is smaller by definition.
-LAYER_FLOOR_LINES = 250
+# Append-only records are the only prose exempt, because the remedy this budget
+# asks for - retire something - cannot be applied to them.
+DOC_EXEMPT_DIRS = {"history", "review"}
 
 
 def count_python(path: Path) -> tuple[int, int]:
-    """Return (code lines, comment lines) for one file.
-
-    Docstrings count as comments, not code. A module that is mostly explanation
-    should read as mostly explanation in the numbers.
-    """
+    """Return (code lines, comment lines). Docstrings count as comments."""
     src = path.read_text(encoding="utf-8")
     lines = src.splitlines()
     comment = sum(1 for ln in lines if ln.strip().startswith("#"))
@@ -82,107 +56,67 @@ def count_python(path: Path) -> tuple[int, int]:
             node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
         ):
             continue
-        doc = ast.get_docstring(node, clean=False)
-        if doc is None:
+        if ast.get_docstring(node, clean=False) is None:
             continue
-        # The docstring node spans end_lineno - lineno + 1 physical lines.
         body = node.body[0]
         comment += (body.end_lineno or body.lineno) - body.lineno + 1
 
     return max(len(lines) - comment - blank, 0), comment
 
 
-def tally(where: Path) -> tuple[int, int]:
-    code = comment = 0
-    for f in sorted(where.rglob("*.py")):
-        if "__pycache__" in f.parts:
-            continue
-        c, m = count_python(f)
-        code += c
-        comment += m
-    return code, comment
+def sources() -> list[Path]:
+    """Shipping code: the package, excluding tests and caches."""
+    return [
+        f
+        for f in sorted((ROOT / "ripdoctor").rglob("*.py"))
+        if "__pycache__" not in f.parts
+    ]
 
 
-# Prose that is append-only by design is exempt, because the remedy this budget
-# demands - retire something - cannot be applied to it. docs/decisions.md says so
-# in its own header: superseded entries stay in place with a note. Deleting an
-# ADR to fit a cap destroys the record the cap exists to keep honest. ADR-017.
-DOC_EXEMPT = {"decisions.md"}
-
-
-def markdown_lines() -> int:
-    """Living prose only: no build artifacts, no append-only records."""
-    total = 0
+def live_docs() -> list[Path]:
+    out = []
     for f in sorted(ROOT.rglob("*.md")):
         parts = f.relative_to(ROOT).parts
         if any(p.startswith(".") for p in parts):
-            continue  # .venv, .git, .pytest_cache and friends
-        if parts[0] in {"venv", "node_modules"} or "history" in parts:
             continue
-        if f.name in DOC_EXEMPT:
+        if parts[0] in {"venv", "node_modules"} or DOC_EXEMPT_DIRS & set(parts):
             continue
-        total += len(f.read_text(encoding="utf-8").splitlines())
-    return total
-
-
-def check(
-    label: str, actual: float, ceiling: float, unit: str = "", *, hard: bool = False
-) -> bool:
-    ok = actual <= ceiling
-    mark = "ok  " if ok else ("HARD" if hard else "OVER")
-    print(f"  {mark}  {label:<28} {actual:>8.0f}{unit} / {ceiling:.0f}{unit}")
-    if not ok:
-        BREACHES.append((label, hard))
-    return ok
-
-
-BREACHES: list[tuple[str, bool]] = []
+        out.append(f)
+    return out
 
 
 def main() -> int:
-    pkg = ROOT / "ripdoctor"
-    core_code, _ = tally(pkg / "core")
-    all_code, all_comment = tally(pkg)
-    docs = markdown_lines()
+    code = comment = 0
+    for f in sources():
+        c, m = count_python(f)
+        code += c
+        comment += m
+    docs = sum(len(f.read_text(encoding="utf-8").splitlines()) for f in live_docs())
 
-    print("budgets:")
-    results = [
-        check("core lines", core_code, MAX_CORE_LINES),
-        check("total lines", all_code, MAX_TOTAL_LINES),
-    ]
+    if code == 0:
+        print("no code yet")
+        return 0
 
-    core_c, core_m = tally(pkg / "core")
-    other_c, other_m = all_code - core_c, all_comment - core_m
-    for label, code, comment, ceiling in (
-        ("core comment ratio", core_c, core_m, MAX_CORE_COMMENT_RATIO),
-        ("other comment ratio", other_c, other_m, MAX_OTHER_COMMENT_RATIO),
-    ):
-        if code >= LAYER_FLOOR_LINES:
-            results.append(check(label, 100 * comment / code, ceiling, "%", hard=True))
-        elif code:
-            print(
-                f"  info  {label:<28} {100 * comment / code:>7.0f}% / {ceiling}%"
-                f"   (under {LAYER_FLOOR_LINES} lines, at {code})"
-            )
+    ratio = comment * 100 // code
+    dratio = docs * 100 // code
 
-    if all_code >= RATIO_FLOOR_LINES:
-        results.append(check("doc ratio", 100 * docs / all_code, MAX_DOC_RATIO, "%"))
-    elif all_code:
+    print(f"code:     {code} lines (budget {MAX_CODE_LINES})")
+    print(f"comments: {comment} lines, {ratio}% of code (budget {MAX_COMMENT_RATIO}%)")
+    print(f"prose:    {docs} lines, {dratio}% of code (budget {MAX_DOC_RATIO}%)")
+
+    failed = False
+    if ratio > MAX_COMMENT_RATIO:
         print(
-            f"  info  doc ratio                   {100 * docs / all_code:>7.0f}%"
-            f" / {MAX_DOC_RATIO}%   (under {RATIO_FLOOR_LINES} lines)"
+            "\nover the comment budget - this ceiling is hard."
+            "\nMove findings into docs/method.md. Do not raise it."
         )
-
-    # web/ must not outgrow the algorithm it presents. In the predecessor a
-    # single HTTP module was larger than the entire detection core.
-    web_code, _ = tally(pkg / "web")
-    if core_code:
-        results.append(check("web vs core lines", web_code, core_code))
-
-    # The strongest budget in the project, and the cheapest to verify.
-    with (ROOT / "pyproject.toml").open("rb") as fh:
-        deps = tomllib.load(fh)["project"]["dependencies"]
-    results.append(check("runtime dependencies", len(deps), 0))
+        failed = True
+    if code > MAX_CODE_LINES:
+        print("\nover the code budget - the author decides whether it moves.")
+        failed = True
+    if dratio > MAX_DOC_RATIO:
+        print("\nover the prose budget - retire a document, or the author decides.")
+        failed = True
 
     if "--wheel" in sys.argv:
         subprocess.run(  # noqa: S603
@@ -192,29 +126,23 @@ def main() -> int:
         )
         wheels = sorted((ROOT / "dist").glob("*.whl"))
         if wheels:
-            newest = max(wheels, key=lambda p: p.stat().st_mtime)
-            results.append(
-                check("wheel bytes", newest.stat().st_size, MAX_WHEEL_BYTES, "B")
-            )
+            size = max(wheels, key=lambda p: p.stat().st_mtime).stat().st_size
+            print(f"wheel:    {size} bytes (budget {MAX_WHEEL_BYTES})")
+            if size > MAX_WHEEL_BYTES:
+                print("\nover the wheel budget.")
+                failed = True
 
-    if all(results):
-        return 0
+    with (ROOT / "pyproject.toml").open("rb") as fh:
+        deps = tomllib.load(fh)["project"]["dependencies"]
+    print(f"deps:     {len(deps)} runtime dependencies (budget 0)")
+    if deps:
+        print("\nthe base install must pull in nothing.")
+        failed = True
 
-    hard = [label for label, is_hard in BREACHES if is_hard]
-    soft = [label for label, is_hard in BREACHES if not is_hard]
-    if hard:
-        print(
-            f"\nHARD ceiling exceeded: {', '.join(hard)}."
-            "\nThis one is not negotiable. Move findings into docs/method.md."
-        )
-    if soft:
-        print(
-            f"\nCeiling exceeded: {', '.join(soft)}."
-            "\nThis is a decision for the author, not a reason to write less."
-            "\nSay so and stop - do not trim code, drop a guard or skip a case"
-            "\nto fit the number."
-        )
-    return 1
+    if failed:
+        print("\nDo not argue with a budget; write a decision record to change one.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
