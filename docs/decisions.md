@@ -931,3 +931,33 @@ The same reasoning covers Ctrl-C: it stops the record, not the program. The loop
 catches it, stops the recorder properly, and encodes what was captured. A side is
 twenty minutes of somebody's evening, and every path out of the capture loop
 encodes what is on disk rather than discarding it.
+
+---
+
+## ADR-034 — The code ceiling moves from 4,000 to 5,000, once
+
+**Status:** accepted. Set by the author, 2026-09-06.
+
+4,000 was chosen in Phase 0, when the package was a scaffold and the web layer
+did not exist. It was not a measured number and nothing about it was wrong; it
+simply predates a quarter of the application.
+
+At the point it bound, the code stood at 3,939 lines against roughly 770 still
+to write: the socket adapter, `ripdoctor serve`, the remaining parity routes -
+capture, split, review, import, archive, library, artwork, punch - and Phase 5's
+artwork and beets importer. That lands near 4,700.
+
+**Why 5,000 rather than 4,700.** A ceiling set exactly at the estimate is one
+that has to move again the moment the estimate is out, and a ceiling that moves
+often is not a ceiling. This moves once, with room, and any further move needs
+its own record saying what changed.
+
+**What did not move.** The comment ratio, which is hard and stays at 25%. No
+code was trimmed, no guard dropped and no case skipped to fit either number -
+that is the failure this budget exists to prevent, and it would have been the
+wrong answer here. ADR-020.
+
+**What would reverse this.** The web layer coming in far under estimate, or a
+decision to ship the command line alone. Neither would justify moving the
+ceiling back on its own; a smaller number is only worth setting if something is
+retired to fit it.
