@@ -2,11 +2,11 @@
 
 Capture a vinyl side, find the track boundaries, cut them where you want them.
 
-**Status: early, and usable offline.** `ripdoctor doctor`, `config`, `fit`,
-`split` and `check` work today against sides you already have. Capture and the
-web interface are not built yet. See
-[docs/decisions.md](docs/decisions.md) for what has been decided and why, and
-the phase table below for what exists.
+**Status: complete, and not yet run against a turntable.** Every step works and
+is tested end to end - capture, fitting, cutting, the ear check, import and
+archive - but only against synthesised and recorded audio. Nothing here has met
+a sound card. See [docs/decisions.md](docs/decisions.md) for what has been
+decided and why.
 
 ## The problem it solves
 
@@ -71,8 +71,6 @@ the music?
 
 ## Install
 
-Nothing to install yet. When there is:
-
 ```
 pip install ripdoctor
 ```
@@ -117,6 +115,26 @@ Nothing is cut until a plan validates. A track that would end before it starts,
 overlap its neighbour, collide on a track number or run past the end of the side
 is refused with the reason, rather than written as an empty or duplicated file.
 
+## The web interface
+
+`ripdoctor serve` is the same pipeline with a waveform in front of it, on the
+machine that holds the library. It binds to loopback unless told otherwise, and
+asks for a login either way: it can write to the pool and run ffmpeg, so a
+password is the compensating control for being reachable at all.
+
+What the page adds over the commands is the part that needs eyes and ears. The
+1-3 kHz gap curve is drawn under the waveform with the detection threshold on
+it, so a boundary is placed against the measurement rather than against a
+number in a table. Ghost markers show where the catalogue says each cut should
+fall, and the distance between a ghost and a real one is the disagreement the
+fitter reported. Every boundary can be auditioned as a tick clip without
+leaving the page.
+
+Recording runs on the server rather than in the browser, so the meter and the
+auto-stop survive a closed laptop. You can listen to the input while cueing the
+needle, which is the only way to tell that the arm is tracking before twenty
+minutes have gone by.
+
 ## Phases
 
 | Phase | State |
@@ -127,7 +145,7 @@ is refused with the reason, rather than written as an empty or duplicated file.
 | 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
 | 4 — web interface | done, except listening while cueing (untested against hardware) |
 | 5 — tagging and import | done |
-| 6 — documentation revision, then 1.0 | not started |
+| 6 — documentation revision, then 1.0 | in progress |
 
 ## Development
 
@@ -150,9 +168,12 @@ affected.
 Size budgets are failing checks. The comment ratio is hard and is never raised;
 the others are the author's call. Never write less code to fit a number.
 
-The documentation is a draft until the code is complete, so the prose budget is
-knowingly over. It is trimmed in Phase 6, and the ratio is how that pass is
-checked. See ADR-023.
+The documentation was written ahead of the code and revised once the code was
+complete. What holds it true from here is a set of tests rather than a ratio:
+every command the README names is a real subparser and every subparser is
+named; every threshold appears in `docs/method.md` with the number the code
+actually uses; every element the front end reaches for exists in the markup;
+and every endpoint it calls is a route. See ADR-023 and ADR-037.
 
 ## Prior work
 

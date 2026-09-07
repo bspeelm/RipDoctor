@@ -188,10 +188,13 @@ def test_every_threshold_is_documented() -> None:
     missing = [n for n in NAMES if f"`{n}`" not in text]
     assert not missing, f"undocumented thresholds: {missing}"
 
-    # The documented value must be the one the code actually uses.
+    # The documented value must be the one the code actually uses. Taken from
+    # the table row rather than any mention: the prose names these too, and it
+    # should be able to without breaking this.
     defaults = Thresholds().as_dict()
+    rows = [ln for ln in text.splitlines() if ln.startswith("|")]
     for name in NAMES:
-        row = next(ln for ln in text.splitlines() if f"`{name}`" in ln)
+        row = next(ln for ln in rows if f"`{name}`" in ln)
         value = defaults[name]
         shown = row.split("|")[2].strip()
         assert shown, f"{name} has no value in the table"

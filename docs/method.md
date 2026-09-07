@@ -206,6 +206,13 @@ at all — which it answers very well:
 
 `MIN_R` sits at 0.65, in the empty gap between those groups.
 
+**The window is a count of samples, so it must come from the file.** Assuming
+48 kHz halves every window on a 96 kHz capture, so a thirty-second needle is
+compared against fifteen seconds of hay. It degrades rather than breaks, which
+is worse: one side measured r = 0.60 that way, just under `align_min_r`, and was
+refused when it should have fitted. `-ar` does not help - that is an output
+option, applied after the filter graph, and the window is set inside it.
+
 **Correctness comes from a prediction, not from r.** Any two points define a
 line, including two wrong ones. Fit on two probes, then predict a third the fit
 has never seen and measure where the music actually is. An internally consistent

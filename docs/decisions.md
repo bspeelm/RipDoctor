@@ -672,6 +672,9 @@ per cent when the code is complete, the pass did not happen.
 **What is not deferred.** The comment ratio remains hard and is enforced every
 run. This concerns `docs/` and the README, not the package.
 
+**Closed by ADR-037**, which records what the pass found and why the ratio
+turned out not to measure it.
+
 ---
 
 ## ADR-024 — The meter's band level was 1.76 dB hot
@@ -1024,3 +1027,41 @@ during the trim, with something retired to fit it.
 
 **What has not moved, through all three.** The comment ratio. Nothing has been
 trimmed, no guard dropped and no case skipped to fit any of these numbers.
+
+---
+
+## ADR-037 — The prose ratio stopped measuring the thing it was chosen for
+
+**Status:** accepted. Closes ADR-023, 2026-09-07.
+
+ADR-023 said the ratio was the measure of whether the revision pass was real:
+still over 75 per cent when the code was complete, and the pass did not happen.
+
+It is at 23 per cent, and the pass had not happened. Prose grew from about 1,250
+lines to about 1,430 while the code went from 2,600 to 6,200 - so the number
+fell by a factor of three without a word being retired. A ratio against a
+denominator that trebles measures the denominator.
+
+**What the pass actually found**, done properly rather than by the number:
+
+- The README said capture and the web interface were not built. Both are.
+- Two screenshots were carried over from the predecessor: its name in the
+  header, a feature that has since been cut visible in the corner, and the
+  author's own record collection in the album picker. Nothing referenced them.
+  They are removed, and come back when there is something to photograph that
+  has met a turntable.
+- `docs/method.md` was accurate throughout and gained one finding it was
+  missing - that a correlation window is a count of samples and has to come from
+  the file's own rate, which is why one side that should have aligned was
+  refused.
+- The install section promised there was nothing to install yet.
+
+**What holds it true from here**, in place of a ratio: every command the README
+names is a real subparser and every subparser is named; every threshold appears
+in `docs/method.md` with the number the code uses; every element the front end
+reaches for exists in the markup, every module it imports is there, and every
+endpoint it calls is a route. Those fail when prose and code disagree, which is
+what the ratio was standing in for.
+
+The ratio is still reported every run. It is a trend, not a gate, and this
+record is here so nobody reads a low number as evidence of a tidy repository.
