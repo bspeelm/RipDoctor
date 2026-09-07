@@ -710,3 +710,31 @@ exception is stated as a condition, not as a tolerance. The reference must still
 overlap at least eight pairs, or the fixtures have changed or the defect was not
 real. At least half of all boundaries must come from the detector, or the
 comparison has quietly stopped exercising one.
+
+---
+
+## ADR-026 — External programs are run from exactly one module
+
+**Status:** accepted.
+
+`audio/runner.py` is the only module that imports `subprocess`. Everything else
+is handed a `Runner` and calls through it. A test enforces the rule by name, so
+a second caller cannot appear quietly.
+
+**Why one module rather than one layer.** The earlier form of this rule allowed
+`audio/`, `integrations/` and `doctor/` to run programs, which is three places
+to keep honest and three places a fake has to be threaded past. One module means
+one fake, and everything above it - including the parts that talk to beets and
+the parts that check the machine - is exercised with no ffmpeg installed.
+
+**What the seam is worth beyond testing.** A missing program is named before
+anything starts, rather than surfacing as a `FileNotFoundError` partway through
+a twenty-minute capture. Every call is an argv list and never a shell string, so
+a record whose title contains a quote or a semicolon has no string to break out
+of. And the fake records every call, which is what allows the argv itself to be
+asserted - for cutting, the argv *is* the behaviour, and the return value says
+nothing about whether the right seconds were taken.
+
+**What it costs.** A `Runner` is threaded through constructors that would
+otherwise reach for a process directly, and the real one is only exercised in
+its own tests.
