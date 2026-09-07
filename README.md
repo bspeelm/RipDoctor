@@ -177,6 +177,11 @@ unknown opcode, a NameError for something imported at the top of the file) is
 the interpreter, not the code. Run it again. CI uses 3.11 to 3.13 and is not
 affected.
 
+`main` is protected by a ruleset kept in `.github/rulesets/main.json`: linear
+history, no force-push, no deletion, and a pull request whose checks have all
+passed. Nobody bypasses it, the author included - a gate with an exception for
+the person most likely to be in a hurry is not a gate.
+
 Size budgets are failing checks. The comment ratio is hard and is never raised;
 the others are the author's call. Never write less code to fit a number.
 
