@@ -626,3 +626,32 @@ def test_serve_without_a_vinyl_directory_points_at_the_doctor(
     args = argparse.Namespace(port=None, bind=None, user="ripdoctor")
     assert cmd_serve(ctx, args) == 2
     assert "ripdoctor doctor" in capsys.readouterr().err
+
+
+def test_an_explicit_port_of_zero_is_not_read_as_no_port(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Zero means "any free port". Taken as falsy it silently becomes the
+    configured one, and the server comes up somewhere nobody asked for."""
+    import argparse
+    from dataclasses import replace
+
+    from ripdoctor.cli import Context, cmd_serve
+    from ripdoctor.web import auth as A
+
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    ctx = Context(everything())
+    ctx.settings = replace(ctx.settings, vinyl=str(tmp_path / "vinyl"), port=8080)
+
+    asked: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "ripdoctor.cli.HTTPD.serve",
+        lambda _app, host, port: asked.append((host, port)),
+    )
+    monkeypatch.setattr(
+        "ripdoctor.cli.AUTH.load_or_create",
+        lambda *_a, **_k: (A.create("u", "p", iterations=1000), None),
+    )
+    cmd_serve(ctx, argparse.Namespace(port=0, bind=None, user="ripdoctor"))
+    assert asked == [("127.0.0.1", 0)]

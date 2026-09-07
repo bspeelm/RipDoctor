@@ -332,13 +332,16 @@ def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
         credentials=credentials,
         sessions=AUTH.Sessions(secret=credentials.secret),
     )
-    bind = args.bind or ctx.settings.bind
+    # Checked against None rather than truthiness: port 0 means "any free
+    # port", and `or` turns that into the configured one without a word.
+    bind = ctx.settings.bind if args.bind is None else args.bind
+    port = ctx.settings.port if args.port is None else args.port
     if bind not in ("127.0.0.1", "localhost", "::1"):
         # Worth saying out loud: on any other address the login is the only
         # thing between the network and a program that writes to the pool.
         print(f"  reachable from the network on {bind} - the login is the only control")
     app = ROUTES.build(service, static=STATIC.handler(STATIC_DIR))
-    HTTPD.serve(app, bind, args.port or ctx.settings.port)
+    HTTPD.serve(app, bind, port)
     return 0
 
 
