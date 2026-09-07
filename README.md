@@ -39,6 +39,15 @@ These are measurements from one signal chain, not universal constants. See
 [docs/method.md](docs/method.md) for what each number means and where it came
 from.
 
+![The cut panel: a side's waveform above the 1-3 kHz level curve, with the gap
+threshold drawn across it and the detected boundaries marked.](docs/images/cut_panel.png)
+
+That is the argument in one picture. The blue is the full-band waveform, where
+the gaps between tracks are barely dents. The orange line under it is the same
+side measured in 1-3 kHz, and every inter-track gap drops clean through the
+dashed threshold. Nine of them, on a side where full-band silence detection
+finds an ambiguous handful.
+
 ## What it does
 
 **Records**, if the turntable is attached to the machine running it, with a live
@@ -146,6 +155,15 @@ Recording runs on the server rather than in the browser, so the meter and the
 auto-stop survive a closed laptop. You can listen to the input while cueing the
 needle, which is the only way to tell that the arm is tracking before twenty
 minutes have gone by.
+
+![The rip panel while a side is recording: the elapsed time, the music level,
+and a bar showing which zone the 1-3 kHz level is sitting in.](docs/images/rip_panel.png)
+
+The bar under the controls is what you watch while cueing. Arm-up handling
+rumble is loud full-band and dead in 1-3 kHz, a silent groove is quiet in both,
+and music is loud in both - so where the band bar sits says which of those is
+happening, before twenty minutes have gone by. Drop the needle when it reads
+`groove`, not below it.
 
 ## Phases
 

@@ -670,3 +670,32 @@ def test_salvaging_says_which_side_it_wrote(tmp_path: Path) -> None:
         build(service), "/api/rip/salvage", service, {"slug": "album", "side": "b"}
     ).json()
     assert body["side"] == "b" and body["duration"] > 0
+
+
+def test_the_capture_in_progress_is_not_wreckage(tmp_path: Path) -> None:
+    """A capture being written looks exactly like one that was interrupted, so
+    it was listed among them - and the panel offered to encode or delete a side
+    while the needle was still on it."""
+    service, app = running_service(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    assert get(app, "/api/rip/orphans", service).json()["orphans"] == []
+
+
+def test_an_interrupted_capture_is_still_offered(tmp_path: Path) -> None:
+    service, _tape = recording_service(tmp_path)
+    album = service.layout.raw / "album"
+    C.partial_path(album, "z").write_bytes(b"RIFF" + b"\x00" * 8000)
+    found = get(build(service), "/api/rip/orphans", service).json()["orphans"]
+    assert [o["side"] for o in found] == ["z"]
+
+
+def test_a_capture_in_progress_reports_how_much_has_arrived(tmp_path: Path) -> None:
+    """The capture loop does not know the size until the outcome is written, so
+    the line reporting it said `NaN MB` for the whole of every side."""
+    service, app = running_service(tmp_path)
+    partial = C.partial_path(service.layout.raw / "album", "b")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(b"RIFF" + b"\x00" * 8000)
+    assert get(app, "/api/rip/status", service).json()["bytes"] == 8004

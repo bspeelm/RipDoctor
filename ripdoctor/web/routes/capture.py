@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -151,7 +152,19 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/rip/status")
     def status(_r: H.Request) -> H.Response:
-        return H.ok(service.recorder.status())
+        """What is recording, and how much of it has arrived.
+
+        The size comes from the file rather than from the capture loop, which
+        does not know it until the outcome is written - so the line reporting
+        it said `NaN MB` for the whole of every side.
+        """
+        out = service.recorder.status()
+        live = service.recorder.live
+        if live is not None and live.running:
+            partial = C.partial_path(layout.raw / live.slug, live.side, live.stem)
+            with suppress(OSError):
+                out["bytes"] = partial.stat().st_size
+        return H.ok(out)
 
     @app.route("POST", "/api/rip/start")
     def start(r: H.Request) -> H.Response:
@@ -334,10 +347,19 @@ def add(app: App, service: Service) -> None:
 
         Each one is most of a side, and a side is twenty minutes of somebody's
         evening.
+
+        The one being written now is not one of them. It was listed, because a
+        capture in progress looks exactly like a capture that was interrupted,
+        and the panel offered to encode or delete a side while the needle was
+        still on it.
         """
         found: list[dict[str, Any]] = []
         for album in sorted(p for p in layout.raw.iterdir() if p.is_dir()):
-            found.extend(_partial(album, partial) for partial in C.salvageable(album))
+            found.extend(
+                described
+                for partial in C.salvageable(album)
+                if not (described := _partial(album, partial))["recording"]
+            )
         return H.ok({"orphans": found})
 
     @app.route("POST", "/api/rip/salvage")
