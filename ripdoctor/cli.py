@@ -20,10 +20,9 @@ from ripdoctor.config.machine import Machine, detect
 from ripdoctor.config.settings import Settings, describe, load
 from ripdoctor.config.thresholds import Thresholds
 from ripdoctor.core import autostop as A
-from ripdoctor.core import gaps as G
 from ripdoctor.core import measure as MEASURE
 from ripdoctor.core.envelope import Envelope, decode
-from ripdoctor.core.fit import fit_side, report, to_side
+from ripdoctor.core.fit import fit_plan, report
 from ripdoctor.core.meter import Levels, Verdict
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
@@ -366,39 +365,25 @@ def cmd_fit(ctx: Context, args: argparse.Namespace) -> int:
     spec = Spec.from_dict(json.loads(Path(args.spec).read_text()))
     envelopes = {p.stem.split("-")[-1]: p for p in map(Path, args.envelope)}
 
-    sides = []
+    lanes = {}
     for side in spec.sides:
         source = envelopes.get(side.letter)
         if source is None:
             print(f"no envelope given for side {side.letter}", file=sys.stderr)
             return 2
-        env = _read_envelope(source, args.lane)
-        # The anchor has to match the lane. core.gaps will not guess which one
-        # an envelope is, and neither will this.
-        found = (
-            G.find(env, above=ctx.thresholds.gap_above)
-            if args.lane == "band"
-            else G.find(env, below=ctx.thresholds.gap_below)
-        )
-        fitted = fit_side(
-            side,
-            env,
-            found,
-            duration=env.duration,
-            lead=spec.lead,
-            tail=spec.tail,
-        )
-        print(f"=== side {side.letter}")
-        print(report(fitted))
-        sides.append(to_side(side.letter, fitted))
+        lanes[side.letter] = _read_envelope(source, args.lane)
 
-    plan = Plan(
-        slug=spec.slug,
-        album=spec.album,
-        artist=spec.artist,
-        sides=tuple(sides),
-        date=spec.date,
+    # The anchor travels with the lane; neither this nor the core will guess.
+    anchor = (
+        {"above": ctx.thresholds.gap_above}
+        if args.lane == "band"
+        else {"below": ctx.thresholds.gap_below}
     )
+    plan, working = fit_plan(spec, lanes, **anchor)
+    for letter, fitted in working.items():
+        print(f"=== side {letter}")
+        print(report(fitted))
+
     try:
         validate(plan)
     except BadPlan as e:

@@ -1,0 +1,222 @@
+"""The catalogue, the first pass, and getting a record into the library."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from ripdoctor.core.fit import fit_plan, report
+from ripdoctor.core.plan import BadPlan, Spec, SpecSide, SpecTrack, validate
+from ripdoctor.core.sides import assign_sides, music_span
+from ripdoctor.integrations import musicbrainz as MB
+from ripdoctor.integrations import tagger as T
+from ripdoctor.store import cache as C
+from ripdoctor.store import files as F
+from ripdoctor.web import http as H
+from ripdoctor.web.app import App
+from ripdoctor.web.routes.records import slug_of
+from ripdoctor.web.service import Service
+from ripdoctor.work.jobs import Busy, Job
+
+
+def _release(r: MB.Release) -> dict[str, Any]:
+    return {
+        "mbid": r.mbid,
+        "title": r.title,
+        "artist": r.artist,
+        "date": r.date,
+        "format": r.format,
+        "tracks": len(r.tracks),
+        "has_durations": r.has_durations,
+        "describe": r.describe(),
+    }
+
+
+def spec_from(slug: str, release: MB.Release, sides: list[tuple[str, float, float]]):  # type: ignore[no-untyped-def]
+    """Lay a tracklist across the sides that were actually recorded.
+
+    The split is exhaustive rather than greedy: putting one track on the wrong
+    side displaces every side after it, so the arrangement is chosen whole.
+    """
+    lengths = [t.length or 0.0 for t in release.tracks]
+    runs = assign_sides([hi - lo for _letter, lo, hi in sides], lengths)
+    out = []
+    for (letter, lo, hi), (first, last) in zip(sides, runs, strict=True):
+        out.append(
+            SpecSide(
+                letter=letter,
+                start=lo,
+                end=hi,
+                tracks=tuple(
+                    SpecTrack(number=t.number, title=t.title, cat=t.length or 0.0)
+                    for t in release.tracks[first:last]
+                ),
+            )
+        )
+    return Spec(
+        slug=slug,
+        album=release.title,
+        artist=release.artist,
+        date=release.date,
+        sides=tuple(out),
+    )
+
+
+def add(app: App, service: Service) -> None:
+    layout = service.layout
+
+    @app.route("GET", "/api/mb/search")
+    def search(r: H.Request) -> H.Response:
+        artist, album = r.query.get("artist", ""), r.query.get("album", "")
+        if not artist or not album:
+            raise H.HttpError(400, "an artist and an album are needed")
+        try:
+            found = MB.search(service.fetcher, artist, album)
+            for release in found:
+                MB.fetch_tracks(service.fetcher, release)
+        except MB.LookupFailed as e:
+            raise H.HttpError(503, str(e)) from e
+        # Usable entries first, whatever the format: a vinyl entry with no
+        # durations at all fits worse than a CD entry that has them.
+        return H.ok({"releases": [_release(x) for x in MB.rank(found)]})
+
+    @app.route("POST", "/api/firstpass/([^/]+)")
+    def firstpass(r: H.Request) -> H.Response:
+        """Build a spec from a chosen release and fit it against the sides."""
+        slug = slug_of(r)
+        mbid = str(r.json().get("mbid", ""))
+        if not mbid:
+            raise H.HttpError(400, "a release is needed; search first")
+        letters = layout.sides_on_disk(slug)
+        if not letters:
+            raise H.HttpError(404, f"no side files for {slug}")
+
+        def work(job: Job) -> dict[str, Any]:
+            job.total = len(letters) + 1
+            job.step("catalogue", "fetching the tracklist")
+            release = MB.fetch_tracks(
+                service.fetcher, MB.Release(mbid, "", "", "", "", [])
+            )
+            if not release.has_durations:
+                # Fitting against zeros produces a plausible-looking plan that
+                # is wrong everywhere.
+                raise ValueError("that release has no track durations")
+            job.finished += 1
+
+            spans, lanes = [], {}
+            for letter in letters:
+                job.step(letter, "reading the envelope")
+                built = C.prepared(layout, slug, letter)
+                if built is None:
+                    raise ValueError(f"side {letter} is not prepared")
+                band = C.lanes_of(layout, slug, letter).band
+                lo, hi = music_span(band)
+                spans.append((letter, lo, hi))
+                lanes[letter] = band
+                job.finished += 1
+
+            spec = spec_from(slug, release, spans)
+            plan, working = fit_plan(spec, lanes, above=service.thresholds.gap_above)
+            validate(plan)
+            F.save(layout, slug, spec, plan)
+            return {
+                "album": plan.album,
+                "artist": plan.artist,
+                "tracks": sum(len(s.tracks) for s in plan.sides),
+                "report": {k: report(v) for k, v in working.items()},
+            }
+
+        try:
+            return H.ok(service.jobs.start(slug, "firstpass", work).as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    @app.route("GET", "/api/library")
+    def library(_r: H.Request) -> H.Response:
+        root = service.settings.library
+        return H.ok({"library": root, "exists": bool(root) and _isdir(root)})
+
+    @app.route("POST", "/api/import/([^/]+)")
+    def import_record(r: H.Request) -> H.Response:
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
+        root = service.settings.library
+        if not root:
+            raise H.HttpError(409, "no library directory is configured")
+
+        def work(job: Job) -> dict[str, Any]:
+            review = str(layout.review_dir(slug))
+            job.total = len(T.placements(plan, review, root))
+            job.step(plan.album, "tagging and placing")
+            moved = T.apply(
+                service.runner,
+                plan,
+                review,
+                root,
+                file_mode=service.settings.file_mode,
+                dir_mode=service.settings.dir_mode,
+            )
+            job.finished = len(moved)
+            return {"tracks": len(moved), "library": root}
+
+        try:
+            return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    @app.route("GET", "/api/archive/([^/]+)")
+    def archive_gate(r: H.Request) -> H.Response:
+        """Whether the raw sides are safe to move, and why not if they are not.
+
+        The gate is the whole point: it is what stops twenty minutes a side
+        being cleared before the record is provably somewhere else.
+        """
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
+        where, count = T.locate(service.settings.library, plan.artist, plan.album)
+        expected = sum(len(s.tracks) for s in plan.sides)
+        return H.ok(
+            {
+                "ready": where is not None and count >= expected,
+                "found": count,
+                "expected": expected,
+                "where": None if where is None else str(where),
+            }
+        )
+
+    @app.route("POST", "/api/archive/([^/]+)")
+    def archive(r: H.Request) -> H.Response:
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
+        where, count = T.locate(service.settings.library, plan.artist, plan.album)
+        expected = sum(len(s.tracks) for s in plan.sides)
+        if where is None or count < expected:
+            raise H.HttpError(
+                409, f"only {count} of {expected} tracks are in the library"
+            )
+        source = layout.raw / slug
+        if not source.is_dir():
+            raise H.HttpError(404, f"nothing in raw for {slug}")
+        dest = layout.archive / slug
+        if dest.exists():
+            raise H.HttpError(409, f"{dest} already exists; move it first")
+        # Moved, never deleted. Nothing in this application removes a side.
+        shutil.move(str(source), str(dest))
+        return H.ok({"ok": True, "archived": str(dest)})
+
+
+def _isdir(path: str) -> bool:
+    return Path(path).is_dir()
+
+
+def _plan_of(service: Service, slug: str):  # type: ignore[no-untyped-def]
+    where = service.layout.plan_file(slug)
+    if not where.is_file():
+        raise H.HttpError(404, f"no plan for {slug}")
+    try:
+        plan = F.read_plan(where)
+        validate(plan)
+    except BadPlan as e:
+        raise H.HttpError(409, str(e)) from e
+    return plan

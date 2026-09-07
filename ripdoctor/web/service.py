@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from ripdoctor.audio.runner import Runner
 from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
+from ripdoctor.integrations.musicbrainz import Fetcher, HttpFetcher
 from ripdoctor.store.files import Layout
 from ripdoctor.web.auth import Credentials, Sessions, Throttle
 from ripdoctor.work.capture import Recorder
@@ -29,5 +30,8 @@ class Service:
     sessions: Sessions
     jobs: Jobs = field(default_factory=Jobs)
     recorder: Recorder = field(default_factory=Recorder)
+    # The catalogue goes through a seam for the same reason the tools do:
+    # everything above it is then testable with no network at all.
+    fetcher: Fetcher = field(default_factory=HttpFetcher)
     throttle: Throttle = field(default_factory=Throttle)
     now: Callable[[], float] = time.time

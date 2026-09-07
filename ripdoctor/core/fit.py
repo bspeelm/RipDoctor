@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ripdoctor.core import gaps
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.gaps import Gap, GapSet, refine
-from ripdoctor.core.plan import LEAD, TAIL, PlanSide, PlanTrack, SpecSide
+from ripdoctor.core.plan import LEAD, TAIL, Plan, PlanSide, PlanTrack, Spec, SpecSide
 
 # A cut is never placed within this of its neighbour.
 MIN_SEPARATION = 0.2
@@ -141,6 +142,44 @@ def fit_side(
                 cur = end
 
     return tuple(out)
+
+
+def fit_plan(
+    spec: Spec,
+    envelopes: dict[str, Envelope],
+    *,
+    above: float | None = None,
+    below: float | None = None,
+) -> tuple[Plan, dict[str, tuple[Fitted, ...]]]:
+    """Fit every side of a spec, and return the plan with its reasoning.
+
+    The anchor travels with the lane the envelopes are in: gaps.find refuses to
+    guess which one it was handed, and so does this. ADR-030.
+    """
+    anchor = {"above": above} if above is not None else {"below": below}
+    sides, working = [], {}
+    for side in spec.sides:
+        env = envelopes.get(side.letter)
+        if env is None:
+            raise KeyError(f"no envelope for side {side.letter}")
+        fitted = fit_side(
+            side,
+            env,
+            gaps.find(env, **anchor),
+            duration=env.duration,
+            lead=spec.lead,
+            tail=spec.tail,
+        )
+        working[side.letter] = fitted
+        sides.append(to_side(side.letter, fitted))
+    plan = Plan(
+        slug=spec.slug,
+        album=spec.album,
+        artist=spec.artist,
+        sides=tuple(sides),
+        date=spec.date,
+    )
+    return plan, working
 
 
 def to_side(letter: str, fitted: tuple[Fitted, ...]) -> PlanSide:
