@@ -22,6 +22,7 @@ from ripdoctor.core.envelope import Envelope, decode
 from ripdoctor.core.fit import fit_side, report, to_side
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
+from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
 
 
@@ -82,6 +83,24 @@ def cmd_devices(ctx: Context, args: argparse.Namespace) -> int:
     found = enumerate_devices(ctx.runner)
     print(devices_report(found, ctx.settings.capture_device))
     return 0 if found else 1
+
+
+def cmd_lookup(ctx: Context, args: argparse.Namespace) -> int:
+    """Find candidate releases, most usable first."""
+    fetcher = MB.HttpFetcher()
+    try:
+        found = MB.search(fetcher, args.artist, args.album)
+        for r in found[: args.limit]:
+            MB.fetch_tracks(fetcher, r)
+    except MB.LookupFailed as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    if not found:
+        print("nothing matched", file=sys.stderr)
+        return 1
+    print(MB.report(MB.rank(found[: args.limit])))
+    return 0
 
 
 def cmd_fit(ctx: Context, args: argparse.Namespace) -> int:
@@ -259,6 +278,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("devices", help="list capture devices")
     v.set_defaults(run=cmd_devices)
+
+    lk = sub.add_parser("lookup", help="find a release in the catalogue")
+    lk.add_argument("artist")
+    lk.add_argument("album")
+    lk.add_argument("--limit", type=int, default=5)
+    lk.set_defaults(run=cmd_lookup)
 
     f = sub.add_parser("fit", help="place boundaries from a spec and envelopes")
     f.add_argument("spec")
