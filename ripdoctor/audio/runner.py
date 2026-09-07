@@ -59,6 +59,16 @@ class Result:
         return self
 
 
+class Process(Protocol):
+    """A program still running. A capture outlives a single call."""
+
+    def poll(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def wait(self, timeout: float | None = ...) -> int: ...
+
+
 class Runner(Protocol):
     """Runs one external program and returns what it said."""
 
@@ -69,6 +79,8 @@ class Runner(Protocol):
         stdin: bytes | None = ...,
         timeout: float | None = ...,
     ) -> Result: ...
+
+    def start(self, argv: Sequence[str]) -> Process: ...
 
     def which(self, tool: str) -> str | None: ...
 
@@ -104,6 +116,21 @@ class RealRunner:
             raise ToolMissing(args[0]) from e
         return Result(tuple(args), p.returncode, p.stdout or b"", p.stderr or b"")
 
+    def start(self, argv: Sequence[str]) -> Process:
+        """Begin a program and return while it runs.
+
+        Used only for capture, which lasts a side. Everything else finishes
+        inside one call and goes through run().
+        """
+        args = [str(a) for a in argv]
+        if not args:
+            raise ValueError("empty argv")
+        if self.which(args[0]) is None:
+            raise ToolMissing(args[0])
+        return subprocess.Popen(  # noqa: S603 - argv list, never shell=True
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
     def which(self, tool: str) -> str | None:
         return shutil.which(tool)
 
@@ -126,6 +153,10 @@ class FakeRunner:
     # None means every tool exists. An empty set means none do - which is a
     # thing a test needs to say, and cannot if the two are the same value.
     installed: set[str] | None = None
+    # How many poll() calls a started process runs for. None means it keeps
+    # going until something stops it, which is what a capture does.
+    exit_after: int | None = None
+    started: list[FakeProcess] = field(default_factory=list)
 
     def expect(
         self,
@@ -163,6 +194,17 @@ class FakeRunner:
                 return Result(args, reply.returncode, reply.stdout, reply.stderr)
         return Result(args, 0, b"", b"")
 
+    def start(self, argv: Sequence[str]) -> Process:
+        args = tuple(str(a) for a in argv)
+        if not args:
+            raise ValueError("empty argv")
+        self.calls.append(args)
+        if self.installed is not None and args[0] not in self.installed:
+            raise ToolMissing(args[0])
+        proc = FakeProcess(self.exit_after)
+        self.started.append(proc)
+        return proc
+
     def which(self, tool: str) -> str | None:
         if self.installed is None or tool in self.installed:
             return f"/usr/bin/{tool}"
@@ -174,3 +216,33 @@ class FakeRunner:
         if len(hits) != 1:
             raise AssertionError(f"{len(hits)} calls matched {needle!r}, wanted 1")
         return hits[0]
+
+
+@dataclass
+class FakeProcess:
+    """A started program that never existed."""
+
+    exit_after: int | None = None
+    polls: int = 0
+    returncode: int | None = None
+    terminated: bool = False
+
+    def poll(self) -> int | None:
+        self.polls += 1
+        if (
+            self.returncode is None
+            and self.exit_after is not None
+            and self.polls >= self.exit_after
+        ):
+            self.returncode = 0
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        if self.returncode is None:
+            self.returncode = -15
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode

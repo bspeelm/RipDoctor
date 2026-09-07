@@ -130,3 +130,46 @@ def levels_of(raw: bytes, rate: int, channels: int, width: int) -> Levels | None
     peak_db = 20 * math.log10(peak / full_scale) if peak else FLOOR_DB
 
     return Levels(round(full, 1), round(band, 1), round(peak_db, 1))
+
+
+# The four states the meter is calibrated against, as a judgement rather than
+# three numbers. See docs/method.md.
+ARM_FLOOR = -60.0
+MUSIC_PEAK = -30.0
+SIGNAL_PEAK = -40.0
+DEAD_BAND = -70.0
+DEAD_FULL = -70.0
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    """What a short test capture found."""
+
+    ok: bool
+    summary: str
+    full_rms: float
+    full_peak: float
+    band_rms: float
+
+
+def verdict(full_rms: float, full_peak: float, band_rms: float) -> Verdict:
+    """Judge a test capture, in the order that distinguishes the cases.
+
+    Music is checked first, then the wrong-input case - signal present but
+    nothing musical in the band lane - then an empty room. Checking the floor
+    first would call a wrong input "no signal" and send somebody to look at the
+    cable instead of the input selector.
+    """
+    if band_rms > ARM_FLOOR and full_peak > MUSIC_PEAK:
+        summary, ok = "music - this is what a good capture looks like", True
+    elif full_peak > SIGNAL_PEAK and band_rms < DEAD_BAND:
+        summary, ok = (
+            "signal, but nothing musical in 1-3 kHz - this is what the wrong "
+            "input sounds like",
+            False,
+        )
+    elif full_rms < DEAD_FULL:
+        summary, ok = "nothing but the noise floor - no needle, or no signal", False
+    else:
+        summary, ok = "quiet - groove noise, or a very quiet passage", False
+    return Verdict(ok, summary, full_rms, full_peak, band_rms)

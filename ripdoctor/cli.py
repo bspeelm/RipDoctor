@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ripdoctor import __version__
+from ripdoctor.audio import capture as CAP
 from ripdoctor.audio.devices import enumerate_devices
 from ripdoctor.audio.devices import report as devices_report
 from ripdoctor.audio.runner import RealRunner, Runner, ToolFailed, ToolMissing
@@ -83,6 +84,62 @@ def cmd_devices(ctx: Context, args: argparse.Namespace) -> int:
     found = enumerate_devices(ctx.runner)
     print(devices_report(found, ctx.settings.capture_device))
     return 0 if found else 1
+
+
+def _format(ctx: Context) -> CAP.Format:
+    return CAP.Format(
+        rate=ctx.settings.capture_rate,
+        channels=ctx.settings.capture_channels,
+        sample_format=ctx.settings.capture_format,
+    )
+
+
+def cmd_probe(ctx: Context, args: argparse.Namespace) -> int:
+    """Record briefly and say what arrived.
+
+    Turns "drop the needle, wait twenty minutes, find out it was the wrong
+    input" into a twenty-second question.
+    """
+    device = args.device or ctx.settings.capture_device
+    try:
+        CAP.check_device(device)
+    except CAP.CaptureError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+    scratch = Path(ctx.machine.cache_dir) / "probe.wav"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    argv = CAP.test_capture_argv(device, str(scratch), _format(ctx), args.seconds)
+    print(f"recording {args.seconds:.0f}s from {device} ...")
+    try:
+        ctx.runner.run(argv, timeout=args.seconds + 30).require()
+        if not scratch.is_file() or scratch.stat().st_size < 1024:
+            print("nothing was captured", file=sys.stderr)
+            return 1
+        v = CAP.judge(ctx.runner, str(scratch))
+    finally:
+        scratch.unlink(missing_ok=True)
+
+    print(f"  full band  rms {v.full_rms:>7.1f}  peak {v.full_peak:>7.1f}")
+    print(f"  1-3 kHz    rms {v.band_rms:>7.1f}")
+    print(f"\n  {v.summary}")
+    return 0 if v.ok else 1
+
+
+def cmd_salvage(ctx: Context, args: argparse.Namespace) -> int:
+    """Find and finish captures an interrupted session left behind."""
+    found = CAP.salvageable(args.album)
+    if not found:
+        print("nothing to salvage")
+        return 0
+    for partial in found:
+        letter = CAP.letter_of(partial)
+        size = partial.stat().st_size / 1e6
+        print(f"  side {letter}: {size:.0f} MB")
+        if not args.dry_run:
+            out = CAP.finish(ctx.runner, args.album, letter)
+            print(f"    -> {out}")
+    return 0
 
 
 def cmd_lookup(ctx: Context, args: argparse.Namespace) -> int:
@@ -278,6 +335,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("devices", help="list capture devices")
     v.set_defaults(run=cmd_devices)
+
+    pr = sub.add_parser("probe", help="record briefly and say what arrived")
+    pr.add_argument("--device", help="override the configured device")
+    pr.add_argument("--seconds", type=float, default=CAP.TEST_SECONDS)
+    pr.set_defaults(run=cmd_probe)
+
+    sv = sub.add_parser("salvage", help="finish captures an interruption left")
+    sv.add_argument("album", help="directory holding the sides")
+    sv.add_argument("--dry-run", action="store_true")
+    sv.set_defaults(run=cmd_salvage)
 
     lk = sub.add_parser("lookup", help="find a release in the catalogue")
     lk.add_argument("artist")

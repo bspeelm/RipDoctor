@@ -337,3 +337,94 @@ def test_a_missing_file_is_reported_not_traced(tmp_path: Path, capsys) -> None:
 def test_no_command_needs_a_working_machine(argv: list[str]) -> None:
     """The commands that explain a broken machine must run on one."""
     assert main(argv, runner=FakeRunner(installed=set())) in (0, 1)
+
+
+# ---------------------------------------------------------------- probe
+
+
+def probe_env(monkeypatch, tmp_path: Path) -> Path:
+    """Point every directory at the test's own, and stage a capture."""
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    scratch = tmp_path / "state" / "cache" / "probe.wav"
+    scratch.parent.mkdir(parents=True)
+    scratch.write_bytes(b"RIFF" + b"\x00" * 4000)
+    return scratch
+
+
+def astats(full_rms: float, peak: float, band_rms: float) -> FakeRunner:
+    return (
+        FakeRunner()
+        .expect(
+            lambda a: any("highpass" in x for x in a),
+            stderr=f"[astats] RMS level dB: {band_rms}\n".encode(),
+        )
+        .expect(
+            "astats",
+            stderr=f"[astats] RMS level dB: {full_rms}\n"
+            f"[astats] Peak level dB: {peak}\n".encode(),
+        )
+    )
+
+
+def test_probe_reports_music_and_succeeds(monkeypatch, tmp_path: Path, capsys) -> None:
+    """Twenty seconds spent before a side, rather than twenty minutes after."""
+    scratch = probe_env(monkeypatch, tmp_path)
+    code = main(["probe", "--device", "hw:Rx,0"], runner=astats(-24.0, -6.0, -41.0))
+    out = capsys.readouterr().out
+    assert code == 0 and "music" in out
+    assert "-41.0" in out, "the band lane was not reported"
+    assert not scratch.exists(), "the probe capture was left behind"
+
+
+def test_probe_fails_on_a_wrong_input(monkeypatch, tmp_path: Path, capsys) -> None:
+    probe_env(monkeypatch, tmp_path)
+    code = main(["probe", "--device", "hw:Rx,0"], runner=astats(-30.0, -12.0, -77.0))
+    assert code == 1
+    assert "wrong input" in capsys.readouterr().out
+
+
+def test_probe_without_a_device_says_which_command_lists_them(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    probe_env(monkeypatch, tmp_path)
+    assert main(["probe"], runner=everything()) == 2
+    assert "ripdoctor devices" in capsys.readouterr().err
+
+
+def test_probe_that_captured_nothing_does_not_judge_an_absent_file(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    """Judging a file that is not there reported the noise floor - the one
+    verdict that must never be wrong."""
+    monkeypatch.setenv("RIPDOCTOR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    fake = everything()
+    assert main(["probe", "--device", "hw:Rx,0"], runner=fake) == 1
+    assert "nothing was captured" in capsys.readouterr().err
+    assert not any("astats" in " ".join(c) for c in fake.calls)
+
+
+# -------------------------------------------------------------- salvage
+
+
+def test_salvage_finishes_what_an_interruption_left(tmp_path: Path, capsys) -> None:
+    from ripdoctor.audio import capture as C
+
+    C.partial_path(tmp_path, "b").write_bytes(b"RIFF" + b"\x00" * 8000)
+    assert main(["salvage", str(tmp_path)], runner=everything()) == 0
+    assert "side b" in capsys.readouterr().out
+    assert not C.partial_path(tmp_path, "b").exists()
+
+
+def test_salvage_dry_run_leaves_the_capture_alone(tmp_path: Path, capsys) -> None:
+    from ripdoctor.audio import capture as C
+
+    C.partial_path(tmp_path, "b").write_bytes(b"RIFF" + b"\x00" * 8000)
+    assert main(["salvage", str(tmp_path), "--dry-run"], runner=everything()) == 0
+    assert C.partial_path(tmp_path, "b").exists()
+
+
+def test_salvage_with_nothing_to_do_says_so(tmp_path: Path, capsys) -> None:
+    assert main(["salvage", str(tmp_path)], runner=everything()) == 0
+    assert "nothing to salvage" in capsys.readouterr().out

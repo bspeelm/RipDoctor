@@ -87,6 +87,8 @@ The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
 ripdoctor doctor        what this machine has, what it lacks, and what to do
 ripdoctor config        every resolved setting, including where the audio lives
 ripdoctor devices       capture devices this machine has, and what each accepts
+ripdoctor probe         record twenty seconds and say what arrived
+ripdoctor salvage       finish a capture an interrupted session left behind
 ripdoctor lookup        find a release in the catalogue, usable entries first
 ripdoctor fit           place track boundaries from a spec and measured levels
 ripdoctor split         cut a plan into tracks
@@ -94,6 +96,11 @@ ripdoctor check         build tick clips, one per boundary, for listening to
 ripdoctor import        tag the cut tracks and place them in the library
 ripdoctor archive       confirm a record arrived before the raw sides are cleared
 ```
+
+`ripdoctor probe` before a record, not after. It turns "drop the needle, wait
+twenty minutes, find out it was the wrong input" into a twenty-second question,
+and tells the four states apart: music, signal with nothing musical in it, an
+empty room, or something merely quiet.
 
 `ripdoctor doctor` is the one to run first. It never needs a working machine -
 that is the point of it - and every problem it reports comes with what to do
