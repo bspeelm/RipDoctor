@@ -10,9 +10,12 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
+from ripdoctor.web import auth as A
+from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.library import spec_from
 from tests.pool import a_layout, a_runner, quiet_then_loud
@@ -271,3 +274,108 @@ def test_archiving_twice_is_refused_rather_than_overwriting(tmp_path: Path) -> N
     post(build(service), "/api/archive/album", service)
     (service.layout.raw / "album").mkdir()
     assert post(build(service), "/api/archive/album", service).status == 409
+
+
+# --------------------------------------------------------------- artwork
+
+JPEG = b"\xff\xd8\xff" + b"\x00" * 4000
+
+
+def probed(width: int = 1000, height: int = 1000) -> bytes:
+    return json.dumps(
+        {"streams": [{"width": width, "height": height, "codec_name": "mjpeg"}]}
+    ).encode()
+
+
+class Imaging(FakeRunner):
+    """An ffmpeg that writes the cover it was asked to scale."""
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if args[0] == "ffmpeg" and args[-1].endswith(".jpg"):
+            Path(args[-1]).write_bytes(JPEG)
+        return super().run(argv, stdin=stdin, timeout=timeout)
+
+
+def in_the_library(tmp_path: Path, image: bytes | None = None):  # type: ignore[no-untyped-def]
+    service, library = with_library(tmp_path)
+    album = library / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    (album / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
+    service.runner = Imaging().expect(
+        "ffprobe", stdout=image if image is not None else probed()
+    )
+    service.fetcher = Catalogue(JPEG)  # type: ignore[assignment]
+    return service, album
+
+
+def test_the_art_a_record_already_has_is_reported(tmp_path: Path) -> None:
+    service, album = in_the_library(tmp_path)
+    (album / "cover.jpg").write_bytes(JPEG)
+    body = get(build(service), "/api/artwork/album", service).json()
+    assert body["cover"]["name"] == "cover.jpg"
+    assert len(body["tracks"]) == 1
+
+
+def test_asking_about_a_record_not_in_the_library_says_so(tmp_path: Path) -> None:
+    service, _library = with_library(tmp_path)
+    assert get(build(service), "/api/artwork/album", service).status == 409
+
+
+def test_candidates_are_offered_with_their_sizes(tmp_path: Path) -> None:
+    service, _album = in_the_library(tmp_path)
+    r = post(build(service), "/api/artwork/album/search", service, {"mbid": "aaa"})
+    assert r.json()["candidates"][0]["big_enough"]
+
+
+def test_installing_from_a_url_writes_and_embeds(tmp_path: Path) -> None:
+    service, album = in_the_library(tmp_path)
+    r = post(
+        build(service),
+        "/api/artwork/album/install",
+        service,
+        {"url": "https://coverartarchive.org/release/aaa/front"},
+    )
+    assert r.status == 200 and r.json()["embedded"] == 1
+    assert (album / "cover.jpg").is_file()
+
+
+def test_an_address_that_is_not_https_is_refused(tmp_path: Path) -> None:
+    service, _album = in_the_library(tmp_path)
+    r = post(
+        build(service),
+        "/api/artwork/album/install",
+        service,
+        {"url": "http://example.invalid/cover.jpg"},
+    )
+    assert r.status == 400
+
+
+def test_an_uploaded_image_gets_the_same_verification(tmp_path: Path) -> None:
+    service, album = in_the_library(tmp_path)
+    app = build(service)
+    r = app.dispatch(
+        H.Request.of(
+            "POST",
+            "/api/artwork/album/upload",
+            headers={"Cookie": f"{A.COOKIE}={service.sessions.issue('abbey')}"},
+            body=JPEG,
+        )
+    )
+    assert r.status == 200 and (album / "cover.jpg").is_file()
+
+
+def test_an_error_page_never_reaches_the_files(tmp_path: Path) -> None:
+    """The expensive failure: art removed, then the replacement turning out to
+    be a 170-byte HTML page."""
+    service, album = in_the_library(tmp_path)
+    (album / "cover.jpg").write_bytes(b"the existing cover")
+    service.runner = Imaging().expect("ffprobe", returncode=1)
+    r = post(
+        build(service),
+        "/api/artwork/album/install",
+        service,
+        {"url": "https://coverartarchive.org/release/aaa/front"},
+    )
+    assert r.status == 400
+    assert (album / "cover.jpg").read_bytes() == b"the existing cover"
