@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from ripdoctor import __version__
+from ripdoctor.audio.devices import enumerate_devices
+from ripdoctor.audio.devices import report as devices_report
 from ripdoctor.audio.runner import RealRunner, Runner, ToolFailed, ToolMissing
 from ripdoctor.audio.split import cut_one, plan_cuts, tick_one
 from ripdoctor.config.machine import Machine, detect
@@ -72,6 +74,13 @@ def cmd_doctor(ctx: Context, args: argparse.Namespace) -> int:
 def cmd_config(ctx: Context, args: argparse.Namespace) -> int:
     print(json.dumps(describe(ctx.settings, ctx.thresholds), indent=1, default=str))
     return 0
+
+
+def cmd_devices(ctx: Context, args: argparse.Namespace) -> int:
+    """List capture devices. Nothing here decides which one is the turntable."""
+    found = enumerate_devices(ctx.runner)
+    print(devices_report(found, ctx.settings.capture_device))
+    return 0 if found else 1
 
 
 def cmd_fit(ctx: Context, args: argparse.Namespace) -> int:
@@ -191,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("config", help="print every resolved setting")
     c.set_defaults(run=cmd_config)
+
+    v = sub.add_parser("devices", help="list capture devices")
+    v.set_defaults(run=cmd_devices)
 
     f = sub.add_parser("fit", help="place boundaries from a spec and envelopes")
     f.add_argument("spec")

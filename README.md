@@ -86,6 +86,7 @@ The base install has **no Python dependencies**. It needs `ffmpeg`, `ffprobe`,
 ```
 ripdoctor doctor        what this machine has, what it lacks, and what to do
 ripdoctor config        every resolved setting, including where the audio lives
+ripdoctor devices       capture devices this machine has, and what each accepts
 ripdoctor fit           place track boundaries from a spec and measured levels
 ripdoctor split         cut a plan into tracks
 ripdoctor check         build tick clips, one per boundary, for listening to
