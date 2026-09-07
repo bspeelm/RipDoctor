@@ -558,3 +558,39 @@ line and point at the file that holds the reasoning.
 
 **What is still over.** The prose ratio, at 109 per cent against 75. That is a
 soft ceiling and therefore the author's call - see ADR-020.
+
+---
+
+## ADR-022 — The prose ratio is knowingly over, and frozen until it is not
+
+**Status:** accepted by the author, 2026-09-06.
+
+The prose budget is breached: 898 lines of live documentation against 779 lines
+of code, or 115 per cent where the ceiling is 75. It is accepted as it stands
+rather than resolved.
+
+**Why.** It is arithmetic rather than indiscipline. The project is early - one
+layer of seven - and the decisions were written before the code they govern,
+which is the point of writing them first. The same 898 lines is 45 per cent at
+2,000 lines of code, which is where the next two phases land. The reference
+project sits at 69 per cent with 6,991 lines of code carrying 4,879 of prose;
+the difference is denominator, not restraint.
+
+Retiring something was considered and rejected. The decision log is the record
+and cannot be retired without destroying it; `docs/method.md` is the published
+asset; the README is the front door. There is no third candidate.
+
+**The condition.** Prose is frozen at its current length while the ratio is over
+budget. `budgets.py` fails if live documentation grows past the accepted line
+count, so while over the ceiling a new document costs an old one - which is what
+"over budget means retiring" means in practice. The freeze lifts on its own as
+soon as the ratio comes back under 75, and the ordinary rule resumes with no
+further decision.
+
+**What this is not.** Not a floor, and not an exemption. The budget applies, is
+measured every run, and is reported every run. What changed is that a breach the
+author has looked at and accepted does not also block the build, while still
+preventing the thing the budget exists to prevent.
+
+**What would reverse this.** Prose continuing to grow once the freeze lifts, or
+the ratio failing to fall as the code does.

@@ -34,6 +34,16 @@ MAX_COMMENT_RATIO = 25
 MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024
 
+# The prose ratio is over budget and the author has accepted it as it stands:
+# the project is one layer of seven, the decisions were written before the code
+# they govern, and the ratio falls to about 45 per cent by the end of the next
+# two phases. See ADR-022.
+#
+# The condition is that prose may not GROW while the ratio is over. So a new
+# document costs an old one until the ceiling is met again, which is what "over
+# budget means retiring" amounts to in practice. The freeze lifts by itself.
+PROSE_FROZEN_AT_LINES = 934
+
 # Append-only records are the only prose exempt, because the remedy this budget
 # asks for - retire something - cannot be applied to them.
 DOC_EXEMPT_DIRS = {"history", "review"}
@@ -115,8 +125,19 @@ def main() -> int:
         print("\nover the code budget - the author decides whether it moves.")
         failed = True
     if dratio > MAX_DOC_RATIO:
-        print("\nover the prose budget - retire a document, or the author decides.")
-        failed = True
+        if docs > PROSE_FROZEN_AT_LINES:
+            print(
+                f"\nover the prose budget, and past the {PROSE_FROZEN_AT_LINES}-line"
+                " freeze it was accepted at (ADR-022)."
+                "\nWhile over the ceiling, a new document costs an old one."
+            )
+            failed = True
+        else:
+            print(
+                f"\nnote: prose is over the {MAX_DOC_RATIO}% ceiling, accepted at"
+                f" {PROSE_FROZEN_AT_LINES} lines by ADR-022 and frozen there."
+                "\nThe freeze lifts on its own as the code grows."
+            )
 
     if "--wheel" in sys.argv:
         subprocess.run(  # noqa: S603
