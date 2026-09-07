@@ -28,10 +28,8 @@ VERSION = 1
 HEADER_BYTES = 16
 DEFAULT_WINDOW_MS = 50
 
-# Decibels are stored one byte per window per lane: v = round((dB + 127.5) * 2),
-# giving half-decibel steps across -127.5..0 dB. Half a decibel is far finer
-# than any judgement made from these numbers, and a byte keeps a 22-minute side
-# to about 26 kB per lane.
+# One byte per window per lane: half-decibel steps across -127.5..0 dB. Far
+# finer than any judgement made from these numbers, and 26 kB per side per lane.
 DB_MIN = -127.5
 DB_STEP = 0.5
 DB_OFFSET = 127.5
@@ -112,11 +110,9 @@ class Envelope:
     def rescaled(self, true_duration: float) -> Envelope:
         """Stretch the grid onto the audio's real length.
 
-        ffmpeg's resampler adds latency padding, so an envelope taken from its
-        output runs roughly 0.25 per cent long. Left uncorrected that is about
-        three seconds of drift across a twenty-minute side, and every cut lands
-        late by a growing amount. The readings do not move; only the spacing
-        between them changes.
+        The readings do not move; only the spacing between them changes. A
+        decoder's timebase runs slightly long, and uncorrected that drifts every
+        cut late by a growing amount. See docs/method.md.
         """
         if true_duration <= 0 or not self.levels:
             return self
@@ -138,12 +134,8 @@ class Lanes(NamedTuple):
         return Lanes(*(e.rescaled(true_duration) for e in self))
 
 
-# Two per cent. The predecessor allowed ten, which let through an envelope
-# measured at 44.1 kHz matched against audio at 48 kHz - a ratio of 0.919, well
-# inside the tolerance and wrong by a growing amount across the side. Measured
-# across 29 real sides the worst honest deviation is 0.072 per cent, so two per
-# cent is a 28-fold margin over anything real while rejecting every sample-rate
-# mismatch (44.1/48 is 8.1 per cent out; 48/96 is 50). See ADR-014.
+# Two per cent: a 28-fold margin over the worst deviation seen across 29 real
+# sides, and tight enough to reject any sample-rate mismatch. ADR-014.
 WINDOW_COUNT_SLACK = 0.02
 
 
@@ -152,10 +144,9 @@ def window_count_is_plausible(
 ) -> bool:
     """Does this many readings match a side of this length?
 
-    An envelope that does not line up with its audio is worse than no envelope,
-    because every cut derived from it is confidently wrong, and wrong by an
-    amount that grows along the side. The check is a ratio, not a difference, so
-    it holds for a thirty-second re-rip and a twenty-two-minute side alike.
+    An envelope that does not line up with its audio is worse than none: every
+    cut from it is confidently wrong. A ratio rather than a difference, so it
+    holds for a thirty-second re-rip and a full side alike.
     """
     if duration <= 0 or window <= 0:
         return False

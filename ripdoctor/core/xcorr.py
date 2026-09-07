@@ -27,10 +27,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# Measured: the same side against itself, shifted, and 0.1 per cent fast, scores
-# 1.000 / 1.000 / 0.882. A needle from one side against a different side of the
-# same record scores 0.391, and against a different record 0.379. 0.65 sits in
-# the empty gap between those two groups.
+# Sits in the empty gap between "same music" (0.88 to 1.00) and "different
+# music" (0.38 to 0.39), measured across a real library. docs/method.md.
 MIN_R = 0.65
 
 # A platter differing by more than this between sessions is not credible; the
@@ -140,9 +138,8 @@ def require_match(probe: Probe, what: str, min_r: float = MIN_R) -> None:
 def fit(a: Probe, b: Probe, max_drift: float = MAX_DRIFT) -> Transform:
     """Fit offset and scale through two probes.
 
-    Refuses an implied speed difference beyond `max_drift`. Two probes always
-    produce *a* line; this is the only thing standing between a nonsense pair
-    and every boundary on the side being moved by it.
+    Two probes always produce *a* line. The drift check is the only thing
+    between a nonsense pair and every boundary on the side moving with it.
     """
     if b.old_t == a.old_t:
         raise AlignError("both probes were taken at the same moment")
@@ -161,10 +158,9 @@ def verify(
 ) -> float:
     """Test a fit against a probe it has never seen. Returns the miss.
 
-    Two probes can only ever agree with themselves - any two points define a
-    line, including two wrong ones. Predicting a third and measuring where the
-    music actually is is the first real test of the transform, and an internally
-    consistent but wrong fit fails it.
+    Any two points define a line, including two wrong ones, so two probes can
+    only agree with themselves. A third the fit has never seen is the first real
+    test of it.
     """
     miss = check.new_t - transform.apply(check.old_t)
     if abs(miss) > tolerance:

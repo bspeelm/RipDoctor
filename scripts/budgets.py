@@ -5,8 +5,16 @@ Budgets are not style. They are the mechanism that keeps this project the size
 it claims to be: a small algorithm with a thin application around it. Each one
 fails the build when exceeded.
 
-Do not raise a budget to make a change fit. Retire something, or write a
-decision record explaining why the number moved.
+Two kinds of ceiling, and they are not treated alike.
+
+**The comment ratio is hard.** It is never exceeded and never raised. If prose
+has outgrown it, move findings into docs/method.md - that is where they belong
+anyway.
+
+**Every other ceiling is soft**, and soft does not mean ignore. It means the
+choice between raising it and writing worse code belongs to the author, not to
+whoever is at the keyboard. Never quietly trim a function, drop a guard or skip
+a case to fit a number: stop and say the ceiling is in the way.
 
 The prose budget exists for the same reason as the comment budget. Documentation
 about this project grows faster than the project does, and past a point the
@@ -117,11 +125,18 @@ def markdown_lines() -> int:
     return total
 
 
-def check(label: str, actual: float, ceiling: float, unit: str = "") -> bool:
+def check(
+    label: str, actual: float, ceiling: float, unit: str = "", *, hard: bool = False
+) -> bool:
     ok = actual <= ceiling
-    mark = "ok  " if ok else "OVER"
+    mark = "ok  " if ok else ("HARD" if hard else "OVER")
     print(f"  {mark}  {label:<28} {actual:>8.0f}{unit} / {ceiling:.0f}{unit}")
+    if not ok:
+        BREACHES.append((label, hard))
     return ok
+
+
+BREACHES: list[tuple[str, bool]] = []
 
 
 def main() -> int:
@@ -143,7 +158,7 @@ def main() -> int:
         ("other comment ratio", other_c, other_m, MAX_OTHER_COMMENT_RATIO),
     ):
         if code >= LAYER_FLOOR_LINES:
-            results.append(check(label, 100 * comment / code, ceiling, "%"))
+            results.append(check(label, 100 * comment / code, ceiling, "%", hard=True))
         elif code:
             print(
                 f"  info  {label:<28} {100 * comment / code:>7.0f}% / {ceiling}%"
@@ -182,10 +197,24 @@ def main() -> int:
                 check("wheel bytes", newest.stat().st_size, MAX_WHEEL_BYTES, "B")
             )
 
-    if not all(results):
-        print("\nA budget was exceeded. Retire something, or write an ADR.")
-        return 1
-    return 0
+    if all(results):
+        return 0
+
+    hard = [label for label, is_hard in BREACHES if is_hard]
+    soft = [label for label, is_hard in BREACHES if not is_hard]
+    if hard:
+        print(
+            f"\nHARD ceiling exceeded: {', '.join(hard)}."
+            "\nThis one is not negotiable. Move findings into docs/method.md."
+        )
+    if soft:
+        print(
+            f"\nCeiling exceeded: {', '.join(soft)}."
+            "\nThis is a decision for the author, not a reason to write less."
+            "\nSay so and stop - do not trim code, drop a guard or skip a case"
+            "\nto fit the number."
+        )
+    return 1
 
 
 if __name__ == "__main__":

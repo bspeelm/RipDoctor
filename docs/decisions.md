@@ -484,3 +484,33 @@ again. If it fails twice with an actual assertion, that is a real failure.
 
 **What would reverse this.** The same crash on 3.13 or earlier, or on a second
 3.14 build. Either would mean the fault is in this code after all.
+
+---
+
+## ADR-020 — The comment ratio is a hard ceiling; every other budget is soft
+
+**Status:** accepted. Set by the author, 2026-09-06.
+
+**The comment ratio is never exceeded and never raised.** If prose has outgrown
+it, the answer is to move findings into `docs/method.md`, which is where they
+belong anyway. There is no version of this project where the right response is a
+higher number.
+
+**Every other ceiling is soft, and soft does not mean ignore.** It means the
+choice between raising the ceiling and writing worse code is the author's, not
+the implementer's. Reaching a soft ceiling is a signal to stop and say so.
+
+**What must never happen** is the third option: quietly writing less to fit.
+Trimming a function, dropping a guard, skipping a case or leaving an edge
+unhandled because a number was in the way produces exactly the failure the
+budgets exist to prevent - a codebase that looks disciplined and is incomplete.
+
+`scripts/budgets.py` prints `HARD` or `OVER` accordingly, and says which
+response each one calls for.
+
+**Why the asymmetry.** A line budget bounds how much the project does. That is a
+product decision, and product decisions belong to whoever owns the product. A
+comment budget bounds how much is *said about* what it does, and past a point
+that is displacement rather than documentation - the writing becomes the work.
+Nobody needs to be consulted about moving a paragraph into the file written to
+hold paragraphs.
