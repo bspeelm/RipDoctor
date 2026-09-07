@@ -118,13 +118,16 @@ the boundary by counting seconds does not work, and is not their job.
 
 ## Traps that are not about detection
 
-**Listening to a capture means reading behind it, not beside it.** A monitor
-that opens the growing file at the beginning runs at the same speed as the
-writer and therefore sits permanently at the end of it. Every jitter in either
-direction is an end-of-stream, and a decoder resyncing after one sounds like a
-burst of loud static - a fault in the monitoring, on a recording that is
-perfect. Start well behind the write head; the delay costs nothing, because
-this is for hearing that a side sounds right rather than for cueing.
+**Listening to a capture means waiting for it, not racing it.** A monitor that
+hands the growing file to a decoder runs at the same speed as the writer, so it
+sits at the end of the file and every jitter in either direction is an
+end-of-stream. A decoder resyncing after one sounds like a burst of loud static
+- a fault in the monitoring, on a recording that is perfect, which is the worst
+shape a fault can take.
+
+A larger head start only delays that. The fix is a reader that waits at the end
+of the file and continues when more arrives, feeding the encoder through a pipe:
+then the lag is a choice rather than a defence, and half a second is enough.
 
 **A capture device is chosen, never defaulted to.** The first device a machine
 lists is whatever the motherboard calls its own audio, and its input is

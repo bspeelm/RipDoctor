@@ -215,17 +215,18 @@ def add(app: App, service: Service) -> None:
         """
         live = service.recorder.live
         if live is not None and live.running:
+            # The capture is walked and fed to the encoder rather than handed
+            # to it: ffmpeg reading the file itself ends at every end-of-file,
+            # and a monitor keeping pace with a writer catches up constantly.
             wav = C.partial_path(layout.raw / live.slug, live.side, live.stem)
-            if not wav.is_file():
-                raise H.HttpError(409, "the capture has not written anything yet")
             fmt = _format(service)
-            argv = PT.tail_argv(wav, PT.tail_start(wav, fmt))
-        else:
-            device = str(r.query.get("device") or service.settings.capture_device)
-            try:
-                argv = PT.device_argv(device, _format(service))
-            except C.CaptureError as e:
-                raise H.HttpError(400, str(e)) from e
+            return H.streaming(lambda: PT.follow(service.runner, wav, fmt), "audio/ogg")
+
+        device = str(r.query.get("device") or service.settings.capture_device)
+        try:
+            argv = PT.device_argv(device, _format(service))
+        except C.CaptureError as e:
+            raise H.HttpError(400, str(e)) from e
         return H.streaming(lambda: PT.stream(service.runner, argv), "audio/ogg")
 
     @app.route("GET", "/api/rip/orphans")

@@ -28,13 +28,6 @@ def test_an_odd_looking_device_is_refused() -> None:
         PT.device_argv("hw:Rx,0; rm -rf /", Format())
 
 
-def test_a_capture_in_progress_is_read_at_playing_speed(tmp_path: Path) -> None:
-    """Without that ffmpeg empties the file in a second: what a listener hears
-    is the last few seconds at high speed, then silence."""
-    argv = PT.tail_argv(tmp_path / "a.wav")
-    assert "-re" in argv and argv.index("-re") < argv.index("-i")
-
-
 def test_the_stream_is_encoded_for_latency_not_for_keeping() -> None:
     """The delay between the needle and the headphones is the whole point."""
     argv = PT.device_argv("hw:Rx,0", Format())
@@ -63,54 +56,141 @@ def test_an_encoder_that_already_exited_is_not_killed() -> None:
     assert not fake.started[0].killed
 
 
-# ------------------------------------------------- joining a capture late
+# ------------------------------------------------- following a capture
 
 
-def a_capture(tmp_path: Path, seconds: float, fmt: Format) -> Path:
+FMT = Format(rate=48000, channels=2, sample_format="S24_3LE")
+FRAME = FMT.channels * FMT.width
+
+
+def a_capture(tmp_path: Path, seconds: float) -> Path:
     wav = tmp_path / "side.wav"
-    wav.write_bytes(bytes(44 + int(seconds * fmt.rate) * fmt.channels * fmt.width))
+    wav.write_bytes(b"R" * 44 + bytes(int(seconds * FMT.rate) * FRAME))
     return wav
 
 
-def test_a_listener_joins_behind_the_write_head(tmp_path: Path) -> None:
-    """Starting where the writer is means the two run at the same speed for
-    the whole side, so the reader sits permanently at the end of the file. Any
-    jitter either way is an end-of-stream, and an Opus decoder resyncing after
-    one is a burst of loud static - which is what it sounded like."""
-    fmt = Format(rate=96000, channels=2, sample_format="S24_3LE")
-    wav = a_capture(tmp_path, 600.0, fmt)
-    assert PT.tail_start(wav, fmt) == pytest.approx(600.0 - PT.LAG, abs=0.01)
+def grow(wav: Path, seconds: float, fill: bytes = b"\x01") -> None:
+    with wav.open("ab") as f:
+        f.write(fill * (int(seconds * FMT.rate) * FRAME))
 
 
-def test_a_capture_shorter_than_the_cushion_starts_at_the_beginning(
+def test_the_encoder_is_told_what_is_coming(tmp_path: Path) -> None:
+    """There is no header on a pipe, and ffmpeg guessing would guess wrong."""
+    argv = PT.pipe_argv(FMT)
+    assert argv[argv.index("-f") + 1] == "s24le"
+    assert argv[argv.index("-ar") + 1] == "48000"
+    assert argv[argv.index("-ac") + 1] == "2"
+    assert argv[argv.index("-i") + 1] == "-"
+
+
+def test_a_format_that_cannot_be_streamed_is_refused() -> None:
+    with pytest.raises(CaptureError):
+        PT.pipe_argv(Format(sample_format="S24_LE"))
+
+
+def test_a_listener_joins_just_behind_the_write_head(tmp_path: Path) -> None:
+    """A head start, not a safety margin - the reader waits for the writer
+    rather than racing it."""
+    wav = a_capture(tmp_path, 600.0)
+    at = PT.tail_start(wav, FMT)
+    behind = (wav.stat().st_size - at) / FRAME / FMT.rate
+    assert behind == pytest.approx(PT.LAG, abs=0.01)
+
+
+def test_the_start_lands_on_a_frame(tmp_path: Path) -> None:
+    """Starting mid-frame swaps the channels and shifts every sample by a byte,
+    which sounds like noise rather than like a mistake."""
+    wav = a_capture(tmp_path, 7.3)
+    assert (PT.tail_start(wav, FMT) - 44) % FRAME == 0
+
+
+def test_a_capture_shorter_than_the_head_start_begins_at_the_first_sample(
     tmp_path: Path,
 ) -> None:
-    fmt = Format(rate=96000, channels=2, sample_format="S24_3LE")
-    assert PT.tail_start(a_capture(tmp_path, 3.0, fmt), fmt) == 0.0
+    assert PT.tail_start(a_capture(tmp_path, 0.1), FMT) == 44
 
 
-def test_a_capture_that_is_not_there_starts_at_the_beginning(
+def test_a_capture_that_is_not_there_begins_at_the_first_sample(
     tmp_path: Path,
 ) -> None:
-    assert PT.tail_start(tmp_path / "absent.wav", Format()) == 0.0
+    assert PT.tail_start(tmp_path / "absent.wav", FMT) == 44
 
 
-def test_the_cushion_survives_the_drift_it_exists_for() -> None:
-    """ffmpeg paces by its own clock and the card writes by its own. A tenth of
-    a per cent over a twenty-minute side is about a second; the cushion has to
-    be comfortably more than that."""
-    drift_over_a_side = 20 * 60 * 0.001
-    assert PT.LAG > drift_over_a_side * 5
+def test_the_reader_waits_at_the_end_instead_of_stopping_there(
+    tmp_path: Path,
+) -> None:
+    """The whole point. ffmpeg reading the file itself treats end-of-file as
+    end of stream, so a monitor keeping pace with the writer ends every time it
+    catches up - and a decoder resyncing after that is loud static on a
+    recording that is perfect."""
+    wav = a_capture(tmp_path, 1.0)
+    clock = [0.0]
+    added = []
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+        if len(added) < 2:
+            added.append(True)
+            grow(wav, 0.5)
+
+    got = b"".join(
+        PT.tail(wav, FMT, lag=1.0, sleep=sleep, now=lambda: clock[0], chunk=4096)
+    )
+    assert added == [True, True], "it never waited for more"
+    assert len(got) == int(1.0 * FMT.rate) * FRAME + 2 * int(0.5 * FMT.rate) * FRAME
 
 
-def test_the_seek_comes_before_the_input() -> None:
-    """After it, ffmpeg decodes everything up to the point instead of seeking -
-    which on a twenty-minute side is the delay this exists to remove."""
-    argv = PT.tail_argv("/raw/side.wav", 585.0)
-    assert argv.index("-ss") < argv.index("-i")
-    assert argv[argv.index("-ss") + 1] == "585.000"
+def test_the_reader_gives_up_once_the_capture_has_stopped(tmp_path: Path) -> None:
+    """A listener held open forever on a side that ended is a process nobody
+    closes."""
+    wav = a_capture(tmp_path, 0.2)
+    clock = [0.0]
+    got = b"".join(
+        PT.tail(
+            wav,
+            FMT,
+            lag=1.0,
+            idle_limit=2.0,
+            sleep=lambda s: clock.__setitem__(0, clock[0] + s),
+            now=lambda: clock[0],
+        )
+    )
+    assert got and clock[0] >= 2.0
 
 
-def test_a_negative_start_is_not_passed_to_ffmpeg() -> None:
-    argv = PT.tail_argv("/raw/side.wav", -3.0)
-    assert argv[argv.index("-ss") + 1] == "0.000"
+def test_what_the_encoder_is_fed_is_the_tail_of_the_capture(
+    tmp_path: Path,
+) -> None:
+    wav = a_capture(tmp_path, 0.5)
+    fake = FakeRunner(output=b"OggS" + b"\x00" * 100)
+    out = b"".join(
+        PT.follow(
+            fake,
+            wav,
+            FMT,
+            lag=1.0,
+            spawn=lambda work: work(),
+            idle_limit=0.0,
+            sleep=lambda _s: None,
+            now=lambda: 0.0,
+        )
+    )
+    fed = fake.started[0].stdin
+    assert fed is not None
+    assert fed.getvalue() == (tmp_path / "side.wav").read_bytes()[44:]
+    assert out.startswith(b"OggS")
+
+
+def test_following_stops_the_encoder_when_the_listener_goes_away(
+    tmp_path: Path,
+) -> None:
+    """A tab closed mid-side would otherwise leave ffmpeg running for the life
+    of the process."""
+    wav = a_capture(tmp_path, 0.5)
+    fake = FakeRunner(output=b"\x00" * 100000)
+    chunks = PT.follow(
+        fake, wav, FMT, spawn=lambda _w: None, sleep=lambda _s: None, now=lambda: 0.0
+    )
+    next(chunks)
+    chunks.close()
+    assert fake.started[0].killed
