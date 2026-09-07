@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -409,3 +410,27 @@ def test_the_emptied_album_directory_goes_with_the_name(tmp_path: Path) -> None:
     (layout.raw / "album").mkdir()
     assert F.forget(layout, "album") is True
     assert not (layout.raw / "album").exists()
+
+
+def test_both_documents_are_written_with_the_same_name(tmp_path: Path) -> None:
+    """Every path a record is filed under is built from one or the other, so
+    written together but not equal sends the archive gate and the import to
+    Unknown Artist while the record sits in the library under its real name."""
+    layout = a_layout(tmp_path)
+    F.save(layout, "album", replace(a_spec(), album="", artist=""), a_plan())
+    spec = F.read_spec(layout.spec_file("album"))
+    plan = F.read_plan(layout.plan_file("album"))
+    assert (spec.album, spec.artist) == (plan.album, plan.artist) == ("A", "B")
+
+
+def test_a_name_only_the_spec_has_reaches_the_plan(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    F.save(layout, "album", a_spec(), replace(a_plan(), album="", artist=""))
+    assert F.read_plan(layout.plan_file("album")).album == "A"
+
+
+def test_a_record_can_still_be_saved_before_it_is_named(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    blank = replace(a_spec(), album="", artist="", date="")
+    F.save(layout, "album", blank, replace(a_plan(), album="", artist="", date=""))
+    assert F.read_spec(layout.spec_file("album")).album == ""

@@ -151,11 +151,27 @@ def save(layout: Layout, slug: str, spec: Spec, plan: Plan) -> tuple[Path, Path]
     the plan means the next fit recomputes over a decision somebody made by
     listening, and there is nothing to say it happened.
     """
+    spec, plan = _agreeing(spec, plan)
     spec_path = layout.spec_file(slug)
     plan_path = layout.plan_file(slug)
     write_json(spec_path, _spec_to_dict(spec))
     write_json(plan_path, plan.to_dict())
     return spec_path, plan_path
+
+
+def _agreeing(spec: Spec, plan: Plan) -> tuple[Spec, Plan]:
+    """The same names in both, so no reader has to know which one to ask.
+
+    Both documents carry a record's name and every path built from either has
+    to land in the same place. Written together but not equal, they sent the
+    archive gate and the import to Unknown Artist while the record sat in the
+    library under its real one. Blank in both is left alone: a record can be
+    saved before anybody has named it. ADR-044.
+    """
+    names = {
+        f: getattr(spec, f) or getattr(plan, f) for f in ("album", "artist", "date")
+    }
+    return replace(spec, **names), replace(plan, **names)
 
 
 def _spec_to_dict(spec: Spec) -> dict[str, Any]:

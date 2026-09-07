@@ -125,3 +125,41 @@ def test_every_layer_named_in_the_docstring_exists() -> None:
     assert len(layers) >= 6, "the layer list in the docstring has drifted"
     for layer in layers:
         assert (PKG / layer).is_dir(), f"docstring names {layer}/, which does not exist"
+
+
+# Both documents carry a record's name, and every path a record is filed under
+# is built from one or the other. Written together but not equal, they sent the
+# archive gate and the import to Unknown Artist while the record sat in the
+# library under its real name - five separate faults in a day, all the same
+# shape. `store.files.save` reconciles them, so the rule this enforces is that
+# nothing can write those documents without going through it. ADR-044.
+WRITES_A_RECORD = {"spec_file", "plan_file"}
+
+
+def test_the_two_documents_are_only_ever_written_together() -> None:
+    """The names in a spec and a plan have to agree, and one function makes
+    them. A second writer would be a second place for them to drift apart, and
+    every reader downstream trusts that they did not."""
+    checked = 0
+    offences: list[str] = []
+    for mod in modules_under(PKG):
+        tree = ast.parse(mod.read_text(encoding="utf-8"))
+        checked += 1
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", "") != "write_json":
+                continue
+            target = node.args[0] if node.args else None
+            named = (
+                isinstance(target, ast.Call)
+                and getattr(target.func, "attr", "") in WRITES_A_RECORD
+            )
+            if named and mod.parts[-1] != "files.py":
+                offences.append(f"{mod.relative_to(PKG)}:{node.lineno}")
+
+    assert checked >= 1, "no modules were examined; the pattern has drifted"
+    assert not offences, (
+        "a spec or plan written outside store/files.py, where the two are kept "
+        "in step:\n  " + "\n  ".join(offences)
+    )

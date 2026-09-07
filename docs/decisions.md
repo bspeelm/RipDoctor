@@ -1322,3 +1322,43 @@ cover file does not, so such a record is worth giving art again once filed.
 A cover that misses the size floor is reported with its size and a suggestion to
 upload one instead. Twenty pixels under is a judgement somebody can overrule
 with a better scan of their own, and reading it as a failure helps nobody.
+
+## ADR-044 — a record's name lives in two documents, reconciled at the write
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+Both the spec and the plan carry a record's album, artist and date, and every
+path the record is filed under is built from one or the other. In one day this
+produced five separate faults, all the same shape:
+
+- saving rebuilt the spec from the plan and dropped the lead, the tail and the
+  per-side ear-set fix map;
+- saving wrote the page's empty fields over names that were already there,
+  leaving a record with every boundary intact and no name;
+- the record's own answer took the plan's names raw immediately after asking
+  which of the two to believe, putting the plan's blanks back;
+- the artwork route built a library path from the plan alone, so a record whose
+  name only the spec still held resolved to Unknown Artist over Unknown Album
+  and was reported as not being in a library its ten tracks were sitting in;
+- and the repair for that fixed only the spec, so the plan stayed blank.
+
+The common cause is not any of those. It is that two documents hold the same
+field and each reader picks one.
+
+**The fix is at the write, not in the readers.** `store.files.save` already
+existed to write both documents together — "never one without the other" — and
+it wrote them together while letting them disagree about the same field. It now
+reconciles the names: a blank in one takes the other's, and blank in both is
+left alone, because a record can be saved before anybody has named it.
+
+`records.named` remains for the read side, where either document may be missing
+entirely rather than merely blank — a capture writes a spec and no plan at all.
+It prefers the plan, whose names were confirmed against the catalogue.
+
+**Why not make every reader ask.** It was tried. An architecture test forbidding
+a library path built from a raw plan field passes only if `integrations` and the
+CLI import a helper from `web.routes`, which is a layering violation to fix a
+data problem — and the tagger writing tags from the plan is correct, not a
+fault. The rule that holds is the one nothing can bypass: nothing outside
+`store/files.py` writes a spec or a plan, enforced by a test, so the
+reconciliation cannot be gone around.
