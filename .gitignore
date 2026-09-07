@@ -27,3 +27,4 @@ venv/
 
 # Maps anonymised fixtures back to album names. Never committed.
 tests/fixtures/PRIVATE-mapping.json
+tests/fixtures/PRIVATE-golden-mapping.json

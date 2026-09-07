@@ -666,3 +666,47 @@ curve that broadly agree.
 matches the full-band reading of the same signal, which is only true when the
 normalisation is right. The window's mean square is now computed from the window
 rather than written as a constant, so it stays correct if the window changes.
+
+---
+
+## ADR-025 — The port is checked against the reference on real records
+
+**Status:** accepted.
+
+Six records, 73 tracks, 146 boundaries. For each, the reference implementation
+was run on the same envelope with the same spec, and its answer committed. The
+specs have their ear-set edges removed, so the detector decides every boundary -
+re-fitting a spec whose edges are all human-set exercises nothing.
+
+`refit2` was verified deterministic first: run against all 22 specs on the
+server, it reproduced every boundary in every plan already on disk. The only
+differences were an `mbid` the application adds on save and a `cat: null` where
+the catalogue had no duration.
+
+**What the comparison found.**
+
+*Agreement, to the window.* 132 of 146 boundaries are identical. One
+disagreement was a genuine port error - `refine` used an exclusive end and a
+floored index where the reference is inclusive and rounds, moving an edge by one
+window, 0.05 s. Small enough to look like agreement and it is not.
+
+*The overlap defect, on real audio.* The remaining 14 differences are all
+ADR-016. Ten are pairs where the reference has a track ending after its
+neighbour starts - by up to **0.90 s** - because it clamps each padding against
+the gap and not against the other. The same audio is written into both files.
+Four more are the same arithmetic landing just short of an overlap, leaving a
+0.05 to 0.40 s sliver where this implementation makes the cuts meet.
+
+*A first pass that runs out of side.* On one record the detector gives a track
+an end 52 s past its catalogue duration and consumes the gap the last track
+needed. That track then starts after the side's music ends - 1268.55 to 1266.57
+- and cutting it runs ffmpeg from a later time to an earlier one, writing an
+empty file. This implementation produces the same numbers, reports the
+catalogue disagreement that preceded it, and then refuses the plan. The
+reference has no validation and writes it.
+
+**What is held.** Boundaries must match exactly wherever the gap is roomy; the
+exception is stated as a condition, not as a tolerance. The reference must still
+overlap at least eight pairs, or the fixtures have changed or the defect was not
+real. At least half of all boundaries must come from the detector, or the
+comparison has quietly stopped exercising one.

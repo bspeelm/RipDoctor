@@ -1,0 +1,38 @@
+{
+ "record-30deab76.json": {
+  "ear_set_edges": 11,
+  "exercises": "wide dynamics; a catalogue with awkward durations",
+  "sides": 2,
+  "tracks": 11
+ },
+ "record-389fec66.json": {
+  "ear_set_edges": 16,
+  "exercises": "many short tracks, tight gaps",
+  "sides": 4,
+  "tracks": 16
+ },
+ "record-910f935f.json": {
+  "ear_set_edges": 11,
+  "exercises": "sparse pressing; every edge ear-set; a single-track re-rip side",
+  "sides": 3,
+  "tracks": 11
+ },
+ "record-a5b4a005.json": {
+  "ear_set_edges": 15,
+  "exercises": "the older 48 kHz/16-bit chain",
+  "sides": 4,
+  "tracks": 15
+ },
+ "record-c5652c48.json": {
+  "ear_set_edges": 7,
+  "exercises": "dense wall of sound; ambient stretches that sit on the auto-stop gate",
+  "sides": 4,
+  "tracks": 7
+ },
+ "record-f838e3f8.json": {
+  "ear_set_edges": 13,
+  "exercises": "96 kHz/24-bit; long sides, few tracks",
+  "sides": 4,
+  "tracks": 13
+ }
+}

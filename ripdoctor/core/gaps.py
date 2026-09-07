@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ripdoctor.core.envelope import Envelope
@@ -122,22 +123,34 @@ def refine(env: Envelope, lo: float, hi: float) -> tuple[float, float]:
     if hi <= lo or not len(env):
         return lo, hi
 
+    # Bounds are inclusive at both ends, and readings are addressed by their own
+    # timestamps rather than by a floored index. An exclusive end, or a floor
+    # where the reference rounds, moves an edge by one window - 0.05 s, which is
+    # small enough to look like agreement and is not.
     quarter = (hi - lo) * 0.25
-    core = env.between(lo + quarter, hi - quarter)
+    first = math.ceil((lo + quarter) / env.window)
+    last = math.floor((hi - quarter) / env.window)
+    core = env.levels[first : last + 1]
     if not core:
         return lo, hi
 
     threshold = sum(core) / len(core) + REFINE_ABOVE
     mid = (lo + hi) / 2.0
 
+    lo_i = math.ceil(lo / env.window)
+    mid_i = math.floor(mid / env.window)
+    hi_i = math.floor(hi / env.window)
+
     music_end = lo
-    for i in range(env.index(lo), env.index(mid) + 1):
-        if i < len(env.levels) and env.levels[i] > threshold:
+    for i in range(max(lo_i, 0), min(mid_i, len(env.levels) - 1) + 1):
+        if env.levels[i] > threshold:
             music_end = i * env.window
 
     music_start = hi
-    for i in range(env.index(mid), env.index(hi) + 1):
-        if i < len(env.levels) and env.levels[i] > threshold:
+    for i in range(
+        max(math.ceil(mid / env.window), 0), min(hi_i, len(env.levels) - 1) + 1
+    ):
+        if env.levels[i] > threshold:
             music_start = i * env.window
             break
 
