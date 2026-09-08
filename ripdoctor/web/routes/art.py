@@ -5,7 +5,9 @@ from __future__ import annotations
 from contextlib import suppress
 from pathlib import Path
 
+from ripdoctor.audio.runner import ToolFailed, ToolMissing
 from ripdoctor.integrations import artwork as ART
+from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store import files as F
@@ -35,10 +37,25 @@ def _album(service: Service, slug: str) -> Path:
         return cut
     album, artist, _date, _old = named(service.layout, slug)
     if service.settings.library:
-        filed = T.album_dir(service.settings.library, artist, album)
-        if filed.is_dir():
+        # Asked rather than guessed: the importer owns the path formatting, so
+        # this project's naming is right only by coincidence. ADR-048.
+        filed = _filed(service, slug, artist, album)
+        if filed is not None and filed.is_dir():
             return filed
     raise H.HttpError(409, f"{album or slug} has no cut tracks and is not filed yet")
+
+
+def _filed(service: Service, slug: str, artist: str, album: str) -> Path | None:
+    spec = service.layout.spec_file(slug)
+    mbid = F.read_spec(spec).mbid if spec.is_file() else ""
+    importer = IMP.choose(service.runner, service.settings.importer, service.state_dir)
+    with suppress(ToolMissing, ToolFailed, OSError, ValueError):
+        where, _count = importer.locate(
+            service.runner, service.settings.library, artist, album, mbid=mbid
+        )
+        if where is not None:
+            return where
+    return T.album_dir(service.settings.library, artist, album)
 
 
 def add(app: App, service: Service) -> None:

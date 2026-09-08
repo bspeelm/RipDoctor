@@ -1488,3 +1488,51 @@ finishing a rip and wrong for re-ripping side b. It always lands on the next
 free side rather than keeping what was showing: it is rebuilt when the record
 changes and when a side finishes recording, and keeping the old value left it
 pointing at the side just captured, ready to record over it.
+
+## ADR-048 — the import dialog means what it says
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+The dialog asked for things it did not use and did not report what it did.
+
+**The release id was write-only.** The field was filled in three places and read
+in none; the import posted an empty body and the server took the release from
+the spec on disk. So the placeholder invited you to paste a release id and
+pasting one changed nothing, and picking one from the search results imported
+the release picked before it. The route reads the body now, falling back to the
+spec.
+
+**The names were editable and ignored.** Artist and Album fed the MusicBrainz
+search and a confirmation dialog that quoted them back - and the import tagged
+from the plan. You could retype the artist, read it in the confirmation, press
+Import, and get files tagged with something else. They are read-only now, from
+the plan the import will actually use, and re-labelling is how you change them.
+
+**Two confirmations became one.** The second quoted the fields that were
+ignored, which is the worst kind of question: it looked like the last chance to
+check, and it was describing something that would not happen.
+
+**The transcript is shown.** What the importer said was collected, carried back,
+and hidden on both the success and the failure path, so the block could only
+ever contain the word "importing". It opens by itself when there is a note to
+read.
+
+**An empty review directory is refused.** Nothing checked, so the importer found
+nothing to move, reported no failure, and the summary read off whatever was
+already in the library - an import that did nothing, reported as one that
+worked.
+
+**The artwork offer is reachable.** The panel that says a record went into the
+library without a cover, and offers to fetch or upload one, was written and
+never called: it could only appear if you were already inside it. It is offered
+after an import now, which is the moment it is worth acting on.
+
+**Artwork asks the importer where the record went** rather than building a path
+from this project's naming. The importer owns the path formatting - beets files
+by its own scheme - so the guess was right only by coincidence, and a record
+filed under a different one read as absent from a library its tracks were in.
+
+The claim that it previews first is gone. `Importer.preview` exists on both
+importers and has never had a caller; the honest description is that the release
+below is what it will match against, and the transcript afterwards says what it
+did.

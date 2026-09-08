@@ -237,10 +237,22 @@ def add(app: App, service: Service) -> None:
             service.runner, service.settings.importer, service.state_dir
         )
         spec_file = layout.spec_file(slug)
-        mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+        # The release chosen in the dialog wins over the one in the spec. It
+        # used to be read from the spec alone, so picking one and pressing
+        # Import imported the previous choice.
+        spec_mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+        mbid = str(r.json().get("mbid", "")) or spec_mbid
+
+        review_dir = layout.review_dir(slug)
+        if not any(review_dir.glob("*.flac")):
+            # Otherwise the importer finds nothing to move, reports no failure,
+            # and the summary reads off whatever is already in the library.
+            raise H.HttpError(
+                409, f"nothing to import for {slug} - cut the tracks first"
+            )
 
         def work(job: Job) -> dict[str, Any]:
-            review = str(layout.review_dir(slug))
+            review = str(review_dir)
             job.total = sum(len(s.tracks) for s in plan.sides)
             job.step(plan.album, f"importing with {importer.name}")
             done = importer.apply(

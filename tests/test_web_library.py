@@ -13,6 +13,7 @@ from pathlib import Path
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import musicbrainz as MB
+from ripdoctor.integrations.importer import _SEP as I_SEP
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import auth as A
@@ -201,6 +202,44 @@ def test_importing_without_a_library_is_refused(tmp_path: Path) -> None:
     service.settings = replace(service.settings, library="")
     F.write_json(service.layout.plan_file("album"), a_plan_dict())
     assert post(build(service), "/api/import/album", service).status == 409
+
+
+def ready_to_import(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """A record whose tracks are cut and waiting in review."""
+    service, library = with_library(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
+    return service, library
+
+
+def test_importing_nothing_is_refused_rather_than_reported_as_done(
+    tmp_path: Path,
+) -> None:
+    """With review empty the importer finds nothing to move, reports no
+    failure, and the summary reads off whatever is already in the library - so
+    an import that did nothing looked like one that worked."""
+    service, _library = with_library(tmp_path)
+    r = post(build(service), "/api/import/album", service)
+    assert r.status == 409 and "cut the tracks first" in r.json()["error"]
+
+
+def test_the_release_chosen_in_the_dialog_is_the_one_imported(
+    tmp_path: Path,
+) -> None:
+    """It used to come from the spec alone, so picking one and pressing Import
+    imported the release picked before it."""
+    service, _library = ready_to_import(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    rows = f"A Record{I_SEP}/music/A Band/A Record/01 One.flac"
+    service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
+    F.remember(service.layout, "album", album="A Record", artist="A Band")
+
+    # The importer moves nothing here, so review is still full and the run
+    # reports a failure - what matters is which release it was told to use.
+    post(build(service), "/api/import/album", service, {"mbid": "chosen-here"})
+    argv = service.runner.argv_for("import")
+    assert "--search-id" in argv and "chosen-here" in argv
 
 
 def a_plan_dict() -> dict:

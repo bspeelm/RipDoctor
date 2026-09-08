@@ -118,17 +118,13 @@ def repair_argv(source: str, dest: str) -> list[str]:
     ]
 
 
-# Where a side that has been re-ripped goes. Kept rather than deleted: the old
-# capture is the only copy of a take somebody may want back, and it is the
-# thing this whole gate exists to protect. ADR-046.
+# Where a re-ripped side's predecessor goes. Kept, not deleted: it is the only
+# copy of a take somebody may want back. ADR-046.
 SUPERSEDED = "_superseded"
 
 
 def _step_aside(target: Path) -> Path | None:
-    """Move an archived side out of the way of its replacement.
-
-    Returns where it went, so a copy that does not read back can be undone.
-    """
+    """Move an archived side aside, returning where, so it can be put back."""
     if not target.exists():
         return None
     kept = target.parent / SUPERSEDED

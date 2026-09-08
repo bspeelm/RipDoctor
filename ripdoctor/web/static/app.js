@@ -770,9 +770,14 @@ function openImport() {
   $("#imp-close").textContent = "Close";
   $("#imp-results").innerHTML = "";
   $("#imp-relabel-wrap").hidden = true;
+  // What the record is called, from the plan the import tags from. Editable,
+  // they fed only the search box and a confirm quoting them back. ADR-048.
   const g = guessFromSlug(S.slug);
   $("#imp-artist").value = S.meta.artist || g.artist;
   $("#imp-album").value = S.meta.album || g.album;
+  $("#imp-artist").readOnly = $("#imp-album").readOnly = true;
+  $("#imp-artist").title = $("#imp-album").title =
+    "what the saved plan says — pick a release below and re-label to change it";
   $("#imp-replace").checked = false;
   $("#imp-go").disabled = false;
   // Hidden until this record has been asked about. Left showing, it was the
@@ -813,9 +818,9 @@ async function relabelRun() {
   $("#imp-err").textContent = "";
   $("#imp-relabel").disabled = true;
   try {
-    const r = await postJSON(`/api/relabel/${S.slug}`, {
-      mbid: relabelPick.id, artist: $("#imp-artist").value,
-      album: $("#imp-album").value, date: relabelPick.date });
+    // The release is the whole request: the titles, the artist and the date all
+    // come from it. Sending the fields as well implied they were consulted.
+    const r = await postJSON(`/api/relabel/${S.slug}`, { mbid: relabelPick.id });
     $("#imp-relabel-wrap").hidden = true;
     S.sideData = {};
     await openAlbum(S.slug);
@@ -830,14 +835,22 @@ async function relabelRun() {
 // An import that lands with no art used to be reported nowhere, which meant
 // finding out from a blank tile in a player days later. Ask at the moment it
 // happens, and offer both answers.
-function offerArt(art) {
+// Offered after an import, the moment it is worth acting on. It was written
+// and never called, so the panel could only appear from inside itself.
+async function offerArt() {
   const wrap = $("#imp-art-wrap");
   $("#imp-art-err").textContent = "";
-  if (!art || art.complete) { wrap.hidden = true; return; }
-  wrap.hidden = false;
-  $("#imp-art-what").textContent =
-    `${art.embedded} of ${art.tracks} tracks carry a picture`
-    + (art.cover_file ? "   ·   cover.jpg is on disk but not embedded" : "");
+  wrap.hidden = true;
+  try {
+    const art = await api(`/api/artwork/${S.slug}`);
+    const tracks = art.tracks || [];
+    const withArt = tracks.filter((t) => t.has_art).length;
+    if (!tracks.length || withArt === tracks.length) return;
+    $("#imp-art-what").textContent =
+      `${withArt} of ${tracks.length} tracks carry a picture`
+      + (art.cover ? `   ·   ${art.cover.name} is on disk but not embedded` : "");
+    wrap.hidden = false;
+  } catch { /* the record may not be filed yet; the panel simply stays hidden */ }
 }
 
 async function artFetch() {
@@ -862,25 +875,29 @@ async function artFetch() {
 
 async function runImport() {
   const tracks = Object.values(S.bySide).flat().length;
-  if (S.dirty && !confirm("Import the saved plan? Unsaved edits are not in it."))
-    return;
-  if (!confirm(`Tag and place ${tracks} tracks as "${$("#imp-artist").value} \u2014 `
-             + `${$("#imp-album").value}"?\n\nThe files move out of review/.`)) return;
+  // One question. There used to be two in a row, and the second quoted the
+  // artist and album out of fields the import did not use - so it could ask
+  // about a name and then tag with a different one.
+  if (!confirm(`Tag and place ${tracks} tracks as "${S.meta.artist} \u2014 `
+             + `${S.meta.album}"?\n\nThe files move out of review/.`)) return;
+  if (S.dirty) await save();      // the importer reads the plan from disk
   $("#imp-err").textContent = "";
   $("#imp-out").textContent = "tagging and placing\u2026";
   $("#imp-outwrap").hidden = false;
   $("#imp-go").disabled = true;
   try {
-    const r = await runJob(S.slug, `/api/import/${S.slug}`, {}, "importing");
+    const r = await runJob(S.slug, `/api/import/${S.slug}`,
+                           { mbid: $("#imp-mbid").value.trim() }, "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
     $("#imp-done").hidden = false;
-    $("#imp-outwrap").hidden = true;
+    showTranscript(r);   // collected all along, and hidden on every path
     $("#imp-go").hidden = true;
     $("#imp-close").textContent = "Not yet";
     await loadArtState();
     await loadReview();
     await refreshArchiveButton();
     await renderPipeline();
+    offerArt();
     $("#imp-next").hidden = $("#archive").disabled;
     status("imported into the library");
   } catch (e) {
@@ -888,6 +905,14 @@ async function runImport() {
     $("#imp-outwrap").hidden = true;
     $("#imp-go").disabled = false;
   }
+}
+
+function showTranscript(r) {
+  const notes = (r.notes || []).map((n) => "  " + n);
+  const text = [...notes, r.output || ""].join("\n").trim();
+  $("#imp-out").textContent = text || "nothing to report";
+  $("#imp-outwrap").hidden = false;
+  $("#imp-outwrap").open = notes.length > 0;
 }
 
 // -------------------------------------------------------------- first pass
