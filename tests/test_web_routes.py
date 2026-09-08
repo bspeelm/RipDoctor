@@ -495,6 +495,22 @@ def test_splitting_cuts_every_track_and_verifies_it(tmp_path: Path) -> None:
     assert len(list(service.layout.review_dir("album").glob("*.flac"))) == 2
 
 
+def test_a_cut_clears_what_a_previous_cut_left(tmp_path: Path) -> None:
+    """Cuts are named from the track number and title, so re-cutting after a
+    retitle left the old files beside the new. The importer reads whatever is
+    still in review as proof it refused, which turned the next good import into
+    a reported failure."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 An Old Title.flac").write_bytes(b"fLaC")
+    post(build(service), "/api/split/album", service)
+    left = sorted(p.name for p in review.glob("*.flac"))
+    assert "01 An Old Title.flac" not in left
+    assert len(left) == 2
+
+
 def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
     service = with_a_plan(tmp_path)
     # Matched on the program, not the string: every cut writes a .flac, so a

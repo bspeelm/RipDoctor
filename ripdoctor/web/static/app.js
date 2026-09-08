@@ -30,7 +30,6 @@ const postJSON = (path, obj) =>
 
 const S = {
   slug: null, album: null, side: null,
-  earPassOverride: null,          // set by align, consumed by the next save
   meta: null,                     // {album, artist, date, sides, ready, tracks_by_side}
   bySide: {},                     // letter -> [track]
   sideData: {},                   // letter -> {duration, windowMs, rms, peak, band, gaps}
@@ -622,27 +621,41 @@ function buildDoc() {
   };
 }
 
+// Reports whether it wrote, so a caller that must not proceed on a stale plan
+// can stop. The Save button ignores the answer; Cut does not.
 async function save() {
   try {
     await postJSON(`/api/plan/${S.slug}`, buildDoc());
-    S.earPassOverride = null;
     markDirty(false);
     dropDraft();
     status("saved plan + spec");
-  } catch (e) { status(`save failed: ${e.message}`, true); alert(`Save failed:\n${e.message}`); }
+    return true;
+  } catch (e) {
+    status(`save failed: ${e.message}`, true);
+    alert(`Save failed:\n${e.message}`);
+    return false;
+  }
 }
 
 async function split() {
-  if (S.dirty && !confirm("You have unsaved changes. Cut using the last saved plan?")) return;
+  // The cutter reads the plan from disk, so an unsaved edit is not in it. This
+  // used to ask whether to cut from the last saved copy instead, which is a
+  // question with one sensible answer and a dozen chances to press the wrong
+  // one - three nudged boundaries and an absent-minded OK cut the old ones.
+  if (S.dirty && !(await save())) return;
   $("#split").disabled = true;
   status("cutting…", true);
   try {
     const r = await runJob(S.slug, `/api/split/${S.slug}`, {}, "cutting");
-    logline(r.stdout || r.stderr);
-    status(r.ok ? "split complete" : "split failed");
+    const bad = r.unreadable || [];
+    status(`${r.tracks} tracks cut` + (bad.length ? ` - ${bad.length} unreadable` : ""),
+           bad.length > 0);
+    // Named rather than counted: a track that will not decode is one to cut
+    // again, and knowing which costs nothing to report.
+    if (bad.length) logline(`these did not read back: ${bad.join(", ")}`, true);
     loadReview();
     renderPipeline();
-  } catch (e) { status(`split failed: ${e.message}`, true); logline(e.message, true); }
+  } catch (e) { status(`cut failed: ${e.message}`, true); logline(e.message, true); }
   $("#split").disabled = false;
 }
 
@@ -1851,6 +1864,7 @@ function wire() {
                              // First pass, so the Archive gate went on querying
                              // an id that no longer described the album.
                              S.meta.mbid = r.id;
+    markDirty();          // buildDoc sends this, so picking a release is an edit
                              offerRelabel(r);
                            }, { requireDurations: false });
     } catch (e) { $("#imp-err").textContent = e.message; }
@@ -1974,12 +1988,12 @@ function wire() {
       const r = await runJob(S.slug, `/api/align/${S.slug}`, {}, "aligning");
       for (const a of r.aligned) {
         S.bySide[a.side] = a.tracks.map((t) => ({ ...t }));
-        logline(`side ${a.side}: r=${a.r}, offset ${a.offset > 0 ? "+" : ""}${a.offset}s, `
-          + `drift ${a.drift_ms_per_min} ms/min — ${a.tracks.length} boundaries moved`);
+        logline(`side ${a.side}: offset ${a.offset > 0 ? "+" : ""}${a.offset}s, `
+          + `drift ${a.drift_ms_per_min} ms/min, worst check ${a.check_miss}s `
+          + `— ${a.tracks.length} boundaries moved`);
       }
       for (const p of r.problems) logline(`side ${p.side}: ${p.why}`);
       // the audio genuinely changed, so nobody has listened to these yet
-      S.earPassOverride = "aligned from archive (not yet heard)";
       markDirty();
       renderTracks();
       ed.setTracks(tracks());

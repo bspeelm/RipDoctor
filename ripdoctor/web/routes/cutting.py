@@ -66,6 +66,12 @@ def add(app: App, service: Service) -> None:
 
         def work(job: Job) -> dict[str, Any]:
             dest.mkdir(parents=True, exist_ok=True)
+            # Cuts are named from the track number and title, so re-cutting
+            # after a retitle leaves the old files beside the new ones. The
+            # importer reads whatever is left in review as proof it refused,
+            # which turns the next good import into a reported failure.
+            for stale in dest.glob("*.flac"):
+                stale.unlink()
             cuts = plan_cuts(plan, str(source), str(dest))
             job.total = len(cuts)
             bad = []
