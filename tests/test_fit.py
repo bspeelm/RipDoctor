@@ -337,3 +337,31 @@ def test_a_side_that_cannot_hold_its_tracks_says_so_in_words() -> None:
     said = str(caught.value)
     assert "side a" in said and "3 tracks" in said
     assert "another release" in said and "by ear" in said
+
+
+def test_a_gap_too_far_from_the_prediction_is_not_this_boundary() -> None:
+    """A boundary the detector never found - a fade, an intro running straight
+    in - has no gap near it, and the nearest one is the next boundary. Taking it
+    swallows a whole track: one record lost two to a 69-second intro."""
+    # Three 60s tracks with gaps, but the catalogue says the first is 10s long.
+    env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
+    near = FIT._pick_gap(gapset, want=20.0, after=10.0, reach=5.0)
+    assert near is None, "a gap 50s from a 10s track is a neighbour's"
+    assert FIT._pick_gap(gapset, want=20.0, after=10.0) is not None
+
+
+def test_a_gap_containing_the_prediction_always_wins() -> None:
+    """Reach only decides between gaps that do not contain it."""
+    env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
+    inside = FIT._pick_gap(gapset, want=71.0, after=10.0, reach=0.0)
+    assert inside is not None and inside.lo <= 71.0 <= inside.hi
+
+
+def test_a_track_with_no_gap_near_it_falls_back_to_the_catalogue() -> None:
+    """Which is what the fallback was always for, and never reached while the
+    nearest gap anywhere on the side counted as near."""
+    env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
+    side = spec_side(n=3, cat=10.0, start=10.0, end=208.0)
+    fitted = fit_side(side, env, gapset, duration=208.0)
+    assert fitted[0].reason == "no gap"
+    assert fitted[0].track.end == 20.0

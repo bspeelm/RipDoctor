@@ -16,6 +16,11 @@ MIN_SEPARATION = 0.2
 # began in is its own best match and every track collapses.
 MIN_ADVANCE = 1.0
 
+# How far from its predicted place a gap may be and still be taken for this
+# track's boundary, as a fraction of the track's catalogue length. Beyond half
+# a track, the nearest gap is a neighbour's rather than a late one of ours.
+REACH = 0.5
+
 
 class OutOfSide(ValueError):
     """The tracks a side was given need more of it than the side has.
@@ -59,17 +64,33 @@ class Fitted:
         return self.reason == "ear"
 
 
-def _pick_gap(gapset: GapSet, want: float, after: float) -> Gap | None:
-    """The gap nearest the prediction; one containing it wins outright."""
+def _pick_gap(
+    gapset: GapSet, want: float, after: float, reach: float | None = None
+) -> Gap | None:
+    """The gap nearest the prediction; one containing it wins outright.
+
+    Nearest is not enough on its own. A boundary the detector never found -
+    a fade between two tracks, an intro that runs straight in - has no gap near
+    it, and the nearest one is then the *next* boundary, tens or hundreds of
+    seconds away. Taking it swallows a whole track and displaces every track
+    after it. One record lost two that way from a single 69-second intro.
+
+    So a gap has to be within reach of the prediction to count. Beyond that
+    the catalogue is the better answer, which is what the caller falls back to.
+    """
     candidates = [g for g in gapset.gaps if g.hi > after + MIN_ADVANCE]
     if not candidates:
         return None
-    return min(
+    nearest = min(
         candidates,
         key=lambda g: (
             0.0 if g.lo <= want <= g.hi else min(abs(want - g.lo), abs(want - g.hi))
         ),
     )
+    if reach is None or nearest.lo <= want <= nearest.hi:
+        return nearest
+    away = min(abs(want - nearest.lo), abs(want - nearest.hi))
+    return nearest if away <= reach else None
 
 
 def _share_gap(
@@ -128,7 +149,9 @@ def fit_side(
 
         else:
             want = cur + track.cat
-            gap = _pick_gap(gapset, want, cur)
+            # Half a track is the reach: a gap further from the prediction than
+            # that is not this track's boundary, it is a neighbour's.
+            gap = _pick_gap(gapset, want, cur, reach=track.cat * REACH)
             if gap is None:
                 end = nxt = min(want, duration)
                 reason = "no gap"
