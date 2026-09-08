@@ -22,7 +22,7 @@ from ripdoctor.config.thresholds import Thresholds
 from ripdoctor.core import autostop as A
 from ripdoctor.core import measure as MEASURE
 from ripdoctor.core.envelope import Envelope, decode
-from ripdoctor.core.fit import fit_plan, report
+from ripdoctor.core.fit import OutOfSide, fit_plan, report
 from ripdoctor.core.meter import Levels, Verdict
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
@@ -397,7 +397,11 @@ def cmd_fit(ctx: Context, args: argparse.Namespace) -> int:
         if args.lane == "band"
         else {"below": ctx.thresholds.gap_below}
     )
-    plan, working = fit_plan(spec, lanes, **anchor)
+    try:
+        plan, working = fit_plan(spec, lanes, **anchor)
+    except OutOfSide as e:
+        print(f"\nrefusing to write this plan: {e}", file=sys.stderr)
+        return 1
     for letter, fitted in working.items():
         print(f"=== side {letter}")
         print(report(fitted))

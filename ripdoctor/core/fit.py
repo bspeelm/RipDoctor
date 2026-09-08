@@ -16,6 +16,27 @@ MIN_SEPARATION = 0.2
 # began in is its own best match and every track collapses.
 MIN_ADVANCE = 1.0
 
+
+class OutOfSide(ValueError):
+    """The tracks a side was given need more of it than the side has.
+
+    Reported rather than absorbed. Scaling the catalogue to fit would hide the
+    disagreement this exists to surface, and it moves boundaries on records
+    where the two already agree.
+    """
+
+    def __init__(self, side: SpecSide, reached: float) -> None:
+        want = sum(t.cat for t in side.tracks)
+        span = side.end - side.start
+        super().__init__(
+            f"side {side.letter}: the {len(side.tracks)} tracks the catalogue "
+            f"puts here run {want:.0f}s against {span:.0f}s of music, and the "
+            f"last one would start at {reached:.0f}s with the side ending at "
+            f"{side.end:.0f}s. The release's durations do not match this "
+            f"pressing - try another release, or place this side by ear."
+        )
+
+
 # Beyond this the disagreement with the catalogue is worth flagging, not just
 # recording.
 OUTLIER = 15.0
@@ -170,6 +191,12 @@ def fit_plan(
             lead=spec.lead,
             tail=spec.tail,
         )
+        # Checked here rather than inside the fit, which stays faithful to the
+        # numbers the reference produced. A track that would start after its
+        # side ends is the one shape those numbers cannot be cut from.
+        bad = next((f for f in fitted if f.track.end <= f.track.start), None)
+        if bad is not None:
+            raise OutOfSide(side, bad.track.start)
         working[side.letter] = fitted
         sides.append(to_side(side.letter, fitted))
     plan = Plan(

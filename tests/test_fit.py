@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from ripdoctor.core import fit as FIT
 from ripdoctor.core import gaps as G
 from ripdoctor.core import plan as P
 from ripdoctor.core.envelope import Envelope
@@ -321,3 +322,18 @@ def test_fitted_is_a_value_that_explains_itself() -> None:
         reason="ear",
     )
     assert f.from_ear and not f.is_outlier and f.track.delta == 0.0
+
+
+def test_a_side_that_cannot_hold_its_tracks_says_so_in_words() -> None:
+    """`end 1164.65 is not after start 1180.00` is arithmetic, and true, and
+    tells nobody what to do. The catalogue being a different master from the
+    pressing is the actual finding, and it is one a person can act on."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    # Three tracks the catalogue says are far longer than the side holds.
+    side = spec_side(n=3, cat=200.0, start=10.0, end=200.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert "side a" in said and "3 tracks" in said
+    assert "another release" in said and "by ear" in said
