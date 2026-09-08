@@ -154,7 +154,7 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
     yield Result("importer", Level.OK, f"importing with {settings.importer}")
     if settings.importer == "beets":
         yield from _agree(settings, runner)
-        yield from _plugins(runner)
+        yield from _plugins(settings, runner)
 
 
 # What beets is wanted for beyond filing. Absent, an import still files the
@@ -166,15 +166,28 @@ WANTED = {
 }
 
 
-def _plugins(runner: Runner) -> Iterator[Result]:
-    """Which plugins beets will actually run. ADR-042."""
+def _plugins(settings: Settings, runner: Runner) -> Iterator[Result]:
+    """Which plugins beets will actually run, and how to get the rest. ADR-042."""
+    beets = Beets()
     try:
-        loaded = Beets().plugins(runner)
+        loaded = beets.plugins(runner)
+        missing = [p for p in WANTED if p not in loaded]
+        if not missing:
+            yield Result("beets plugins", Level.OK, f"beets runs {', '.join(loaded)}")
+            return
+        where = beets.config_file(runner)
     except (ToolMissing, ToolFailed):
         return
-    missing = [p for p in WANTED if p not in loaded]
-    if not missing:
-        yield Result("beets plugins", Level.OK, f"beets runs {', '.join(loaded)}")
+
+    starter = _starter(settings.library or "/path/to/music", missing)
+    if where and not Path(where).is_file():
+        yield Result(
+            "beets config",
+            Level.WARN,
+            f"beets has no configuration file, so it runs with no plugins and "
+            f"files records into its own default rather than {settings.library}",
+            fix=f"write {where} with:\n{starter}",
+        )
         return
     yield Result(
         "beets plugins",
@@ -183,9 +196,34 @@ def _plugins(runner: Runner) -> Iterator[Result]:
         + (", ".join(loaded) if loaded else "no plugins")
         + " - "
         + "; ".join(WANTED[p] for p in missing),
-        fix="add them to beets' own config (`beet config -p` says where), or "
-        "point BEETSDIR at the configuration the rest of this machine uses",
+        fix=f"add to {where or _OWN}:\n" + _indent(f"plugins: {' '.join(missing)}"),
     )
+
+
+_OWN = "beets' own config"
+
+
+def _starter(library: str, missing: list[str]) -> str:
+    """The smallest beets configuration that does what this needs of it."""
+    return _indent(
+        f"directory: {library}\n"
+        f"plugins: {' '.join(missing)}\n"
+        "import:\n"
+        "  move: yes\n"
+        "fetchart:\n"
+        "  auto: yes\n"
+        "  minwidth: 500\n"
+        "embedart:\n"
+        "  auto: yes\n"
+        "replaygain:\n"
+        "  backend: ffmpeg\n"
+        "  auto: yes\n"
+        "  albums: yes"
+    )
+
+
+def _indent(text: str) -> str:
+    return "\n".join("      " + line for line in text.splitlines())
 
 
 def _agree(settings: Settings, runner: Runner) -> Iterator[Result]:

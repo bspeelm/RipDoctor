@@ -160,6 +160,12 @@ class Beets:
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
 
+    def config_file(self, runner: Runner) -> str:
+        """The file beets reads, whether or not anything has written one."""
+        result = runner.run(self._argv(["config", "-p"]), timeout=60)
+        lines = (result.text + result.err).strip().splitlines()
+        return lines[-1].strip() if lines else ""
+
     def plugins(self, runner: Runner) -> tuple[str, ...]:
         """Which plugins beets loaded - not which it was told to. A plugin
         whose own dependency is missing is configured and absent."""

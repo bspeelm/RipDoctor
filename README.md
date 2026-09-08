@@ -35,12 +35,44 @@ You also need `ffmpeg`, `ffprobe`, `flac` and `metaflac` on the system, plus
 `arecord` to record. Run `ripdoctor doctor` and it will tell you which are
 missing and what to install for each.
 
-RipDoctor uses whatever beets configuration it finds, through `BEETSDIR` or
-beets' default location. **Point it at the configuration the rest of the machine
-uses.** beets with no configuration has no plugins, which means no cover art and
-no ReplayGain, filed into a library database nothing else reads. `ripdoctor
-doctor` reports which plugins beets will run and whether it files records where
-you expect.
+### Configuring beets
+
+RipDoctor does not tag or file anything itself - it hands finished tracks to
+beets, which matches them against MusicBrainz, writes the tags, fetches cover
+art, computes ReplayGain and decides the path each file goes to.
+
+**beets needs its own configuration, and a fresh install has none.** Without one
+it runs with no plugins: no cover art, no ReplayGain, and files go to `~/Music`
+rather than your library. The import still appears to work, which is what makes
+this worth saying twice.
+
+`beet config -p` prints where beets expects its file. Create it with at least:
+
+```yaml
+directory: /srv/music          # where finished albums go
+plugins: fetchart embedart replaygain
+
+import:
+  move: yes                    # move out of review/ rather than copying
+
+fetchart:
+  auto: yes
+  minwidth: 500
+embedart:
+  auto: yes
+replaygain:
+  backend: ffmpeg
+  auto: yes
+  albums: yes                  # album mode - vinyl is mastered as a side
+```
+
+`directory` must match the `library` setting in RipDoctor's own config; they are
+two names for the same place and nothing else keeps them in step. `ripdoctor
+doctor` reports when they disagree, which plugins beets will actually load, and
+prints a starter config if there is none.
+
+If you already have a beets setup, point RipDoctor at it with `BEETSDIR` rather
+than writing a second one.
 
 ## Getting started
 
@@ -62,11 +94,38 @@ ripdoctor probe       # record 20 seconds and say what arrived
 This tells music from silence from an empty input, so a wrong input costs twenty
 seconds rather than a whole side.
 
-Start the interface and open it in a browser:
+Then start the interface:
 
 ```
 ripdoctor serve
 ```
+
+On first run it generates a login and prints it:
+
+```
+  first run - a login was generated
+    user:     ripdoctor
+    password: <shown once>
+  Store it now; it is not recoverable.
+```
+
+The password is hashed on the way to disk, so that is the only time you see it.
+`--user` sets a different name on first run.
+
+By default it listens on `127.0.0.1:8080` - that machine only. To reach it from
+a laptop, set the address and port in RipDoctor's config file:
+
+```toml
+bind = "0.0.0.0"
+port = 8084
+```
+
+or pass `--bind` and `--port` to try it once. Then open
+`http://<the machine>:8084`.
+
+It asks for a login whichever way it is bound: it can write to your pool and run
+ffmpeg, so the password is the thing that makes it safe to be reachable at all.
+There is no TLS - put it behind a reverse proxy if it leaves your own network.
 
 From there, one record goes like this:
 
@@ -98,9 +157,12 @@ detection threshold on it. Ghost markers show where the catalogue says each cut
 should fall; the distance between a ghost and a real marker is how far the two
 disagree.
 
-The server binds to loopback unless told otherwise and asks for a login either
-way. [`packaging/ripdoctor.service`](packaging/ripdoctor.service) runs it as a
-systemd service - the paths in it are examples.
+To keep it running across reboots, install it as a service.
+[`packaging/ripdoctor.service`](packaging/ripdoctor.service) is a systemd unit
+to copy and edit - the paths in it are examples, and the comments say what each
+one is for. Set `BEETSDIR` in it if beets keeps its configuration somewhere
+other than the default; a variable exported in your shell is not inherited by a
+service, which is an easy way to end up with no plugins.
 
 ## Why 1-3 kHz
 
