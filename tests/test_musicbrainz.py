@@ -279,3 +279,31 @@ def test_a_dated_entry_is_asked_about_before_an_undated_one() -> None:
 
 def test_asking_about_fewer_than_there_are_is_fine() -> None:
     assert len(MB.likely([a_release()])) == 1
+
+
+def test_a_release_fetched_from_an_id_alone_comes_back_named() -> None:
+    """A first pass has nothing but an id to start from. A release that came
+    back with no name gave the record it was fitting no name either, and every
+    path built from one - the library directory, the beets query, the artwork -
+    then took the blank."""
+    body = json.dumps(
+        {
+            "title": "An Album",
+            "date": "2015-01-01",
+            "artist-credit": [{"name": "A Band"}],
+            "media": [{"format": '12" Vinyl', "tracks": []}],
+        }
+    ).encode()
+    bare = MB.Release("id", "", "", "", "", [])
+    got = MB.fetch_tracks(FakeFetcher(replies=[body]), bare)
+    assert (got.title, got.artist, got.date) == ("An Album", "A Band", "2015-01-01")
+
+
+def test_what_is_already_known_is_not_overwritten() -> None:
+    """A search answered these; a lookup must not replace them with its own."""
+    body = json.dumps(
+        {"title": "Catalogue", "date": "1999", "artist-credit": [{"name": "Other"}]}
+    ).encode()
+    known = MB.Release("id", "Mine", "Me", "2020", "CD", [])
+    got = MB.fetch_tracks(FakeFetcher(replies=[body]), known)
+    assert (got.title, got.artist, got.date) == ("Mine", "Me", "2020")

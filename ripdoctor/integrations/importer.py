@@ -247,6 +247,11 @@ class Beets:
         have chosen would be checking the wrong directory on every install that
         configured beets differently, which is all of them.
         """
+        # An empty name is not a query, it is every record in the library:
+        # `beet ls album:` matches them all, and the gate then reports a record
+        # that has nothing to do with the one being imported.
+        if not mbid and not album:
+            return None, 0
         query = [f"mb_albumid:{mbid}"] if mbid else [f"album:{album}"]
         try:
             result = runner.run(

@@ -732,6 +732,11 @@ function openImport() {
   $("#imp-album").value = S.meta.album || g.album;
   $("#imp-replace").checked = false;
   $("#imp-go").disabled = false;
+  // Hidden until this record has been asked about. Left showing, it was the
+  // previous record's answer - naming another album's directory as the one
+  // about to be written into - and it stayed if the question failed.
+  $("#imp-replace-wrap").hidden = true;
+  $("#imp-replace-what").textContent = "";
   $("#impdlg").showModal();
   checkExisting();
 }
@@ -1039,7 +1044,11 @@ async function checkExisting() {
   try {
     const { existing } = await api(`/api/library/existing/${S.slug}`);
     showReplaceOffer(existing, { keepTick: true });
-  } catch { /* the import itself still refuses; this is only the early warning */ }
+  } catch {
+    // The import itself still refuses, so this is only the early warning - but
+    // a warning that could not be checked must not read as one that was.
+    showReplaceOffer(null, { keepTick: true });
+  }
 }
 
 let ripAlbums = [];

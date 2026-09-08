@@ -273,3 +273,16 @@ def test_choosing_beets_without_somewhere_to_write_still_works() -> None:
     """The command line has no state directory in every context."""
     chosen = I.choose(FakeRunner(installed={"beet"}), "beets")
     assert chosen.name == "beets"
+
+
+def test_a_record_with_no_name_is_not_every_record_in_the_library(
+    tmp_path: Path,
+) -> None:
+    """`beet ls album:` matches them all, so the gate reported a record that
+    had nothing to do with the one being imported - naming another album's
+    directory as the one about to be written into."""
+    beets = I.Beets.with_override(tmp_path)
+    fake = beets_runner()
+    assert beets.locate(fake, "/music", "", "") == (None, 0)
+    with pytest.raises(AssertionError):
+        fake.argv_for("ls")  # beets was never asked
