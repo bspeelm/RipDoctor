@@ -242,8 +242,12 @@ def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
     start from, and a release that came back with no name gave the record it
     was fitting no name either - which every path built from one then took.
     """
+    # artist-credits as well as recordings: without it the answer carries no
+    # artist at all, and a release fetched from an id came back half-named.
     data = _request(
-        fetcher, f"{BASE}/release/{release.mbid}?inc=recordings&fmt=json", **kw
+        fetcher,
+        f"{BASE}/release/{release.mbid}?inc=recordings+artist-credits&fmt=json",
+        **kw,
     )
     release.tracks = _tracks(data.get("media") or [])
     if not release.format:

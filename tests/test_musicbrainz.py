@@ -295,8 +295,11 @@ def test_a_release_fetched_from_an_id_alone_comes_back_named() -> None:
         }
     ).encode()
     bare = MB.Release("id", "", "", "", "", [])
-    got = MB.fetch_tracks(FakeFetcher(replies=[body]), bare)
+    fetcher = FakeFetcher(replies=[body])
+    got = MB.fetch_tracks(fetcher, bare)
     assert (got.title, got.artist, got.date) == ("An Album", "A Band", "2015-01-01")
+    # Asked for explicitly: without it the answer carries no artist at all.
+    assert "artist-credits" in fetcher.calls[0][0]
 
 
 def test_what_is_already_known_is_not_overwritten() -> None:
