@@ -1745,28 +1745,26 @@ async function ripStart() {
 // one just made was still on disk, so a completed rip was offered back as
 // wreckage to salvage.
 async function whenCaptureSettles(limit = 600) {
-  settling = true;
   const state = $("#rip-state");
-  try {
-    for (let i = 0; i < limit; i++) {
-      const st = await api("/api/rip/status");
-      if (!st.running && st.stage !== "encoding") return st;
-      // Named rather than "encoding…", because a side takes most of a minute
-      // and a person who has just pressed Stop wants to know it was heard.
-      state.className = "dim working";
-      state.textContent = st.stage === "encoding"
-        ? `encoding side ${st.side} — a full side takes about a minute`
-        : "stopping the capture…";
-      await new Promise((r) => setTimeout(r, 800));
-    }
-    throw new Error("the capture is taking longer than expected to finish");
-  } finally {
-    settling = false;
-    state.className = "dim";
+  for (let i = 0; i < limit; i++) {
+    const st = await api("/api/rip/status");
+    if (!st.running && st.stage !== "encoding") return st;
+    // Named rather than "encoding…", because a side takes most of a minute
+    // and a person who has just pressed Stop wants to know it was heard.
+    state.className = "dim working";
+    state.textContent = st.stage === "encoding"
+      ? `encoding side ${st.side} — a full side takes about a minute`
+      : "stopping the capture…";
+    await new Promise((r) => setTimeout(r, 800));
   }
+  throw new Error("the capture is taking longer than expected to finish");
 }
 
 async function ripStop() {
+  // Claimed before anything is awaited. Claiming it when the wait began left
+  // the meter poll a round trip to write the recording line back over the
+  // answer to a button somebody had already pressed.
+  settling = true;
   $("#rip-err").textContent = "";
   $("#rip-state").className = "dim working";
   $("#rip-state").textContent = "stopping the capture…";
