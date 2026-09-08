@@ -6,12 +6,13 @@
 // two states are 27 dB apart. So the band bar is drawn bigger and the zones are
 // labelled with what they mean physically.
 
-// Measured on the Waxwing optical chain 2026-08-26: stylus UP reads -75 dB full
-// band, because the ADC now sits after the phono gain and carries its noise -
-// the old PCM2900C line-level floor was -89. The needle-up boundary was -80, so
-// the meter called "stylus in the air" a groove. Only this edge is moved: the
-// groove and quiet-music edges below still want a real measurement on this
-// chain and are left as inherited values rather than guesses.
+// Re-measured 2026-08-26 on a chain whose converter sits after the phono gain
+// rather than at line level: stylus UP reads -75 dB full band, because the
+// converter now carries that gain's noise. The same edge measured -89 on the
+// line-level chain these numbers were inherited from. The needle-up boundary
+// was -80, so the meter called "stylus in the air" a groove. Only this edge is
+// moved: the groove and quiet-music edges below still want a real measurement
+// and are left as inherited values rather than guesses.
 const ZONES = [
   { lo: -120, hi: -68, label: "dead air / needle up", color: "#2a2e35" },
   { lo: -68, hi: -60, label: "groove", color: "#2f4a3a" },
