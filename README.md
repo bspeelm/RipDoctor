@@ -25,6 +25,10 @@ vertical markers.](docs/images/cut_panel.png)
 You drive it from a web page on the machine that holds the library, or from the
 command line.
 
+**[The wiki](https://github.com/bspeelm/RipDoctor/wiki) is the manual** —
+installing it, configuring the capture device and the library, and each step of
+a record from the needle drop to the archive.
+
 ## Install
 
 ```
@@ -83,7 +87,8 @@ ripdoctor config      # check where audio and the library live
 ```
 
 Set the pool and library directories, the capture device, rate and format in
-your config file - `ripdoctor config` prints the path.
+your config file. `ripdoctor config` prints every resolved setting and
+`ripdoctor doctor` prints the path of the file they came from.
 
 Then, before you commit twenty minutes to a side:
 
@@ -243,7 +248,9 @@ subprocess, no filesystem, no clock - so the whole algorithm is testable without
 ffmpeg, a sound card or any audio files. `tests/test_architecture.py` enforces
 that boundary.
 
-[docs/decisions.md](docs/decisions.md) records what was decided and why.
+[docs/decisions.md](docs/decisions.md) records what was decided and why. The
+[wiki](https://github.com/bspeelm/RipDoctor/wiki) covers using it rather than
+building it.
 
 On Python 3.14 the suite is occasionally unreliable through no fault of its own
 (see ADR-019). A failure whose error is impossible - an unknown opcode, a
