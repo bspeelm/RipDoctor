@@ -38,6 +38,10 @@ const S = {
 };
 
 let ed, player, ripTimer;
+// True while a stop is being waited out. The readout has one owner then: the
+// meter poll and the wait were both writing it on different intervals, so it
+// alternated between what each of them thought was happening.
+let settling = false;
 
 // ------------------------------------------------------------------ status
 
@@ -1409,7 +1413,11 @@ function startRipPoll() {
         auto.textContent = `monitoring input — full ${st.levels.full} dB · `
                          + `1–3 kHz ${st.levels.band} dB`;
       } else { auto.textContent = ""; auto.className = "dim"; }
-      $("#rip-elapsed").textContent = on ? fmt(st.elapsed) : "0:00.00";
+      // While a stop is being waited out, the readout belongs to whoever is
+      // waiting. Two writers on different intervals made it alternate between
+      // "recording - N MB" and "stopping...", and the elapsed time snapped to
+      // zero halfway through an encode that had not finished.
+      if (!settling) $("#rip-elapsed").textContent = on ? fmt(st.elapsed) : "0:00.00";
       // Overruns are dropped samples - a permanent click in the archive. This
       // is the difference between "the monitor stuttered" (harmless, it reads
       // the file) and "the capture dropped audio" (redo the side).
@@ -1421,10 +1429,12 @@ function startRipPoll() {
       } else if (on) {
         $("#rip-done").className = "dim";
       }
-      $("#rip-state").textContent = on
-        ? `recording ${st.slug} side ${st.side} — ${(st.bytes / 1e6).toFixed(0)} MB`
-          + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
-        : (st.stage === "encoding" ? "encoding…" : "idle");
+      if (!settling) {
+        $("#rip-state").textContent = on
+          ? `recording ${st.slug} side ${st.side} — ${(st.bytes / 1e6).toFixed(0)} MB`
+            + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
+          : (st.stage === "encoding" ? "encoding…" : "idle");
+      }
       // levels arrive while merely listening too, not only while recording
       drawMeter($("#meter"), st.levels || null);
     } catch {}
@@ -1735,18 +1745,31 @@ async function ripStart() {
 // one just made was still on disk, so a completed rip was offered back as
 // wreckage to salvage.
 async function whenCaptureSettles(limit = 600) {
-  for (let i = 0; i < limit; i++) {
-    const st = await api("/api/rip/status");
-    if (!st.running && st.stage !== "encoding") return st;
-    $("#rip-state").textContent = st.stage === "encoding" ? "encoding…" : "stopping…";
-    await new Promise((r) => setTimeout(r, 800));
+  settling = true;
+  const state = $("#rip-state");
+  try {
+    for (let i = 0; i < limit; i++) {
+      const st = await api("/api/rip/status");
+      if (!st.running && st.stage !== "encoding") return st;
+      // Named rather than "encoding…", because a side takes most of a minute
+      // and a person who has just pressed Stop wants to know it was heard.
+      state.className = "dim working";
+      state.textContent = st.stage === "encoding"
+        ? `encoding side ${st.side} — a full side takes about a minute`
+        : "stopping the capture…";
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    throw new Error("the capture is taking longer than expected to finish");
+  } finally {
+    settling = false;
+    state.className = "dim";
   }
-  throw new Error("the capture is taking longer than expected to finish");
 }
 
 async function ripStop() {
   $("#rip-err").textContent = "";
-  $("#rip-state").textContent = "encoding…";
+  $("#rip-state").className = "dim working";
+  $("#rip-state").textContent = "stopping the capture…";
   $("#rip-stop").disabled = true;
   try {
     await postJSON("/api/rip/stop", {});
@@ -1768,7 +1791,17 @@ async function ripStop() {
     // is on disk rather than by bumping the letter in the box
     await refreshAlbums(r.slug);
     await loadOrphans();
-  } catch (e) { $("#rip-err").textContent = e.message; }
+  } catch (e) {
+    $("#rip-err").textContent = e.message;
+  } finally {
+    // A stop that failed before the wait began would otherwise leave the
+    // sweep running over a capture nothing is doing anything about.
+    // The button belongs to the meter poll, which re-enables it when
+    // something is recording; another writer here is read elsewhere as
+    // "a capture is running" and would be lying.
+    settling = false;
+    $("#rip-state").className = "dim";
+  }
 }
 
 // ------------------------------------------------------------------- boot
