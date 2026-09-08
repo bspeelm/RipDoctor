@@ -253,9 +253,8 @@ def test_a_capture_is_judged_from_both_lanes() -> None:
 
 
 def test_the_format_is_read_from_the_header_not_assumed(tmp_path: Path) -> None:
-    """The chain stopped being 48 kHz/16-bit when it became a Waxwing into a
-    UR23. A capture metered at the wrong rate measures 2-6 kHz and calls it
-    1-3."""
+    """A chain is not permanently whatever it was when this was written. A
+    capture metered at the wrong rate measures 2-6 kHz and calls it 1-3."""
     wav = tmp_path / "a.wav"
     wav.write_bytes(tape.header(rate=96000, channels=2, bits=24))
     fmt = C.wav_format(wav, C.Format(rate=48000, sample_format="S16_LE"))

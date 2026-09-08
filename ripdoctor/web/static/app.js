@@ -1360,9 +1360,9 @@ function fillRates(info) {
 
 const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
 
-// Default to the WIDEST the device offers, not the narrowest. The Waxwing sends
-// 24-bit and capturing it as 16 throws the low 8 bits away, which is most of
-// the reason for the optical path in the first place.
+// Default to the WIDEST the device offers, not the narrowest. Capturing a
+// 24-bit source as 16 throws the low eight bits away, silently - which is most
+// of the reason for having a wider path in the first place.
 function fillFormats(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-format");
@@ -1428,8 +1428,8 @@ function startRipPoll() {
       $("#rip-abandon").disabled = !on;
       // one device, one capture: Record punch has to follow the same gate
       if (punchState) $("#punch-go").disabled = on || !!currentPunchTrack()?.punch;
-      // Listen works idle too now - it is the only way to hear the record at
-      // all since the Waxwing went digital and its RCA jacks went quiet.
+      // Listen works idle too: a digital-only chain has no analogue monitoring
+      // path, so this is the only way to hear the record at all.
       $("#rip-listen").disabled = false;
       // A capture ending kills the WAV-tail stream, so drop the player; the
       // human can hit Listen again and get the idle passthrough instead.
