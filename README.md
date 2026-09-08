@@ -90,7 +90,11 @@ else comes with it.
 
 beets keeps its own configuration, and RipDoctor uses whatever it finds -
 `BEETSDIR` and the default location are beets' own, and a service that sets one
-passes it down like any other environment variable. The single thing RipDoctor
+passes it down like any other environment variable. Point it at the
+configuration the rest of the machine uses: beets with no configuration is
+beets with no plugins, which means no cover art and no ReplayGain, filing into
+a library database nothing else reads. `ripdoctor doctor` reports when beets
+would file a record somewhere other than the configured library. The single thing RipDoctor
 adds is a layer that turns the import prompt back on, because under `quiet: yes`
 beets never asks: it applies anything above the match threshold and skips
 anything below it without a word, and there is then no such thing as a preview.
@@ -139,7 +143,9 @@ is refused with the reason, rather than written as an empty or duplicated file.
 ## The web interface
 
 `ripdoctor serve` is the same pipeline with a waveform in front of it, on the
-machine that holds the library. It binds to loopback unless told otherwise, and
+machine that holds the library. [`packaging/ripdoctor.service`](packaging/ripdoctor.service)
+runs it as a service; the paths in it are examples and the comments say what
+each one is for. It binds to loopback unless told otherwise, and
 asks for a login either way: it can write to the pool and run ffmpeg, so a
 password is the compensating control for being reachable at all.
 

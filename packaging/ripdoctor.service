@@ -1,0 +1,65 @@
+# RipDoctor as a service.
+#
+# On the host rather than in a container, because the whole job is to drive host
+# binaries against host paths: arecord for the sound card, ffmpeg and flac for
+# the audio, beet for the library. A container isolates a process from exactly
+# those things. The sandboxing below is a volume list expressed as
+# ReadWritePaths, which gets the same containment without hiding the tools.
+#
+# Every path here is an example. Change them, and change nothing else.
+
+[Unit]
+Description=RipDoctor - vinyl rip and cut tool
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/pool
+
+[Service]
+Type=simple
+# A service account that owns the pool, and the audio group, without which the
+# capture device is not readable.
+User=ripdoctor
+Group=ripdoctor
+SupplementaryGroups=audio
+
+# beets keeps its own configuration and this uses whatever it finds. Point this
+# at the one the rest of the machine uses; without it beets runs on defaults,
+# which means no cover art, no ReplayGain and a different library database from
+# the one everything else writes to. `ripdoctor doctor` reports the mismatch.
+Environment=BEETSDIR=/var/lib/beets
+Environment=XDG_CONFIG_HOME=/opt/ripdoctor/config
+Environment=RIPDOCTOR_DIR=/opt/ripdoctor/state
+Environment=PYTHONUNBUFFERED=1
+# A pool shared with other tools is usually setgid and expects 0664/2775.
+# systemd's default 0022 writes group-readable but not group-writable files,
+# which is how a pool ends up with mixed modes nothing can fix in place.
+UMask=0002
+
+WorkingDirectory=/opt/ripdoctor
+ExecStart=/opt/ripdoctor/venv/bin/ripdoctor serve
+Restart=always
+RestartSec=5
+
+# MemoryHigh throttles under pressure; MemoryMax only kills - and a kill takes
+# the capture with it, because arecord is a child of this unit.
+MemoryHigh=1G
+MemoryMax=4G
+CPUQuota=400%
+TasksMax=256
+
+ProtectSystem=strict
+ReadWritePaths=/srv/pool/inbox/vinyl /srv/pool/media/music /opt/ripdoctor/config /opt/ripdoctor/state /var/lib/beets
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+# NOT PrivateDevices - that would hide the capture device.
+DeviceAllow=char-alsa rw
+
+[Install]
+WantedBy=multi-user.target
