@@ -228,6 +228,10 @@ class Beets:
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
+        if not mbid:
+            # Nothing to match against, and a cut file carries no tags at
+            # all. The plan is what is known, so it is written first. ADR-049.
+            T.write_plan_tags(runner, plan, review)
         result = runner.run(
             self._argv(self._import(review, mbid)), stdin=_ACCEPT, timeout=3600
         )

@@ -167,6 +167,19 @@ def locate(library: str, artist: str, album: str) -> tuple[Path | None, int]:
     return where, len([p for p in where.iterdir() if p.suffix.lower() == ".flac"])
 
 
+def write_plan_tags(runner: Runner, plan: Plan, review: str) -> int:
+    """Tag the cut tracks where they are, for an import that consults no
+    catalogue. Returns how many were tagged. ADR-049."""
+    total = sum(len(s.tracks) for s in plan.sides)
+    tagged = 0
+    for p in placements(plan, review, ""):
+        if not p.source.is_file():
+            continue
+        write_tags(runner, str(p.source), tags_for(plan, p.track, total))
+        tagged += 1
+    return tagged
+
+
 def apply(
     runner: Runner,
     plan: Plan,

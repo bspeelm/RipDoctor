@@ -1536,3 +1536,35 @@ The claim that it previews first is gone. `Importer.preview` exists on both
 importers and has never had a caller; the honest description is that the release
 below is what it will match against, and the transcript afterwards says what it
 did.
+
+## ADR-049 — a record the catalogue does not have is tagged from the plan
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+Some records are not in MusicBrainz: a private pressing, a demo, a compilation
+somebody made. The importer already had a path for them - with no release to
+pin, beets is run with autotag off - but it was not a usable one. Freshly cut
+tracks carry no tags at all, so beets took files whose only description was
+their filenames, and filed them under nothing.
+
+The only way through was to change `importer` to the built-in tagger in the
+configuration file. That is a global switch for a per-record fact, and it turns
+beets off for every other record too.
+
+**The plan is written into the files first.** It holds the titles, numbers,
+artist, album and date - everything that would have come from a release, decided
+by the person who cut the record. `integrations/tagger.py` already writes
+exactly those tags for the base install, so the same function does it here, in
+place, before the directory is handed over. beets then moves and files tracks
+that describe themselves.
+
+Nothing is written when a release *is* pinned: beets is being asked to match,
+and tags written first would be replaced by the ones it fetches. The two paths
+differ only in who supplies the truth.
+
+**The dialog says which one is happening.** An empty release id is not obviously
+a decision, and the difference decides what ends up on the files, so the panel
+appears when the field is empty rather than leaving it to be inferred. The
+confirmation says the same thing in a sentence. Cover art is not fetched on this
+path - there is no release to fetch it from - which is what the artwork offer
+after an import is for.

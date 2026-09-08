@@ -759,8 +759,16 @@ async function archiveRun() {
 
 // ------------------------------------------------------------------ import
 
+// Whether beets will be asked to match this record, or told not to. The
+// difference decides what the tags say, so it is said in the dialog rather
+// than inferred from an empty field. ADR-049.
+function showCatalogueState() {
+  $("#imp-nocat").hidden = !!$("#imp-mbid").value.trim();
+}
+
 function openImport() {
   $("#imp-mbid").value = S.meta.mbid || "";
+  showCatalogueState();
   $("#imp-err").textContent = "";
   $("#imp-outwrap").hidden = true;
   $("#imp-done").hidden = true;
@@ -825,6 +833,7 @@ async function relabelRun() {
     S.sideData = {};
     await openAlbum(S.slug);
     $("#imp-mbid").value = r.mbid;
+    showCatalogueState();
     status(`re-labelled ${r.applied} tracks from ${r.release} — boundaries untouched`);
   } catch (e) {
     $("#imp-err").textContent = e.message;
@@ -878,8 +887,12 @@ async function runImport() {
   // One question. There used to be two in a row, and the second quoted the
   // artist and album out of fields the import did not use - so it could ask
   // about a name and then tag with a different one.
+  const mbid = $("#imp-mbid").value.trim();
+  const how = mbid ? "matched against the release below"
+                   : "tagged from the plan, with no catalogue match";
   if (!confirm(`Tag and place ${tracks} tracks as "${S.meta.artist} \u2014 `
-             + `${S.meta.album}"?\n\nThe files move out of review/.`)) return;
+             + `${S.meta.album}"?\n\nThey are ${how}.`
+             + `\nThe files move out of review/.`)) return;
   if (S.dirty) await save();      // the importer reads the plan from disk
   $("#imp-err").textContent = "";
   $("#imp-out").textContent = "tagging and placing\u2026";
@@ -887,7 +900,7 @@ async function runImport() {
   $("#imp-go").disabled = true;
   try {
     const r = await runJob(S.slug, `/api/import/${S.slug}`,
-                           { mbid: $("#imp-mbid").value.trim() }, "importing");
+                           { mbid }, "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
     $("#imp-done").hidden = false;
     showTranscript(r);   // collected all along, and hidden on every path
@@ -1828,6 +1841,7 @@ function wire() {
       await searchReleases($("#imp-artist").value, $("#imp-album").value,
                            $("#imp-results"), (r) => {
                              $("#imp-mbid").value = r.id;
+                             showCatalogueState();
                              $("#imp-results").innerHTML = "";
                              // Picking here used to set the id in the box and
                              // nowhere else: the plan kept the release chosen in
@@ -1853,6 +1867,7 @@ function wire() {
   $("#imp-art-fetch").onclick = artFetch;
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
+  $("#imp-mbid").oninput = showCatalogueState;
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
   $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };

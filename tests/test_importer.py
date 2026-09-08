@@ -286,3 +286,51 @@ def test_a_record_with_no_name_is_not_every_record_in_the_library(
     assert beets.locate(fake, "/music", "", "") == (None, 0)
     with pytest.raises(AssertionError):
         fake.argv_for("ls")  # beets was never asked
+
+
+class Moving(FakeRunner):
+    """A beets that takes the tracks, the way `move: yes` does."""
+
+    def __init__(self, review: Path, **kw: object) -> None:
+        super().__init__(**kw)  # type: ignore[arg-type]
+        self.review = review
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if "import" in args:
+            for f in self.review.glob("*.flac"):
+                f.unlink()
+        return super().run(argv, stdin=stdin, timeout=timeout)
+
+
+def moving_beets(review: Path, listed: int = 2) -> Moving:
+    rows = "\n".join(
+        f"A Record{SEP}/music/A Band/A Record/{i + 1:02d} Track.flac"
+        for i in range(listed)
+    )
+    fake = Moving(review, installed={"beet", "metaflac"})
+    return fake.expect("ls", stdout=rows.encode())  # type: ignore[return-value]
+
+
+def test_a_record_with_no_release_is_tagged_before_it_is_imported(
+    tmp_path: Path,
+) -> None:
+    """With no release there is nothing to match against, so beets consults no
+    catalogue - and a cut file carries no tags at all, which would file the
+    record under nothing but its filenames. The plan is what is known."""
+    review = Path(a_review(tmp_path))
+    fake = moving_beets(review)
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="")
+    written = [c for c in fake.calls if c[0] == "metaflac"]
+    assert len(written) == 2, "the cut tracks were imported untagged"
+    assert any("TITLE=One" in " ".join(c) for c in written)
+    assert any("ALBUM=A Record" in " ".join(c) for c in written)
+
+
+def test_a_record_with_a_release_is_left_to_the_catalogue(tmp_path: Path) -> None:
+    """beets is being asked to match it, and tags written first would be
+    replaced by the ones it fetches."""
+    review = Path(a_review(tmp_path))
+    fake = moving_beets(review)
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="aaa")
+    assert not [c for c in fake.calls if c[0] == "metaflac"]

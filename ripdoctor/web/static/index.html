@@ -190,6 +190,15 @@
         library, tagged from the plan you saved. The release below is the one it
         will match against; the transcript afterwards says what it did.</p>
       <label>Release id <input id="imp-mbid" spellcheck="false" placeholder="pick one below, or paste an id"></label>
+      <div id="imp-nocat" class="warn" hidden>
+        <b>No release is pinned, so the catalogue is skipped.</b>
+        <p class="hint">The tracks are tagged from the saved plan &mdash; its
+          titles, numbers, artist, album and date &mdash; and filed under those
+          names without being matched against anything. This is the way in for a
+          record MusicBrainz does not have. Cover art is not fetched; the panel
+          after the import offers it. To match instead, search below and pick a
+          release.</p>
+      </div>
       <div class="row">
         <label style="flex:1">Artist <input id="imp-artist"></label>
         <label style="flex:1">Album <input id="imp-album"></label>
