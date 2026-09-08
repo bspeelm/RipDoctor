@@ -154,6 +154,38 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
     yield Result("importer", Level.OK, f"importing with {settings.importer}")
     if settings.importer == "beets":
         yield from _agree(settings, runner)
+        yield from _plugins(runner)
+
+
+# What beets is wanted for beyond filing. Absent, an import still files the
+# audio, which is why none of this reads as a failure. ADR-042.
+WANTED = {
+    "fetchart": "no cover art is fetched",
+    "embedart": "cover art is not embedded in the tracks",
+    "replaygain": "no album-mode ReplayGain, which vinyl is mastered for",
+}
+
+
+def _plugins(runner: Runner) -> Iterator[Result]:
+    """Which plugins beets will actually run. ADR-042."""
+    try:
+        loaded = Beets().plugins(runner)
+    except (ToolMissing, ToolFailed):
+        return
+    missing = [p for p in WANTED if p not in loaded]
+    if not missing:
+        yield Result("beets plugins", Level.OK, f"beets runs {', '.join(loaded)}")
+        return
+    yield Result(
+        "beets plugins",
+        Level.WARN,
+        "beets loads "
+        + (", ".join(loaded) if loaded else "no plugins")
+        + " - "
+        + "; ".join(WANTED[p] for p in missing),
+        fix="add them to beets' own config (`beet config -p` says where), or "
+        "point BEETSDIR at the configuration the rest of this machine uses",
+    )
 
 
 def _agree(settings: Settings, runner: Runner) -> Iterator[Result]:

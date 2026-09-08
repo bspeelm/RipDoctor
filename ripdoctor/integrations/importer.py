@@ -160,6 +160,16 @@ class Beets:
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
 
+    def plugins(self, runner: Runner) -> tuple[str, ...]:
+        """Which plugins beets loaded - not which it was told to. A plugin
+        whose own dependency is missing is configured and absent."""
+        result = runner.run(self._argv(["version"]), timeout=60)
+        for line in (result.text + result.err).splitlines():
+            key, sep, value = line.partition(":")
+            if sep and key.strip() == "plugins":
+                return tuple(sorted(p.strip() for p in value.split(",") if p.strip()))
+        return ()
+
     def files_into(self, runner: Runner) -> str:
         """Where beets says it will put a record, defaults included.
 

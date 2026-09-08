@@ -301,6 +301,40 @@ def test_the_built_in_tagger_is_not_asked_what_beets_thinks() -> None:
     assert not [x for x in D.importing(s, everything()) if x.check == "library"]
 
 
+def loading(plugins: str) -> FakeRunner:
+    """A beets that answers `version` the way the real one does."""
+    return configured("/pool/music").expect(
+        lambda a: "version" in a,
+        stdout=f"beets version 2.1.0\nPython version 3.13.5\n{plugins}\n".encode(),
+    )
+
+
+def test_the_plugins_beets_will_run_are_reported() -> None:
+    s = replace(Settings(), importer="beets", library="/pool/music")
+    runner = loading("plugins: chroma, embedart, fetchart, replaygain")
+    r = find(list(D.importing(s, runner)), "beets plugins")
+    assert r.level is D.Level.OK and "fetchart" in r.summary
+
+
+def test_beets_with_no_plugins_is_reported_as_the_silence_it_is() -> None:
+    """An import still files the audio correctly with none of them, which is
+    why it reads as success. Nothing fails, so nothing says so."""
+    s = replace(Settings(), importer="beets", library="/pool/music")
+    r = find(list(D.importing(s, loading("no plugins loaded"))), "beets plugins")
+    assert r.level is D.Level.WARN
+    assert "no plugins" in r.summary and "cover art" in r.summary
+    assert "ReplayGain" in r.summary and "BEETSDIR" in r.fix
+
+
+def test_a_plugin_that_is_configured_but_did_not_load_counts_as_missing() -> None:
+    """`beet version` lists what loaded. One whose own dependency is absent is
+    configured and not there, and only that answer knows the difference."""
+    s = replace(Settings(), importer="beets", library="/pool/music")
+    runner = loading("plugins: embedart, fetchart")
+    r = find(list(D.importing(s, runner)), "beets plugins")
+    assert r.level is D.Level.WARN and "ReplayGain" in r.summary
+
+
 def test_an_importer_nobody_has_heard_of_is_named() -> None:
     s = replace(Settings(), importer="picard")
     r = find(list(D.importing(s, everything())), "importer")
