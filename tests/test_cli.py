@@ -8,6 +8,7 @@ programs are stood in for.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -62,20 +63,28 @@ def test_every_subcommand_is_reachable() -> None:
     assert {"doctor", "config", "fit", "split", "check"} <= names
 
 
-def test_every_documented_command_exists() -> None:
-    """Prose has no compiler; this stands in for one.
-
-    Every command the README names must be a real subparser, and every
-    subparser must be named in the README.
-    """
-    readme = (Path(__file__).parent.parent / "README.md").read_text()
+def _commands() -> set[str]:
     parser = build_parser()
-    names = set(next(a for a in parser._actions if a.dest == "command").choices)
+    return set(next(a for a in parser._actions if a.dest == "command").choices)
 
-    documented = {n for n in names if f"ripdoctor {n}" in readme}
-    assert documented, "the README documents no commands at all"
-    undocumented = names - documented
-    assert not undocumented, f"commands absent from the README: {sorted(undocumented)}"
+
+def test_every_command_the_readme_names_exists() -> None:
+    """Prose has no compiler; this stands in for one."""
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    named = set(re.findall(r"\bripdoctor ([a-z]+)\b", readme))
+    unreal = {n for n in named if n not in _commands()}
+    assert not unreal, f"the README names commands that do not exist: {sorted(unreal)}"
+
+
+def test_the_readme_counts_the_commands_correctly() -> None:
+    """The full reference is in the wiki, which CI cannot read. What it can
+    check is that the number the README claims is still the number there are,
+    so a command added without documenting it fails here."""
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    total = len(_commands())
+    assert f"{total} commands" in readme, (
+        f"there are {total} commands and the README does not say so"
+    )
 
 
 # ------------------------------------------------------------- doctor
