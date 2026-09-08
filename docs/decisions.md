@@ -1450,3 +1450,41 @@ read back puts the old one straight back.
 The order matters and is deliberate: nothing is moved aside until the new file
 has been verified in its final place, so an interrupted archive leaves the
 record with a side rather than without one.
+
+## ADR-047 — one control answers "which record"
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+Three controls answered it, and they disagreed.
+
+The selector at the top hid archived records behind a checkbox and old-format
+ones always, and labelled options with the bare slug. The Rip panel's re-rip
+picker always showed archived, never hid old-format, had its own filter box, and
+labelled by artist and album. The Punch panel had a third, fetching its own list
+and keeping its own selection.
+
+The coupling ran one way: opening a record at the top silently drove the Rip
+panel, and nothing drove Punch at all. So the Punch panel could be working on a
+different record from the rest of the page, which put a capture in one record's
+directory while the header, the pipeline and the captures list all described
+another. Jobs are keyed by slug, so the two could also collide over one capture
+device, or lock each other out when they happened to match.
+
+**There is one selector now, and it is the only one.** Every panel works on the
+record it names. The `archived` checkbox is gone: it was the direct cause of the
+two lists disagreeing, and re-ripping and punching both want archived records,
+so hiding them by default fought both. The re-rip picker's filter box moves up
+beside the selector and takes over what the checkbox was for.
+
+**"— new album —" is the first entry**, and it is load-bearing rather than a
+convenience. The listing endpoint returns directories that already hold a side,
+so a record that does not exist yet cannot come from it - and because opening a
+record fills the name fields read-only, removing the re-rip picker without this
+would have made starting a new record impossible.
+
+**The side control offers the sides the record has, as well as the next one.**
+`nextFreeSide` alone proposed `e` for a four-side record, which is right for
+finishing a rip and wrong for re-ripping side b. It always lands on the next
+free side rather than keeping what was showing: it is rebuilt when the record
+changes and when a side finishes recording, and keeping the old value left it
+pointing at the side just captured, ready to record over it.

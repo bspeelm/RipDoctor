@@ -26,8 +26,9 @@
       <button data-mode="rip">Rip</button>
       <button data-mode="punch">Punch</button>
     </span>
-    <select id="album"></select>
-    <label class="inline" title="albums already imported and moved to archive/ — cutting one writes into review/ as usual"><input type="checkbox" id="incarch"> archived</label>
+    <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
+           title="narrows the list beside it; every record is in there, archived ones included">
+    <select id="album" title="which record everything on this page is about"></select>
     <span id="sides" class="tabs"></span>
     <span class="spacer"></span>
     <span id="status"></span>
@@ -48,12 +49,9 @@
     <div class="ripform" id="ripform">
       <h2>Rip a side</h2>
       <div class="fields">
-        <label class="wide">Re-rip an album already on this box
-          <input id="rip-rerip-q" placeholder="filter by artist or album…" autocomplete="off">
-          <select id="rip-rerip"></select></label>
         <label>Artist <input id="rip-artist" placeholder="artist"></label>
         <label>Album <input id="rip-album" placeholder="album"></label>
-        <label>Side <input id="rip-side" value="a" size="6"></label>
+        <label>Side <select id="rip-side" title="a side this record already has is a re-rip of it"></select></label>
         <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
           Stop at the run-out</label>
       </div>
@@ -72,7 +70,6 @@
         library. The boundaries are <b>fitted against the archived side</b>, so
         the replacement starts and ends exactly where the original did.</p>
       <div class="fields">
-        <label class="wide">Album <select id="punch-album"></select></label>
         <label class="wide">Track <select id="punch-track"></select></label>
       </div>
       <p class="dim mono" id="punch-info"></p>

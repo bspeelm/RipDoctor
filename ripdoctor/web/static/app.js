@@ -232,33 +232,49 @@ function enableActions() {
 // noise, not information.
 let oldFormatNoted = false;
 
-async function refreshAlbums(keep) {
-  const inc = $("#incarch").checked;
-  const { albums } = await api(`/api/albums${inc ? "?archive=1" : ""}`);
-  const usable = albums.filter((a) => !a.old_format);
-  const skipped = albums.length - usable.length;
-  const sel = $("#album"); sel.innerHTML = "";
-  for (const a of usable) {
-    const o = el("option", "", a.where === "archive" ? `${a.slug}  (archived)` : a.slug);
+let albumsHeld = [];
+
+// The only way to say "a record that does not exist yet": the endpoint lists
+// directories that already hold a side, so a new one cannot come from it.
+const NEW_ALBUM = "";
+
+function renderAlbums(keep) {
+  const sel = $("#album");
+  const q = $("#album-q").value.trim().toLowerCase();
+  sel.innerHTML = "";
+  const fresh = el("option", "", "— new album —");
+  fresh.value = NEW_ALBUM;              // an option without one takes its label
+  sel.appendChild(fresh);
+
+  let shown = 0;
+  for (const a of albumsHeld) {
+    const name = a.artist && a.album ? `${a.artist} — ${a.album}` : a.slug;
+    const label = a.where === "archive" ? `${name}  (archived)` : name;
+    const hit = !q || label.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q);
+    // The record in hand stays selectable whatever the filter says, or typing
+    // would quietly change which record the page is about.
+    if (!hit && a.slug !== keep) continue;
+    const o = el("option", "", label);
     o.value = a.slug;
     sel.appendChild(o);
+    if (hit) shown++;
   }
-  if (!usable.length) {
-    // Nothing in raw/ is normal once everything has been archived, and this
-    // reports it rather than papering over it. `archived` is never ticked for
-    // you: those albums are finished, and
-    // auto-loading one puts a completed record on the canvas looking like
-    // pending work. An empty picker is the honest answer - it leaves S.slug
-    // null, which is why every handler that needs an album has to say so
-    // (§3) rather than quietly doing nothing.
-    const msg = inc ? "no editable albums found"
-                    : "nothing in raw/ — rip a side, or tick “archived” to browse finished ones";
-    clearAlbum(msg);
-    status(msg, true);
-    return;
-  }
-  const pick = usable.some((a) => a.slug === keep) ? keep : usable[0].slug;
-  sel.value = pick;
+  sel.value = albumsHeld.some((a) => a.slug === keep) ? keep : NEW_ALBUM;
+  $("#album-q").placeholder = q && !shown ? "nothing matches that" : "filter…";
+  return sel.value;
+}
+
+// `keep` names the record to land on. Omit it to stay where you are, falling
+// back to the first record on a fresh load; pass NEW_ALBUM to deliberately
+// land on nothing, which is what archiving a record wants.
+async function refreshAlbums(keep) {
+  const { albums } = await api("/api/albums?archive=1");
+  albumsHeld = albums.filter((a) => !a.old_format);
+  const want = keep === undefined
+    ? (S.slug || (albumsHeld.length ? albumsHeld[0].slug : NEW_ALBUM))
+    : keep;
+  const pick = renderAlbums(want);
+
   // Only worth mentioning for albums still in raw/, where an unreadable plan
   // actually blocks work. An archived album is finished - imported and filed -
   // so its plan format is nobody's problem and saying so is just noise.
@@ -266,9 +282,23 @@ async function refreshAlbums(keep) {
   if (stuck.length && !oldFormatNoted) {
     oldFormatNoted = true;
     logline(`not editable here, superseded "cuts" plan format: `
-            + `${stuck.map((a) => a.slug).join(", ")} — re-run refit2.py to migrate`);
+            + `${stuck.map((a) => a.slug).join(", ")} — run First pass again to rebuild it`);
   }
+  if (pick === NEW_ALBUM) { startNewAlbum(); return; }
   await openAlbum(pick);
+}
+
+// Nothing selected is a real state rather than an empty one: it is where you
+// are before the first side of a record exists.
+function startNewAlbum() {
+  clearAlbum("");
+  $("#album").value = NEW_ALBUM;
+  for (const id of ["#rip-artist", "#rip-album"]) {
+    $(id).value = ""; $(id).readOnly = false; $(id).title = "";
+  }
+  setSideChoices([]);
+  const none = !albumsHeld.length;
+  status(none ? "no records yet — rip a side to start one" : "", none);
 }
 
 async function openAlbum(slug) {
@@ -312,7 +342,7 @@ async function openAlbum(slug) {
   // yet is the one you are about to record. The list behind the picker is
   // loaded when that panel is shown, not here - opening a record should not
   // wait on something no one is looking at.
-  pinRerip(slug, S.meta.sides, S.meta.artist, S.meta.album);
+  showRecordInRipPanel(S.meta.artist, S.meta.album, S.meta.sides);
   refreshAlignButton();
   refreshArchiveButton();
   renderPipeline();
@@ -718,8 +748,8 @@ async function archiveRun() {
     await renderPipeline();
     $("#arcdlg").close();
     resetCaptureAfterArchive(done);
-    await refreshAlbums();
-    await loadRerip();          // the album moved raw/ -> archive/
+    await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
+
     await loadOrphans();
   } catch (e) {
     $("#arc-err").textContent = e.message;
@@ -966,8 +996,8 @@ function setMode(mode) {
   $("#readout").hidden = capturing;
   $("#lower").hidden = capturing;
   if (capturing) startRipPoll(); else stopRipPoll();
-  if (mode === "rip") { loadOrphans(); loadRerip(); }
-  if (mode === "punch") loadPunchAlbums();
+  if (mode === "rip") loadOrphans();
+  if (mode === "punch") loadPunchTracks();
   if (!capturing) ed.render();
 }
 
@@ -978,15 +1008,13 @@ function setMode(mode) {
 // Deriving the slug from retyped text makes that hinge on spelling the artist
 // identically twice, so when an existing album is picked the slug is pinned to
 // it and the name fields go read-only.
-let ripPinned = null;
-let ripPinnedSides = "";
-
 function ripSlug() {
   const side = $("#rip-side").value.trim();
-  if (ripPinned) {
+  if (S.slug) {
+    const sides = (S.meta.sides || []).join(" ") || "none";
     $("#rip-slug").textContent =
-      `→ raw/${ripPinned}/side-${side}.flac   ·   re-rip · existing sides: ${ripPinnedSides || "none"}`;
-    return ripPinned;
+      `→ raw/${S.slug}/side-${side}.flac   ·   existing sides: ${sides}`;
+    return S.slug;
   }
   const a = $("#rip-artist").value.trim(), b = $("#rip-album").value.trim();
   const slug = a && b ? slugify(a, b) : "";
@@ -1001,11 +1029,6 @@ function ripSlug() {
 // `→ raw/<slug>/side-c.flac` line pointing into a directory archive deleted a
 // moment ago.
 //
-// A pin is the sharp end of it. The archived album is still in
-// `/api/albums?archive=1`, so `renderRerip` re-selects it, the name fields stay
-// read-only, and Start would recreate `raw/<slug>/` for a record cleaned up
-// thirty seconds earlier - the failure §1 exists to prevent.
-//
 // Scoped to the album actually archived. If the fields hold a different name it
 // was typed ahead of the next rip, and wiping it would destroy your typing;
 // that check also covers a capture running for some other album, since the
@@ -1014,15 +1037,10 @@ function ripSlug() {
 // Punch is deliberately left alone: it works on archived albums by design, so
 // having just archived one is a reason to keep it selected, not to clear it.
 function resetCaptureAfterArchive(slug) {
-  if (!slug || ripSlug() !== slug) return;
-  ripPinned = null; ripPinnedSides = "";
-  for (const id of ["#rip-artist", "#rip-album"]) {
-    $(id).value = ""; $(id).readOnly = false; $(id).title = "";
-  }
-  $("#rip-side").value = "a";
+  if (!slug || S.slug !== slug) return;
+  startNewAlbum();
   $("#rip-done").textContent = "";
   $("#rip-err").textContent = "";
-  ripSlug();
 }
 
 // Replacing deletes files, so it is opt-in on every single import: the checkbox
@@ -1064,8 +1082,6 @@ async function checkExisting() {
   }
 }
 
-let ripAlbums = [];
-
 // The first letter this record has not got. Bumping the previous one by a
 // character gave `{` after side z, and offered to record over side a whenever
 // the panel was opened fresh on a record that already had one.
@@ -1078,102 +1094,44 @@ function nextFreeSide(sides) {
   return "";
 }
 
-// Pin the Rip panel to a record that is already on disk: its names fill the
-// fields and go read-only, and the side letter moves to the first one it has
-// not got. Selecting a record is a statement about which one you are ripping,
-// so opening one does this too - otherwise the panel sat on "new album" with
-// empty fields while the record was open at the top of the page, and the only
-// way to record its second side was to type the name in again.
-function pinRerip(slug, sides, artist, album) {
-  ripPinned = slug || null;
-  ripPinnedSides = (sides || []).join(" ");
-  const sel = $("#rip-rerip");
-  // renderRerip keeps the pinned album selectable even when the filter would
-  // hide it, so re-render rather than assigning a value nothing matches.
-  if (!Array.from(sel.options).some((o) => o.value === (slug || ""))) renderRerip();
-  sel.value = slug || "";
-  // The names come from the caller where it has them. Fetching the album list
-  // to look up something already in hand put a network round trip in the
-  // middle of opening a record, and every late redraw it delayed landed while
-  // somebody was already clicking something else.
-  const a = ripAlbums.find((x) => x.slug === slug) || {};
-  const named = { artist: artist ?? a.artist, album: album ?? a.album };
-  if (ripPinned) {
-    $("#rip-artist").value = named.artist || "";
-    $("#rip-album").value = named.album || "";
-    $("#rip-side").value = nextFreeSide(sides);
-  } else {                           // "new album" is a deliberate fresh start
-    $("#rip-artist").value = ""; $("#rip-album").value = ""; $("#rip-side").value = "a";
+// The side to record. A side the record already has is a re-rip of it; the
+// first one it has not got finishes a rip in progress. Offering only the
+// latter meant a four-side record proposed `e`, so re-ripping side b was a
+// correction rather than a choice. ADR-047.
+function setSideChoices(sides) {
+  const sel = $("#rip-side");
+  const next = nextFreeSide(sides);
+  sel.innerHTML = "";
+  for (const letter of sides) {
+    const o = el("option", "", `${letter}  (re-rip)`);
+    o.value = letter;
+    sel.appendChild(o);
   }
-  // read-only rather than disabled: still selectable and copyable, and it
-  // makes the reason visible instead of the field just going dead
-  $("#rip-artist").readOnly = $("#rip-album").readOnly = !!ripPinned;
-  $("#rip-artist").title = $("#rip-album").title =
-    ripPinned ? "pinned to the existing album — pick “new album” to edit" : "";
+  if (next) {
+    const o = el("option", "", sides.length ? `${next}  (next)` : next);
+    o.value = next;
+    sel.appendChild(o);
+  }
+  // Always the next one, never what was showing. This is rebuilt when the
+  // record changes and when a side finishes recording, and both of those want
+  // the side that comes next - keeping the old value left it pointing at the
+  // side just captured, ready to record over it.
+  sel.value = next || (sides[sides.length - 1] || "");
   ripSlug();
 }
 
-async function loadRerip() {
-  try {
-    const { albums } = await api("/api/albums?archive=1");
-    // Every record on disk, not only the ones with a saved cut. A side just
-    // captured has no plan yet and therefore no artist or album anywhere but
-    // in the form somebody typed them into - which a reload throws away. That
-    // is exactly the record you want to offer, because side b comes next.
-    ripAlbums = albums.map((a) => ({ ...a, ...named(a) }));
-  } catch { ripAlbums = []; }
-  renderRerip();
-}
-
-// A <select> cannot be typed into, and this list only grows. The filter narrows
-// the options rather than replacing the control, so the select stays the single
-// source of truth for what is pinned.
-// What to call a record. The plan when there is one, and otherwise the slug
-// read backwards - it was built from an artist and an album, so it gives them
-// back, give or take the punctuation. A guess offered for correction, in a
-// field that can be corrected.
-function named(a) {
-  if (a.artist || a.album) return { artist: a.artist, album: a.album };
-  return guessFromSlug(a.slug);
-}
-
-function renderRerip() {
-  const sel = $("#rip-rerip");
-  const q = $("#rip-rerip-q").value.trim().toLowerCase();
-  const keep = ripPinned;
-  sel.innerHTML = "";
-  // The value has to be set explicitly: an option without one takes its own
-  // label as its value, so `sel.value = ""` below matches nothing and the
-  // control renders blank rather than showing this.
-  const fresh = el("option", "", "— new album —");
-  fresh.value = "";
-  sel.appendChild(fresh);
-  let shown = 0;
-  for (const a of ripAlbums) {
-    const sides = (a.sides || []).join(" ") || "no sides yet";
-    const label = `${a.artist} — ${a.album}  (${a.where}: ${sides})`;
-    if (q && !label.toLowerCase().includes(q) && !a.slug.toLowerCase().includes(q)) continue;
-    const o = el("option", "", label);
-    o.value = a.slug;
-    o.dataset.artist = a.artist || "";
-    o.dataset.album = a.album || "";
-    o.dataset.sides = (a.sides || []).join(" ");
-    sel.appendChild(o);
-    shown++;
-  }
-  // keep the pinned album selectable even when the filter would hide it
-  if (keep && !Array.from(sel.options).some((o) => o.value === keep)) {
-    const a = ripAlbums.find((x) => x.slug === keep);
-    if (a) {
-      const o = el("option", "", `${a.artist} — ${a.album}  (pinned)`);
-      o.value = a.slug; o.dataset.artist = a.artist; o.dataset.album = a.album;
-      o.dataset.sides = (a.sides || []).join(" ");
-      sel.appendChild(o); shown++;
-    }
-  }
-  sel.value = keep || "";
-  $("#rip-rerip-q").placeholder = q && !shown
-    ? "no album matches that" : "filter by artist or album…";
+// The Rip panel takes its record from the selector at the top of the page.
+// There is nothing else to choose it with, so the names are what the record is
+// called rather than something to type over; a new one is started up there too.
+function showRecordInRipPanel(artist, album, sides) {
+  $("#rip-artist").value = artist || "";
+  $("#rip-album").value = album || "";
+  // read-only rather than disabled: still selectable and copyable, and it
+  // makes the reason visible instead of the field just going dead
+  $("#rip-artist").readOnly = $("#rip-album").readOnly = true;
+  $("#rip-artist").title = $("#rip-album").title =
+    "what this record is called — pick “— new album —” above to start another";
+  setSideChoices(sides || []);
 }
 
 // A rip is a child of this service, so anything that restarts it strands a
@@ -1211,7 +1169,6 @@ async function loadOrphans() {
           await postJSON("/api/rip/discard",
                          { slug: o.slug, side: o.side, kind: o.kind });
           await loadOrphans();
-          await loadRerip();
         } catch (e) { $("#rip-err").textContent = e.message; }
       };
       row.append(keep, drop);
@@ -1557,22 +1514,10 @@ function toggleListen() {
 
 let punchState = null;
 
-function punchSlug() { return $("#punch-album").value || ""; }
+// Punch works on the record the page is about, like everything else.
+function punchSlug() { return S.slug || ""; }
 function punchNum() { return parseInt($("#punch-track").value, 10) || 0; }
 
-async function loadPunchAlbums() {
-  const sel = $("#punch-album");
-  const keep = sel.value;
-  try {
-    const { albums } = await api("/api/albums?archive=1");
-    sel.innerHTML = "";
-    for (const a of albums.slice().sort((x, y) => x.slug.localeCompare(y.slug))) {
-      sel.appendChild(el("option", "", a.slug)).value = a.slug;
-    }
-    if (keep && albums.some((a) => a.slug === keep)) sel.value = keep;
-  } catch { /* the panel is optional; the rip form still works */ }
-  await loadPunchTracks();
-}
 
 async function loadPunchTracks() {
   const sel = $("#punch-track");
@@ -1846,7 +1791,7 @@ function wire() {
 
   $("#save").onclick = save;
   $("#split").onclick = split;
-  $("#incarch").onchange = () => refreshAlbums(S.slug);
+  $("#album-q").oninput = () => renderAlbums(S.slug);
   $("#firstpass").onclick = openFirstPass;
   $("#import").onclick = openImport;
   $("#art-upload").onclick = () => $("#art-file").click();
@@ -1870,7 +1815,6 @@ function wire() {
     } catch (e) { $("#imp-err").textContent = e.message; }
   };
   $("#imp-relabel").onclick = relabelRun;
-  $("#punch-album").onchange = loadPunchTracks;
   $("#punch-track").onchange = showPunchTrack;
   $("#punch-go").onclick = punchRecord;
   $("#punch-locate").onclick = punchLocate;
@@ -1914,12 +1858,6 @@ function wire() {
     } catch (e) { $("#rip-err").textContent = e.message; }
   };
   $("#imp-replace").onchange = (e) => { $("#imp-go").disabled = !e.target.checked; };
-  $("#rip-rerip-q").oninput = renderRerip;
-  $("#rip-rerip").onchange = (e) => {
-    const o = e.target.selectedOptions[0];
-    const sides = (o.dataset.sides || "").split(" ").filter(Boolean);
-    pinRerip(e.target.value, sides, o.dataset.artist, o.dataset.album);
-  };
   $("#rip-vol").oninput = () => {
     const v = (parseInt($("#rip-vol").value, 10) || 0) / 100;
     if (monitorEl) monitorEl.volume = v;
@@ -1948,7 +1886,6 @@ function wire() {
       if (r.note) logline(r.note);
       await loadRipSides();
       await refreshAlbums(S.slug);
-      await loadRerip();   // a record that was forgotten leaves the picker
     } catch (e) {
       $("#rip-err").textContent = e.message;
       $("#rip-abandon").disabled = false;
@@ -1965,8 +1902,7 @@ function wire() {
     $(id).value = "";
     $(id).oninput = ripSlug;
   }
-  $("#rip-side").value = "a";
-  $("#rip-side").oninput = ripSlug;
+  $("#rip-side").onchange = ripSlug;
   try {
     for (const id of ["#rip-artist", "#rip-album", "#rip-side"])
       localStorage.removeItem(`ripdoctor:rip:${id}`);
@@ -1975,7 +1911,6 @@ function wire() {
   loadDevices();
   loadOrphans();
   loadRipSides();
-  loadRerip();
 
   $("#logtoggle").onclick = () =>
     setLogCollapsed(!$("#logwrap").classList.contains("collapsed"));
@@ -2017,9 +1952,10 @@ function wire() {
   };
   $("#album").onchange = async (e) => {
     if (S.dirty && !confirm("Discard unsaved changes to this album?")) {
-      e.target.value = S.slug;            // put the picker back
+      e.target.value = S.slug || NEW_ALBUM;   // put the picker back
       return;
     }
+    if (e.target.value === NEW_ALBUM) { startNewAlbum(); return; }
     try { await openAlbum(e.target.value); }
     catch (err) { status(`load failed: ${err.message}`, true); logline(String(err.stack || err), true); }
   };

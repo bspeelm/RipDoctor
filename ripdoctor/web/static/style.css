@@ -41,6 +41,9 @@ header strong{letter-spacing:.02em}
   padding:.25rem .6rem}
 .tabs button.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
 #status{color:var(--dim);font-size:.8rem}
+/* Narrow, because it sits in front of the record picker and is a refinement of
+   it rather than a field in its own right. */
+.pick{width:9rem}
 
 #prepare{display:flex;align-items:center;gap:.6rem;padding:.4rem .75rem;
   border-bottom:1px solid var(--line);font-size:.8rem;color:var(--dim);flex:none}
