@@ -10,7 +10,6 @@ from ripdoctor.audio import capture as C
 from ripdoctor.audio import passthru as PT
 from ripdoctor.audio.devices import enumerate_devices
 from ripdoctor.audio.runner import ToolFailed, ToolMissing
-from ripdoctor.core.meter import Verdict
 from ripdoctor.core.naming import Unsafe, token
 from ripdoctor.store import cache as CACHE
 from ripdoctor.store import files as F
@@ -108,16 +107,6 @@ def _not_while_recording(service: Service, slug: str, side: str, kind: str) -> N
         return
     if (live.slug, live.side, live.stem) == (slug, side, kind):
         raise H.HttpError(409, f"{slug} {kind} {side} is recording now")
-
-
-def _verdict(v: Verdict) -> dict[str, Any]:
-    return {
-        "ok": v.ok,
-        "summary": v.summary,
-        "full_rms": v.full_rms,
-        "full_peak": v.full_peak,
-        "band_rms": v.band_rms,
-    }
 
 
 def add(app: App, service: Service) -> None:
@@ -265,31 +254,6 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
         return H.ok(service.recorder.status())
-
-    @app.route("POST", "/api/rip/test")
-    def test(r: H.Request) -> H.Response:
-        """Twenty seconds, and what arrived.
-
-        Synchronous on purpose: it is twenty seconds and the answer is the
-        whole point, so there is nothing useful to do with a job handle.
-        """
-        device = str(r.json().get("device") or service.settings.capture_device)
-        try:
-            C.check_device(device)
-        except C.CaptureError as e:
-            raise H.HttpError(400, str(e)) from e
-        scratch = layout.cache / "probe.wav"
-        scratch.parent.mkdir(parents=True, exist_ok=True)
-        argv = C.test_capture_argv(
-            device, str(scratch), _format(service), C.TEST_SECONDS
-        )
-        try:
-            service.runner.run(argv, timeout=C.TEST_SECONDS + 30).require()
-            if not scratch.is_file() or scratch.stat().st_size < 1024:
-                raise H.HttpError(503, "nothing was captured")
-            return H.ok(_verdict(C.judge(service.runner, str(scratch))))
-        finally:
-            scratch.unlink(missing_ok=True)
 
     @app.route("GET", "/api/rip/monitor")
     def monitor(r: H.Request) -> H.Response:

@@ -191,36 +191,6 @@ def test_a_machine_with_no_arecord_says_so_rather_than_500(tmp_path: Path) -> No
 # ----------------------------------------------------------------- probe
 
 
-def test_the_probe_reports_what_arrived(tmp_path: Path) -> None:
-    """Twenty seconds before a side rather than twenty minutes after."""
-    service = a_service(tmp_path)
-    service.settings = __import__("dataclasses").replace(
-        service.settings, capture_device="hw:Rx,0"
-    )
-
-    class Probe(FakeRunner):
-        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
-            args = [str(a) for a in argv]
-            if args[0] == "arecord":
-                Path(args[-1]).write_bytes(b"RIFF" + b"\x00" * 4000)
-            return super().run(argv, stdin=stdin, timeout=timeout)
-
-    service.runner = (
-        Probe()
-        .expect(
-            lambda a: any("highpass" in x for x in a),
-            stderr=b"[astats] RMS level dB: -41.0\n",
-        )
-        .expect(
-            "astats",
-            stderr=b"[astats] RMS level dB: -24.0\n[astats] Peak level dB: -6.0\n",
-        )
-    )
-    body = post(build(service), "/api/rip/test", service).json()
-    assert body["ok"] and "music" in body["summary"]
-    assert body["band_rms"] == -41.0
-
-
 # --------------------------------------------------------------- salvage
 
 

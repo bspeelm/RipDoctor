@@ -1915,24 +1915,6 @@ function wire() {
     const v = localStorage.getItem("ripdoctor:rip:vol");
     if (v) $("#rip-vol").value = v;
   } catch {}
-  $("#rip-test").onclick = async () => {
-    const b = $("#rip-test");
-    b.disabled = true; $("#rip-err").textContent = "";
-    $("#rip-done").textContent = "recording 20 s to check the input…";
-    try {
-      const r = await postJSON("/api/rip/test", {
-        device: $("#rip-device").value,
-        rate: parseInt($("#rip-rate").value, 10) || 48000,
-        format: $("#rip-format").value || "S16_LE" });
-      $("#rip-done").textContent =
-        `${r.ok ? "✓" : "✗"} ${r.verdict}  —  ${DEPTH[r.format] || r.format} @ ${r.rate} Hz, `
-        + `full ${r.full_rms} dB RMS / ${r.full_peak} dB peak, 1–3 kHz ${r.band_rms} dB`;
-      status(r.ok ? "input looks right" : "input does not look right", !r.ok);
-    } catch (e) {
-      $("#rip-err").textContent = e.message; $("#rip-done").textContent = "";
-    }
-    b.disabled = false;
-  };
   $("#rip-go").onclick = ripStart;
   $("#rip-stop").onclick = () => { $("#rip-stop").disabled = true; ripStop(); };
   $("#rip-abandon").onclick = async () => {
