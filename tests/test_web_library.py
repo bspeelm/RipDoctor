@@ -334,13 +334,24 @@ def test_a_side_that_does_not_read_back_stops_everything(tmp_path: Path) -> None
     assert (service.layout.raw / "album" / "side-a.flac").is_file()
 
 
-def test_archiving_twice_is_refused_rather_than_overwriting(tmp_path: Path) -> None:
+def test_a_re_ripped_side_supersedes_the_archived_one(tmp_path: Path) -> None:
+    """Archiving a record that was archived before used to be refused outright,
+    with nothing in the page to resolve it - so re-ripping a side of a finished
+    record dead-ended one step from the end. The old capture is kept, because it
+    is the only copy of a take somebody may want back."""
     service, _library = arrived(tmp_path)
     post(build(service), "/api/archive/album", service)
+    first = (service.layout.archive / "album" / "side-a.flac").read_bytes()
+
     (service.layout.raw / "album").mkdir()
     (service.layout.raw / "album" / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 99)
     body = post(build(service), "/api/archive/album", service).json()
-    assert "already exists" in body["error"]
+    assert not body["error"], body["error"]
+
+    kept = sorted((service.layout.archive / "album" / "_superseded").glob("*.flac"))
+    assert len(kept) == 1 and kept[0].read_bytes() == first
+    assert (service.layout.archive / "album" / "side-a.flac").read_bytes() != first
+    assert any("_superseded" in n for n in body["result"]["notes"])
 
 
 # --------------------------------------------------------------- artwork

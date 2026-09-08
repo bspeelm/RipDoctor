@@ -87,18 +87,30 @@ class Layout:
         return found
 
     def side_file(self, slug: str, letter: str) -> Path:
-        where = self.album_dir(slug) / SIDE.format(letter=letter)
-        if not where.is_file():
-            raise FileNotFoundError(f"no side {letter!r} for {slug!r}")
-        return where
+        """One side, resolved on its own rather than with the whole record.
+
+        A record being re-ripped has sides in both places at once - the new
+        capture in raw, the rest still in archive. Resolving the record to one
+        directory made every side but the new one disappear. ADR-046.
+        """
+        for base in (self.raw, self.archive):
+            where = base / slug / SIDE.format(letter=letter)
+            if where.is_file():
+                return under(base, slug) / SIDE.format(letter=letter)
+        raise FileNotFoundError(f"no side {letter!r} for {slug!r}")
 
     def sides_on_disk(self, slug: str) -> list[str]:
-        found = []
-        for p in sorted(self.album_dir(slug).iterdir()):
-            name = p.name
-            if name.startswith("side-") and name.endswith(".flac"):
-                found.append(name[len("side-") : -len(".flac")])
-        return found
+        """Every side of a record, wherever it is. Raw wins side by side."""
+        found: set[str] = set()
+        for base in (self.raw, self.archive):
+            album = base / slug
+            if not album.is_dir():
+                continue
+            for p in album.iterdir():
+                name = p.name
+                if name.startswith("side-") and name.endswith(".flac"):
+                    found.add(name[len("side-") : -len(".flac")])
+        return sorted(found)
 
     def spec_file(self, slug: str) -> Path:
         return under(self.work, f"{slug}.spec.json")

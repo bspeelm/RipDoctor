@@ -1416,3 +1416,37 @@ not after start 1180.00` is arithmetic, and true, and tells nobody what to do.
 Naming the side, the number of tracks, the catalogue total against the measured
 span, and the two ways out — another release, or an ear-set boundary — is a
 finding somebody can act on.
+
+## ADR-046 — a record can have its sides in two places at once
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+Re-ripping one side of a record that has already been archived is an ordinary
+thing to want: a side skipped, a side taken off the wrong input, a pressing
+replaced. Until now it could not be finished.
+
+`Layout.album_dir` resolves a record to a single directory - raw first, then
+archive. That is right for reading a record that lives in one place, and wrong
+for a record mid-re-rip, which genuinely lives in both: the new capture in raw,
+the sides that were fine still in archive. The moment raw held one side, every
+other side stopped resolving - gone from the side tabs, the canvas, and the
+record's own answer - one step into a re-rip and with no sign of why.
+
+Then archiving refused outright, because a side of that name was already there,
+and there was nothing in the page to resolve it. The flow dead-ended.
+
+**Sides resolve individually now.** `sides_on_disk` returns the union of both
+directories and `side_file` looks for one side at a time, raw winning side by
+side. `album_dir` stays for the callers that need one directory to write into -
+a capture, a punch - because those genuinely do.
+
+**An archived side is superseded rather than blocked.** The replacement is
+copied in and read back exactly as before, and only then does the old one move
+to `archive/<slug>/_superseded/` under a timestamp. It is kept rather than
+deleted: it is the only copy of a take somebody may want back, and keeping
+copies of takes is what the archive gate exists for. A replacement that does not
+read back puts the old one straight back.
+
+The order matters and is deliberate: nothing is moved aside until the new file
+has been verified in its final place, so an interrupted archive leaves the
+record with a side rather than without one.

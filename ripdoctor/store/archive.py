@@ -13,6 +13,7 @@ sense in five years.
 from __future__ import annotations
 
 import shutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,6 +118,27 @@ def repair_argv(source: str, dest: str) -> list[str]:
     ]
 
 
+# Where a side that has been re-ripped goes. Kept rather than deleted: the old
+# capture is the only copy of a take somebody may want back, and it is the
+# thing this whole gate exists to protect. ADR-046.
+SUPERSEDED = "_superseded"
+
+
+def _step_aside(target: Path) -> Path | None:
+    """Move an archived side out of the way of its replacement.
+
+    Returns where it went, so a copy that does not read back can be undone.
+    """
+    if not target.exists():
+        return None
+    kept = target.parent / SUPERSEDED
+    kept.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    moved = kept / f"{stamp}--{target.name}"
+    target.replace(moved)
+    return moved
+
+
 def put_away(
     runner: Runner,
     layout: Layout,
@@ -138,8 +160,9 @@ def put_away(
     archived, notes = [], []
     for side in sorted(source.glob("side-*.flac")):
         target = dest / side.name
-        if target.exists():
-            raise NotReady(f"{target} already exists; move it first")
+        superseded = _step_aside(target)
+        if superseded:
+            notes.append(f"the previous {side.name} was moved to {SUPERSEDED}/")
         if verify(runner, str(side)):
             say(side.name, "copying")
             shutil.copy2(side, target)
@@ -153,6 +176,8 @@ def put_away(
         seconds = true_duration(runner, str(target))
         if seconds <= 0 or not verify(runner, str(target)):
             target.unlink(missing_ok=True)
+            if superseded:
+                superseded.replace(target)
             raise NotReady(f"{side.name} did not read back from the archive")
         archived.append(
             {

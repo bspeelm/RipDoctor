@@ -434,3 +434,35 @@ def test_a_record_can_still_be_saved_before_it_is_named(tmp_path: Path) -> None:
     blank = replace(a_spec(), album="", artist="", date="")
     F.save(layout, "album", blank, replace(a_plan(), album="", artist="", date=""))
     assert F.read_spec(layout.spec_file("album")).album == ""
+
+
+def test_a_record_being_re_ripped_keeps_every_side_visible(tmp_path: Path) -> None:
+    """The new capture is in raw and the rest are still in archive. Resolving
+    the record to one directory made every side but the new one disappear -
+    from the side tabs, the canvas and the album's own answer - a step into a
+    re-rip and with no sign of why."""
+    layout = a_layout(tmp_path)
+    for letter in ("a", "b", "c", "d"):
+        a_side(layout.archive / "album", letter)
+    a_side(layout.raw / "album", "b")
+    assert layout.sides_on_disk("album") == ["a", "b", "c", "d"]
+
+
+def test_a_re_ripped_side_is_read_from_raw_and_the_rest_from_archive(
+    tmp_path: Path,
+) -> None:
+    layout = a_layout(tmp_path)
+    a_side(layout.archive / "album", "a")
+    a_side(layout.archive / "album", "b")
+    (layout.raw / "album").mkdir(parents=True, exist_ok=True)
+    (layout.raw / "album" / "side-b.flac").write_bytes(b"new")
+    assert layout.side_file("album", "a").parent == (layout.archive / "album").resolve()
+    assert layout.side_file("album", "b").parent == (layout.raw / "album").resolve()
+    assert layout.side_file("album", "b").read_bytes() == b"new"
+
+
+def test_a_side_nowhere_at_all_is_named(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    a_side(layout.raw / "album", "a")
+    with pytest.raises(FileNotFoundError, match="no side"):
+        layout.side_file("album", "z")
