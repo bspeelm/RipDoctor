@@ -264,15 +264,13 @@ function renderAlbums(keep) {
   return sel.value;
 }
 
-// `keep` names the record to land on. Omit it to stay where you are, falling
-// back to the first record on a fresh load; pass NEW_ALBUM to deliberately
-// land on nothing, which is what archiving a record wants.
+// `keep` names the record to land on. Omit it to stay where you are - which on
+// a fresh load is nothing, because the page opens ready to start a record
+// rather than aimed at whichever one happens to sort first.
 async function refreshAlbums(keep) {
   const { albums } = await api("/api/albums?archive=1");
   albumsHeld = albums.filter((a) => !a.old_format);
-  const want = keep === undefined
-    ? (S.slug || (albumsHeld.length ? albumsHeld[0].slug : NEW_ALBUM))
-    : keep;
+  const want = keep === undefined ? (S.slug || NEW_ALBUM) : keep;
   const pick = renderAlbums(want);
 
   // Only worth mentioning for albums still in raw/, where an unreadable plan
@@ -297,6 +295,7 @@ function startNewAlbum() {
     $(id).value = ""; $(id).readOnly = false; $(id).title = "";
   }
   setSideChoices([]);
+  loadPunchTracks();            // it follows the selection, and there is none
   const none = !albumsHeld.length;
   status(none ? "no records yet — rip a side to start one" : "", none);
 }
@@ -307,6 +306,9 @@ async function openAlbum(slug) {
   S.slug = slug;
   status("loading…", true);
   S.meta = await api(`/api/album/${slug}`);
+  // What the record is, before anything is encoded. Building a waveform takes
+  // minutes on a fresh side, and all of this comes from the document.
+  showRecord();
   // A record opens whether or not its waveform could be built. Letting this
   // through left the header on "loading…" and every panel below it showing the
   // previous record - the side tabs, the captures on disk, the re-rip picker -
@@ -318,37 +320,41 @@ async function openAlbum(slug) {
     unprepared = e.message;
     logline(`could not prepare ${slug}: ${e.message}`);
   }
-  S.bySide = {};
-  for (const letter of S.meta.sides) {
-    S.bySide[letter] = (S.meta.tracks_by_side[letter] || []).map((t) => ({ ...t }));
-  }
   S.sideData = {};
-  enableActions();
-  $("#md-artist").value = S.meta.artist || "";
-  $("#md-album").value = S.meta.album || "";
-  $("#md-date").value = S.meta.date || "";
-  loadArtState();
-  renderSideTabs();
+  renderSideTabs();             // the record was re-read; a side may have stopped
   const rec = S.meta.recording || [];
   const first = S.meta.sides.find((s) => !rec.includes(s));
   if (first) await openSide(first);
-  else {
-    status(`every side of ${slug} is still recording`, true);
-    renderSideTabs();
-  }
+  else status(`every side of ${slug} is still recording`, true);
   loadReview();
-  loadRipSides();               // per-album, so it follows the selection
-  // and so does the Rip panel: the record is open, so the side it has not got
-  // yet is the one you are about to record. The list behind the picker is
-  // loaded when that panel is shown, not here - opening a record should not
-  // wait on something no one is looking at.
-  showRecordInRipPanel(S.meta.artist, S.meta.album, S.meta.sides);
   refreshAlignButton();
   refreshArchiveButton();
   renderPipeline();
   markDirty(false);
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
          !!unprepared);
+}
+
+// Everything a record's own document answers: its names, its sides, and what
+// the Rip and Punch panels are aimed at. None of it waits on an encode, and it
+// used to - so choosing a record left both panels describing the previous one
+// until the waveform finished. ADR-051.
+function showRecord() {
+  S.bySide = {};
+  for (const letter of S.meta.sides) {
+    S.bySide[letter] = (S.meta.tracks_by_side[letter] || []).map((t) => ({ ...t }));
+  }
+  enableActions();
+  $("#md-artist").value = S.meta.artist || "";
+  $("#md-album").value = S.meta.album || "";
+  $("#md-date").value = S.meta.date || "";
+  loadArtState();
+  renderSideTabs();
+  loadRipSides();               // per-album, so it follows the selection
+  // The record is open, so the side it has not got yet is the one you are
+  // about to record.
+  showRecordInRipPanel(S.meta.artist, S.meta.album, S.meta.sides);
+  loadPunchTracks();            // Punch follows the selection too
 }
 
 function renderSideTabs() {

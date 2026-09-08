@@ -1593,3 +1593,23 @@ rather than the removal being assumed to have worked.
 
 The built-in tagger keeps no database, so nothing of its can outlive the files.
 It answers "nothing is stale" rather than being special-cased at every call.
+
+## ADR-051 — a record's own document fills the panels before anything is encoded
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+Choosing a record ran `ensurePrepared` before anything was drawn, so the Rip
+and Punch panels went on describing the previous record until the waveform
+finished - minutes on a fresh side. Nothing they show needs it: the names, the
+sides, the sides already on disk and the punchable tracks all come from the
+record's own document, which has already been fetched by then.
+
+They are filled from it first, and the waveform is waited for afterwards, for
+the one thing that genuinely needs it. The side tabs are drawn again after,
+because preparing re-reads the record and a side may have stopped recording in
+the meantime.
+
+**The page opens on "new album".** It used to land on whichever record sorted
+first, which is a record you were probably finished with - and the ordinary
+reason to open the page is to rip something. Selecting is one action; undoing a
+record you did not mean to open is more.
