@@ -1362,3 +1362,51 @@ data problem — and the tagger writing tags from the plan is correct, not a
 fault. The rule that holds is the one nothing can bypass: nothing outside
 `store/files.py` writes a spec or a plan, enforced by a test, so the
 reconciliation cannot be gone around.
+
+## ADR-045 — a gap has to be near the boundary it is taken for
+
+**Status:** accepted. Set by the author, 2026-09-07.
+
+Fitting requires two independent constraints to agree: the cut must fall inside
+a measured gap, and it must fall at the catalogue duration from the previous
+cut. The gap was chosen as the nearest one to the prediction, with no limit on
+how far away that was allowed to be.
+
+A boundary the detector never found — a fade between two tracks, an intro
+running straight into the next — has no gap near it at all. The nearest gap is
+then the *next* boundary, and taking it swallows a whole track and displaces
+every track after it.
+
+One record lost two tracks to this. A 69-second intro was fitted to a gap 190
+seconds past where the catalogue put its end; by the last track on the side the
+accumulated displacement put its start after the side had finished, and the plan
+was refused. The refusal was correct and the cause was four boundaries earlier.
+The report had said so all along: every one of those cuts is marked `OUTSIDE`,
+one of them by 192 seconds, and the gap was used anyway.
+
+**A gap is now taken only within half a track of the prediction.** Beyond that
+the catalogue is the better answer, which is the fallback that already existed
+and could never be reached while the nearest gap anywhere on the side counted as
+near. A gap that contains the prediction still wins outright, whatever its size.
+
+No boundary in the golden records moves, which is the point: this changes only
+fits that were already wrong.
+
+### What was tried first, and why it was backed out
+
+The same record's catalogue runs 65 seconds long over 40 minutes — the digital
+master against a pressing of it — so the first attempt scaled catalogue
+durations to each side's measured span. It fixed that record, and it moved a
+boundary on a record whose fit was already right and had been checked by ear.
+
+That is the wrong trade twice over. A boundary somebody verified is not to be
+moved by a change aimed at a different record. And absorbing the disagreement
+between the two sources is the opposite of what this tool is for: where they
+disagree the cut is clamped and the disagreement is *reported*, so a person can
+judge it. Scaling hides exactly the evidence that judgement needs.
+
+**A side that still cannot hold its tracks says so in words.** `end 1164.65 is
+not after start 1180.00` is arithmetic, and true, and tells nobody what to do.
+Naming the side, the number of tracks, the catalogue total against the measured
+span, and the two ways out — another release, or an ear-set boundary — is a
+finding somebody can act on.

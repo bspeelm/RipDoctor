@@ -344,7 +344,7 @@ def test_a_gap_too_far_from_the_prediction_is_not_this_boundary() -> None:
     in - has no gap near it, and the nearest one is the next boundary. Taking it
     swallows a whole track: one record lost two to a 69-second intro."""
     # Three 60s tracks with gaps, but the catalogue says the first is 10s long.
-    env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
+    _env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
     near = FIT._pick_gap(gapset, want=20.0, after=10.0, reach=5.0)
     assert near is None, "a gap 50s from a 10s track is a neighbour's"
     assert FIT._pick_gap(gapset, want=20.0, after=10.0) is not None
@@ -352,7 +352,7 @@ def test_a_gap_too_far_from_the_prediction_is_not_this_boundary() -> None:
 
 def test_a_gap_containing_the_prediction_always_wins() -> None:
     """Reach only decides between gaps that do not contain it."""
-    env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
+    _env, gapset = side_with_gaps(n_tracks=3, track=60.0, gap=6.0)
     inside = FIT._pick_gap(gapset, want=71.0, after=10.0, reach=0.0)
     assert inside is not None and inside.lo <= 71.0 <= inside.hi
 
