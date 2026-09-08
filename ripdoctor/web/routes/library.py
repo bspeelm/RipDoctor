@@ -212,13 +212,36 @@ def add(app: App, service: Service) -> None:
         where, count = importer.locate(
             service.runner, service.settings.library, plan.artist, plan.album
         )
+        stale = importer.stale(
+            service.runner, service.settings.library, plan.artist, plan.album
+        )
         return H.ok(
             {
                 "existing": None
                 if where is None
                 else {"where": str(where), "tracks": count},
+                # Rows without files. They read as a copy already there, and
+                # they stop an import part-way. ADR-050.
+                "stale": None
+                if stale is None
+                else {**stale.as_dict(), "note": stale.note()},
             }
         )
+
+    @app.route("POST", "/api/library/clear-stale/([^/]+)")
+    def clear_stale(r: H.Request) -> H.Response:
+        """Remove rows whose files are gone. Refuses if any of them is there."""
+        plan = _plan_of(service, slug_of(r))
+        importer = IMP.choose(
+            service.runner, service.settings.importer, service.state_dir
+        )
+        try:
+            cleared = importer.clear_stale(
+                service.runner, service.settings.library, plan.artist, plan.album
+            )
+        except IMP.ImportFailed as e:
+            raise H.HttpError(409, str(e)) from e
+        return H.ok({"cleared": cleared.tracks, "where": str(cleared.where)})
 
     @app.route("GET", "/api/library")
     def library(_r: H.Request) -> H.Response:

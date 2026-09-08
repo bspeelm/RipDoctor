@@ -215,6 +215,15 @@
         <p class="mono" id="imp-relabel-what"></p>
         <button type="button" id="imp-relabel">Re-label from this release</button>
       </div>
+      <div id="imp-stale-wrap" class="warn" hidden>
+        <b>beets has rows for this album, but the files are gone.</b>
+        <p class="hint">They were deleted outside beets. It still counts them,
+          treats this import as a duplicate and stops part-way. Clearing removes
+          database rows only &mdash; never files, and it refuses unless every
+          file it names is confirmed absent.</p>
+        <p class="mono" id="imp-stale-what"></p>
+        <button type="button" id="imp-stale-clear">Clear the stale rows</button>
+      </div>
       <div id="imp-replace-wrap" class="warn" hidden>
         <b>This album is already in the library.</b>
         <p class="hint">Importing writes into that same directory, so a track

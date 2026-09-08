@@ -1568,3 +1568,28 @@ appears when the field is empty rather than leaving it to be inferred. The
 confirmation says the same thing in a sentence. Cover art is not fetched on this
 path - there is no release to fetch it from - which is what the artwork offer
 after an import is for.
+
+## ADR-050 — rows without files are named, and cleared without touching files
+
+**Status:** accepted. Set by the author, 2026-09-08.
+
+beets counts what its database says, not what is on disk. Delete an album's
+files outside beets and the rows stay; the next import of that record is treated
+as a duplicate and stops part-way, with a message about a duplicate rather than
+about rows for files that are gone. This bit this project's own library during
+0.1.0 testing, and the cause took a while to find because nothing said it.
+
+**It is named in three places**, each being a moment somebody would want to
+know: the import dialog, before an import is started; the import's failure, when
+one has already been refused; and `ripdoctor doctor`, which reports how many
+registered files are missing across the whole library.
+
+**Clearing removes rows only, and refuses unless every file is absent.**
+`beet remove` without `-d` leaves files alone, which is right here because there
+are none left to leave. Every path the query names is checked first, so this can
+never quietly unregister an album that is actually there - the check is the
+feature, not the safety rail around it. The rows are counted again afterwards
+rather than the removal being assumed to have worked.
+
+The built-in tagger keeps no database, so nothing of its can outlive the files.
+It answers "nothing is stale" rather than being special-cased at every call.

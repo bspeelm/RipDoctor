@@ -650,6 +650,35 @@ def test_a_record_already_in_the_library_is_reported_before_the_import(
     assert body["existing"]["tracks"] == 1
 
 
+def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
+    """They read as a copy already there and stop an import part-way, with a
+    message from beets that does not say why."""
+    service, _library = with_library(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    gone = tmp_path / "gone" / "01 One.flac"
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=f"A Record{I_SEP}{gone}".encode()
+    )
+    body = get(build(service), "/api/library/existing/album", service).json()
+    assert body["stale"]["tracks"] == 1
+    assert "deleted outside beets" in body["stale"]["note"]
+
+
+def test_stale_rows_are_cleared_only_when_every_file_is_absent(
+    tmp_path: Path,
+) -> None:
+    service, _library = with_library(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=f"A Record{I_SEP}{there}".encode()
+    )
+    r = post(build(service), "/api/library/clear-stale/album", service)
+    assert r.status == 409 and "still there" in r.json()["error"]
+    assert not [c for c in service.runner.calls if "remove" in c]
+
+
 def test_a_record_that_is_not_there_reports_nothing(tmp_path: Path) -> None:
     service, _library = with_library(tmp_path)
     body = get(build(service), "/api/library/existing/album", service).json()

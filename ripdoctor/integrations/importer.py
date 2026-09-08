@@ -47,6 +47,27 @@ class Outcome:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class Stale:
+    """Rows a library database holds for files that are no longer there."""
+
+    tracks: int
+    where: Path
+    query: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {"tracks": self.tracks, "where": str(self.where), "query": self.query}
+
+    def note(self) -> str:
+        s = "" if self.tracks == 1 else "s"
+        return (
+            f"beets still has {self.tracks} row{s} registered at {self.where}, but "
+            "none of those files exist any more - they were deleted outside beets. "
+            "It will treat this import as a duplicate and stop part-way. Clear the "
+            "stale rows first; that removes database rows only, never files."
+        )
+
+
 class Importer(Protocol):
     @property
     def name(self) -> str:
@@ -73,6 +94,14 @@ class Importer(Protocol):
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]: ...
+
+    def stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale | None: ...
+
+    def clear_stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +142,16 @@ class Tagger:
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]:
         return T.locate(library, artist, album)
+
+    def stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale | None:
+        return None  # it keeps no database, so nothing can outlive the files
+
+    def clear_stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale:
+        raise ImportFailed("the tagger keeps no database - there is nothing to clear")
 
 
 # beets colourises its output, and the escape sequences are litter in a browser.
@@ -243,9 +282,11 @@ class Beets:
         if left:
             # beets leaves the files where they were when it declines, so what
             # is still in review is the honest measure of what did not import.
+            why = self.stale(runner, library, plan.artist, plan.album, mbid=mbid)
+            said = f"\n\n{why.note()}" if why else ""
             raise ImportFailed(
                 f"{len(left)} of the tracks are still in review - beets did not "
-                f"take them.\n\n{output[-2000:]}"
+                f"take them.{said}\n\n{output[-2000:]}"
             )
 
         where, count = self.locate(runner, library, plan.artist, plan.album, mbid=mbid)
@@ -267,27 +308,75 @@ class Beets:
         have chosen would be checking the wrong directory on every install that
         configured beets differently, which is all of them.
         """
-        # An empty name is not a query, it is every record in the library:
-        # `beet ls album:` matches them all, and the gate then reports a record
-        # that has nothing to do with the one being imported.
-        if not mbid and not album:
+        query = _query(album, mbid)
+        paths = self._paths(runner, query) if query else []
+        if not paths:
             return None, 0
-        query = [f"mb_albumid:{mbid}"] if mbid else [f"album:{album}"]
+        return paths[0].parent, len(paths)
+
+    def _paths(self, runner: Runner, query: list[str]) -> list[Path]:
+        """Every file beets has registered under a query, in its own order."""
         try:
             result = runner.run(
                 self._argv(["ls", "-f", _SEP.join(("$album", "$path")), *query]),
                 timeout=300,
             )
         except ToolMissing:
-            return None, 0
-        paths = [
+            return []
+        return [
             Path(line.split(_SEP)[-1])
             for line in _plain(result.text).splitlines()
             if _SEP in line
         ]
-        if not paths:
-            return None, 0
-        return paths[0].parent, len(paths)
+
+    def stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale | None:
+        """Rows whose files are all gone, or nothing. ADR-050."""
+        query = _query(album, mbid)
+        if not query:
+            return None
+        paths = self._paths(runner, query)
+        if not paths or any(p.exists() for p in paths):
+            return None
+        return Stale(len(paths), paths[0].parent, " ".join(query))
+
+    def all_stale(self, runner: Runner) -> tuple[int, int]:
+        """How many registered files are missing, of how many registered."""
+        paths = self._paths(runner, [])
+        return sum(1 for p in paths if not p.exists()), len(paths)
+
+    def clear_stale(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Stale:
+        """Drop the rows, never the files, and only once every path is gone.
+
+        `beet remove` without `-d` leaves files alone, which is right here
+        because there are none left to leave. ADR-050.
+        """
+        found = self.stale(runner, library, artist, album, mbid=mbid)
+        if found is None:
+            raise ImportFailed(
+                f"nothing stale for {album or mbid} - either beets has no rows for "
+                "it, or the files it names are still there"
+            )
+        query = _query(album, mbid) or []
+        runner.run(self._argv(["remove", "-f", *query]), timeout=600)
+        left = self._paths(runner, query)
+        if left:
+            raise ImportFailed(f"{len(left)} row(s) are still registered")
+        return found
+
+
+def _query(album: str, mbid: str) -> list[str]:
+    """What to ask beets for this record, or nothing if there is no question.
+
+    An empty name is not a query, it is every record in the library: `beet ls
+    album:` matches them all.
+    """
+    if mbid:
+        return [f"mb_albumid:{mbid}"]
+    return [f"album:{album}"] if album else []
 
 
 def _plain(text: str) -> str:

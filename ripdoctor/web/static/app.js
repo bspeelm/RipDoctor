@@ -778,6 +778,7 @@ function openImport() {
   $("#imp-close").textContent = "Close";
   $("#imp-results").innerHTML = "";
   $("#imp-relabel-wrap").hidden = true;
+  $("#imp-stale-wrap").hidden = true;
   // What the record is called, from the plan the import tags from. Editable,
   // they fed only the search box and a confirm quoting them back. ADR-048.
   const g = guessFromSlug(S.slug);
@@ -1107,13 +1108,37 @@ function showReplaceOffer(existing, { keepTick = false } = {}) {
   $("#imp-go").disabled = !$("#imp-replace").checked;
 }
 
+// Rows without files read as a copy already there and stop an import part-way,
+// so they are shown before it is started rather than after. ADR-050.
+function showStale(stale) {
+  $("#imp-stale-wrap").hidden = !stale;
+  if (stale) $("#imp-stale-what").textContent =
+    `${stale.tracks} rows registered at ${stale.where}`;
+}
+
+async function clearStale() {
+  const b = $("#imp-stale-clear");
+  const was = b.textContent;
+  b.disabled = true; b.textContent = "clearing\u2026";
+  try {
+    const r = await postJSON(`/api/library/clear-stale/${S.slug}`, {});
+    status(`cleared ${r.cleared} stale rows`);
+    await checkExisting();
+  } catch (e) {
+    $("#imp-err").textContent = e.message;
+  }
+  b.disabled = false; b.textContent = was;
+}
+
 // Ask up front rather than finding out from a failed import. True regardless of
 // which path is taken, so it does not wait for a release id.
 async function checkExisting() {
   try {
-    const { existing } = await api(`/api/library/existing/${S.slug}`);
+    const { existing, stale } = await api(`/api/library/existing/${S.slug}`);
+    showStale(stale);
     showReplaceOffer(existing, { keepTick: true });
   } catch {
+    showStale(null);
     // The import itself still refuses, so this is only the early warning - but
     // a warning that could not be checked must not read as one that was.
     showReplaceOffer(null, { keepTick: true });
@@ -1867,6 +1892,7 @@ function wire() {
   $("#imp-art-fetch").onclick = artFetch;
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
+  $("#imp-stale-clear").onclick = clearStale;
   $("#imp-mbid").oninput = showCatalogueState;
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();

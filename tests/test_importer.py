@@ -334,3 +334,80 @@ def test_a_record_with_a_release_is_left_to_the_catalogue(tmp_path: Path) -> Non
     fake = moving_beets(review)
     I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="aaa")
     assert not [c for c in fake.calls if c[0] == "metaflac"]
+
+
+# ---------------------------------------------------------------- stale rows
+
+
+def _rows(tmp_path: Path, *names: str) -> bytes:
+    return "\n".join(f"A Record{SEP}{tmp_path / n}" for n in names).encode()
+
+
+def test_rows_whose_files_are_gone_are_stale(tmp_path: Path) -> None:
+    fake = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=_rows(tmp_path, "01.flac", "02.flac")
+    )
+    found = I.Beets().stale(fake, "/music", "A Band", "A Record")
+    assert found is not None and found.tracks == 2
+    assert "deleted outside beets" in found.note()
+
+
+def test_rows_are_not_stale_while_any_file_is_there(tmp_path: Path) -> None:
+    (tmp_path / "02.flac").write_bytes(b"fLaC")
+    fake = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=_rows(tmp_path, "01.flac", "02.flac")
+    )
+    assert I.Beets().stale(fake, "/music", "A Band", "A Record") is None
+
+
+def test_clearing_refuses_while_a_file_is_still_there(tmp_path: Path) -> None:
+    """Rows only, never files - so it can never unregister an album that is
+    actually present."""
+    (tmp_path / "01.flac").write_bytes(b"fLaC")
+    fake = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=_rows(tmp_path, "01.flac")
+    )
+    with pytest.raises(I.ImportFailed, match="still there"):
+        I.Beets().clear_stale(fake, "/music", "A Band", "A Record")
+    assert not [c for c in fake.calls if "remove" in c]
+
+
+def test_clearing_removes_rows_and_leaves_files_alone(tmp_path: Path) -> None:
+    class Once(FakeRunner):
+        seen = 0
+
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if "ls" in args:
+                self.seen += 1
+                # The second listing is after the removal, and empty.
+                if self.seen > 1:
+                    return super().run(["true"], stdin=stdin, timeout=timeout)
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    fake = Once(installed={"beet"}).expect("ls", stdout=_rows(tmp_path, "01.flac"))
+    cleared = I.Beets().clear_stale(fake, "/music", "A Band", "A Record")
+    assert cleared.tracks == 1
+    removed = [c for c in fake.calls if "remove" in c]
+    assert removed and "-d" not in removed[0], "it must never delete files"
+
+
+def test_clearing_refuses_when_there_is_nothing_stale() -> None:
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=b"")
+    with pytest.raises(I.ImportFailed, match="nothing stale"):
+        I.Beets().clear_stale(fake, "/music", "A Band", "A Record")
+
+
+def test_the_tagger_has_no_database_to_go_stale() -> None:
+    assert I.Tagger().stale(FakeRunner(), "/music", "A Band", "A Record") is None
+
+
+def test_a_refused_import_names_stale_rows_as_the_cause(tmp_path: Path) -> None:
+    """The failure beets reports does not say why, and this is the usual why."""
+    review = Path(a_review(tmp_path))
+    gone = tmp_path / "music"
+    fake = FakeRunner(installed={"beet", "metaflac"}).expect(
+        "ls", stdout=f"A Record{SEP}{gone / '01.flac'}".encode()
+    )
+    with pytest.raises(I.ImportFailed, match="deleted outside beets"):
+        I.Beets().apply(fake, a_plan(), str(review), "/music")
