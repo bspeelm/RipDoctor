@@ -20,12 +20,7 @@ MAX_IMAGE = 32 * 1024 * 1024
 
 
 def _album(service: Service, slug: str) -> Path:
-    """Where the tracks this art belongs to are: the library, then review.
-
-    A record with no release in the catalogue is exactly the one somebody has
-    to supply a cover for, and requiring the library copy meant that could only
-    be done after an import. ADR-042.
-    """
+    """Where the tracks this art belongs to are: review, then the library."""
     where = service.layout.plan_file(slug)
     if not where.is_file():
         raise H.HttpError(404, f"no plan for {slug}")
@@ -33,14 +28,16 @@ def _album(service: Service, slug: str) -> Path:
     # of the two happened to be read points at Unknown Artist the moment that
     # one is blank, and the record is then reported as not being in a library it
     # is plainly in.
+    # Review first, where the cuts are until an import moves them: beets takes
+    # a cover from the folder it imports, so art put there travels in. ADR-042.
+    cut = service.layout.review_dir(slug)
+    if cut.is_dir() and any(cut.glob("*.flac")):
+        return cut
     album, artist, _date, _old = named(service.layout, slug)
     if service.settings.library:
         filed = T.album_dir(service.settings.library, artist, album)
         if filed.is_dir():
             return filed
-    cut = service.layout.review_dir(slug)
-    if cut.is_dir() and any(cut.glob("*.flac")):
-        return cut
     raise H.HttpError(409, f"{album or slug} has no cut tracks and is not filed yet")
 
 

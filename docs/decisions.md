@@ -1311,13 +1311,19 @@ The group is looked up rather than stored, for the same reason the library is
 not named twice: it is derived from the release id, and a kept copy is a second
 thing to hold in step. A stale one points at another record's sleeve.
 
-**Art can be attached before an import.** Every artwork route required the album
-to be in the library already, so a record with no release in the catalogue —
-exactly the record somebody has to supply a cover for by hand — could not be
-given one until after it was filed. The library copy still wins where there is
-one, and after an import there is no other, because beets moves the cuts out of
-review. Art applied early is embedded in each track and travels with it; the
-cover file does not, so such a record is worth giving art again once filed.
+**Art is attached before an import, not after.** Every artwork route required
+the album to be in the library already, so a record with no release in the
+catalogue — exactly the record somebody has to supply a cover for by hand —
+could not be given one until after it was filed.
+
+The cuts in `review/` now win while they are there. This is not a preference:
+beets is commonly configured with `fetchart` taking `filesystem` as a source,
+which picks up a `cover.jpg` from the folder it is importing and embeds it into
+every track on the way past. Art put there travels in with the record. Put in
+the library afterwards, it has missed the import that would have carried it,
+and the embedding has to be done again by hand — which is what "the import did
+not attach an image" turned out to mean. After an import there is no review
+copy left, so the library one is the only one and still wins then.
 
 A cover that misses the size floor is reported with its size and a suggestion to
 upload one instead. Twenty pixels under is a judgement somebody can overrule

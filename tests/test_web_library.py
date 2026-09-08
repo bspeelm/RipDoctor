@@ -416,15 +416,21 @@ def test_art_can_be_given_to_a_record_before_it_is_imported(tmp_path: Path) -> N
     assert (review / "cover.jpg").is_file()
 
 
-def test_the_library_copy_wins_when_there_is_one(tmp_path: Path) -> None:
-    """After an import there is no other: beets moves the cuts out of review."""
+def test_the_cuts_win_while_they_are_still_in_review(tmp_path: Path) -> None:
+    """beets is commonly set to take a cover from the folder it is importing,
+    so art put there travels in with the tracks. After an import there is no
+    review copy left and the library one is the only one."""
     service, album = in_the_library(tmp_path)
     review = service.layout.review_dir("album")
     review.mkdir(parents=True)
     (review / "01 One.flac").write_bytes(b"fLaC" + b"\x00" * 2000)
     assert uploading(service, JPEG).status == 200
+    assert (review / "cover.jpg").is_file()
+
+    for cut in review.glob("*.flac"):
+        cut.unlink()
+    assert uploading(service, JPEG).status == 200
     assert (album / "cover.jpg").is_file()
-    assert not (review / "cover.jpg").exists()
 
 
 def test_candidates_are_offered_with_their_sizes(tmp_path: Path) -> None:

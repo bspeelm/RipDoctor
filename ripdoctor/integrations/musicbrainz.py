@@ -238,12 +238,10 @@ def likely(releases: list[Release], keep: int = PROBE) -> list[Release]:
 def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
     """Fill in a release from the catalogue, keeping anything already known.
 
-    Everything, not only the tracklist. A first pass has nothing but an id to
-    start from, and a release that came back with no name gave the record it
-    was fitting no name either - which every path built from one then took.
+    Everything, not only the tracklist: a first pass has nothing but an id, and
+    a release that came back unnamed named the record it was fitting. ADR-042.
     """
-    # artist-credits as well as recordings: without it the answer carries no
-    # artist at all, and a release fetched from an id came back half-named.
+    # artist-credits too: without it the answer carries no artist at all.
     data = _request(
         fetcher,
         f"{BASE}/release/{release.mbid}?inc=recordings+artist-credits&fmt=json",
