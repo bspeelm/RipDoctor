@@ -118,15 +118,15 @@ The password is hashed on the way to disk, so that is the only time you see it.
 `--user` sets a different name on first run.
 
 By default it listens on `127.0.0.1:8080` - that machine only. To reach it from
-a laptop, set the address and port in RipDoctor's config file:
+a laptop, change the address in RipDoctor's config file:
 
 ```toml
 bind = "0.0.0.0"
-port = 8084
+port = 8080      # any free port
 ```
 
 or pass `--bind` and `--port` to try it once. Then open
-`http://<the machine>:8084`.
+`http://<the machine>:8080`.
 
 It asks for a login whichever way it is bound: it can write to your pool and run
 ffmpeg, so the password is the thing that makes it safe to be reachable at all.
