@@ -2,11 +2,17 @@
 
 Capture a vinyl side, find the track boundaries, cut them where you want them.
 
-**Status: complete, and not yet run against a turntable.** Every step works and
-is tested end to end - capture, fitting, cutting, the ear check, import and
-archive - but only against synthesised and recorded audio. Nothing here has met
-a sound card. See [docs/decisions.md](docs/decisions.md) for what has been
-decided and why.
+**Status: it has taken a record.** One LP, start to finish on real hardware -
+both sides captured from the turntable, boundaries fitted and checked, tracks
+cut, tagged and filed with cover art and album-mode ReplayGain, and the raw
+sides archived only once the record was provably in the library. Driven from
+the page throughout, with nothing typed at a shell to get it through.
+
+That is one record, on one machine, through one signal chain, by the person who
+wrote it. It is the difference between "the tests pass" and "it works", and it
+is not the same as "it works for you". See
+[docs/decisions.md](docs/decisions.md) for what has been decided and why, and
+`ripdoctor doctor` for what this machine is missing.
 
 ## The problem it solves
 
@@ -178,11 +184,11 @@ happening, before twenty minutes have gone by. Drop the needle when it reads
 | 0 — scaffold, decisions, budgets, architecture tests | done |
 | 1 — the detection and fitting core, and its tests | done |
 | 2 — audio seam, config, doctor; offline CLI | done |
-| 3 — capture, the live meter, auto-stop | done; not yet run against hardware |
-| 7 — validate on the server, then cut over | not started |
-| 4 — web interface | done, except listening while cueing (untested against hardware) |
+| 3 — capture, the live meter, auto-stop | done, and run against a turntable |
+| 4 — web interface | done |
 | 5 — tagging and import | done |
-| 6 — documentation revision, then 1.0 | revision done; 1.0 not tagged |
+| 6 — documentation revision | done |
+| 7 — validate on the server, then cut over | done; cut over 2026-09-07 |
 
 ## Development
 
