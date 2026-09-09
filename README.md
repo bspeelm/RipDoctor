@@ -137,7 +137,7 @@ On Python 3.14 the suite is occasionally unreliable through no fault of its own
 NameError for something imported at the top of the file - is the interpreter.
 Run it again. CI uses 3.11 to 3.13.
 
-## Prior work
+## Alternatives
 
 [VinylFlow](https://github.com/olimic1000/vinylflow) (MIT) covers adjacent
 ground and is worth a look if RipDoctor is not what you want. It takes a
