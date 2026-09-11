@@ -1613,3 +1613,115 @@ the meantime.
 first, which is a record you were probably finished with - and the ordinary
 reason to open the page is to rip something. Selecting is one action; undoing a
 record you did not mean to open is more.
+
+## ADR-052 — The ceiling moves to 7,400, and that breaks a promise
+
+**Status:** accepted. Set by the author, 2026-09-11. Supersedes part of ADR-036.
+
+ADR-036 moved the ceiling to 7,000 and committed to the direction of the next
+move: *"the next number to change should be a smaller one, chosen during the
+trim, with something retired to fit it."* This is a move in the other direction,
+and it is worth saying plainly rather than leaving a reader to find the
+contradiction.
+
+**What changed.** Audio can now enter the pool without being recorded here. That
+is an intake, a scratch store and a route module — about 230 lines, budgeted at
+280 — and there were 113 spare.
+
+**Why not the trim first.** The trim ADR-036 promised is a revision pass of
+unknown size in front of a feature that is wanted now. Doing it under pressure to
+free exactly 280 lines is the worst version of it: a trim measured against a
+number is how a guard gets dropped and called restraint. The trim is still owed,
+and it is still meant to end with a smaller number.
+
+**What this costs.** A ceiling that has now moved four times is a ceiling being
+followed rather than set, and that is the honest reading. What keeps it from
+being decoration is that every move has its own record saying what changed, and
+that nothing has ever been trimmed, no guard dropped and no case skipped to fit
+one of these numbers.
+
+**The contradiction worth naming.** ADR-036 argued for live monitoring as *"one
+of the things this does that a digitise-an-upload tool cannot"*. The project
+positioned itself against the shape of this feature in the same record whose
+number is being raised for it.
+
+That reads worse than it is, and `docs/north-star.md` now settles it rather than
+this record arguing it: the contrast was with a tool that *only* accepts uploads,
+and it is still true. Live monitoring is untouched and remains the primary path.
+The invariant begins *get a side*, not *record a side*, and a side that arrives
+already digital needs its boundaries found and checked exactly as a recorded one
+does.
+
+**What has not moved, through all four.** The comment ratio. Still hard, still
+25%, and still the only number here that pushes back on writing more prose about
+the code instead of writing less code.
+
+---
+
+## ADR-053 — A file arrives in pieces, and becomes a side in one instant
+
+**Status:** accepted. Set by the author, 2026-09-11.
+
+How a complete audio file becomes a record, given a web layer that was built on
+the assumption that a request body fits in memory.
+
+**The body does not fit.** `MAX_BODY` is 32 MB and the adapter reads
+`Content-Length` bytes in one call. An album is 300-700 MB. `Request` is a frozen
+value whose body is complete `bytes`, which is ADR-010, so a handler cannot
+stream a request in.
+
+**The browser sends pieces; the server appends them.** Each request stays well
+under the cap, `Request` stays a value, and the adapter learns nothing about
+paths. Resume and progress fall out of it: the client asks how much arrived and
+continues from there, and `fetch` has no upload-progress event to offer
+otherwise.
+
+Raising the cap was the obvious alternative and is the wrong one. The number is
+not a policy, it is the size of the object the adapter materialises; and the
+check runs before routing, so making it per-route means teaching the socket layer
+which paths are special — exactly the knowledge ADR-010 put above it. Spooling
+the body to a file for one path prefix is fewer lines and was rejected for the
+same reason, plus it has no resume.
+
+**There is no upload id.** One file per record means the record *is* the upload,
+so the scratch path comes from the slug. Every failure — a dropped connection,
+two tabs, a retried chunk — becomes arithmetic on the scratch file's size, with
+no in-memory table a restart could strand.
+
+**The offset check is advisory, not a lock.** A client that lies still wins. The
+backstop is that a wrongly assembled file will not decode, and the decode is
+required before anything is placed.
+
+**The scratch lives outside `raw/`,** and the reason is sharper than the
+half-written-file hazard. `forget` refuses to drop a name while any file except a
+capture log sits under the album directory, so an abandoned scratch there would
+pin a name that belongs to nothing, permanently. It stays on the same filesystem
+as its destination, which is what makes the final rename atomic — the same
+reasoning the document writer already uses.
+
+**A side appears in one instant.** The file is verified, transcoded and verified
+again while still outside `raw/`, and only then renamed into place. The first
+moment anything can observe a side, it is complete and has been decoded end to
+end. Nothing is ever written under a side name, so the growing-file guard never
+has to fire, and the measurement cache invalidates itself because it keys on size
+and mtime.
+
+**Everything is transcoded, including a FLAC.** A file named `.flac` may be FLAC
+in another container, mono, 24/192, or carrying a picture. One pass normalises
+the container and produces a header with a length in it. Two flags carry the
+weight: the first audio stream only, because an embedded cover otherwise becomes
+a stream and the side's duration then probes as zero — a fault that surfaces
+three steps from its cause; and no metadata, because a purchased download arrives
+tagged and those tags are what the first pass and the importer are about to
+decide. A raw side carries none, so dropping them makes the two intakes
+identical.
+
+No resampling and no channel mapping: the rate is read rather than assumed, and
+the envelope windows in samples.
+
+**Verification is the decode, and nothing else.** `flac -t` reads the whole
+stream, so a duration comparison after it would be asking a weaker question
+twice. Recorded as a decision so the absence reads as one.
+
+**The chunk size is served, not agreed.** The server names it when an upload
+begins. A number two programs both hard-code is a number that disagrees.
