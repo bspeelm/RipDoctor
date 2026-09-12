@@ -25,6 +25,7 @@
       <button data-mode="cut" class="on">Cut</button>
       <button data-mode="rip">Rip</button>
       <button data-mode="punch">Punch</button>
+      <button data-mode="upload">Upload</button>
     </span>
     <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
            title="narrows the list beside it; every record is in there, archived ones included">
@@ -51,15 +52,15 @@
          capture pane below is shared - two sets of name fields would be two
          sources of truth for what gets written. -->
     <div class="ripform" id="sourceform">
-      <h2>Rip a side</h2>
+      <h2 id="source-title">Rip a side</h2>
       <div id="recordfields">
         <div class="fields">
           <label>Artist <input id="rip-artist" placeholder="artist"></label>
           <label>Album <input id="rip-album" placeholder="album"></label>
         </div>
-        <p class="dim mono" id="rip-slug"></p>
       </div>
       <div id="ripbits">
+        <p class="dim mono" id="rip-slug"></p>
         <div class="fields">
           <label>Side <select id="rip-side" title="a side this record already has is a re-rip of it"></select></label>
           <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
@@ -70,6 +71,18 @@
         </div>
         <div id="orphans" hidden></div>
         <div id="ripsides" hidden></div>
+      </div>
+      <div id="uploadbits" hidden>
+        <p class="dim">A file you already have &mdash; a download, or a capture
+          made somewhere else. It becomes side a of this record, and every step
+          after that is the same as a rip.</p>
+        <div class="row btns">
+          <button type="button" id="up-pick">Choose a file&hellip;</button>
+          <button type="button" id="up-go" disabled>Upload</button>
+          <button type="button" id="up-cancel" class="ghost" hidden>Cancel</button>
+        </div>
+        <input type="file" id="up-file" accept="audio/*,video/*" hidden>
+        <p class="err" id="up-err"></p>
       </div>
     </div>
 
@@ -144,6 +157,20 @@
         rumble is loud full-band but dead in this band; silent groove is quiet in
         both; music is loud in both. Drop the needle when the band bar sits in
         the <b>groove</b> zone, not below it.</p>
+    </div>
+
+    <!-- The column the meter occupies during a rip, showing the equivalent for
+         an upload: what was chosen, where it is going, and how far it has got. -->
+    <div class="ripmeter" id="uploadpane" hidden>
+      <h2 id="up-what">Nothing chosen yet</h2>
+      <p class="dim mono" id="up-target"></p>
+      <div class="row"><div class="bar" id="up-bar"><i></i></div></div>
+      <p class="dim" id="up-state"></p>
+      <p class="dim" id="up-done"></p>
+      <p class="hint">Anything ffmpeg can read. It is re-encoded to FLAC on the
+        way in and checked that it decodes before it becomes a side &mdash; and
+        a lossy source stays lossy, so this does not improve a download.
+        Boundaries are found and checked by ear afterwards, in <b>Cut</b>.</p>
     </div>
   </div>
 

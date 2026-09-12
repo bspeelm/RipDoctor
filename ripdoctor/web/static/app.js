@@ -1031,19 +1031,27 @@ async function fpRun(rel) {
 function setMode(mode) {
   for (const b of document.querySelectorAll("#modes button"))
     b.classList.toggle("on", b.dataset.mode === mode);
-  // Rip and Punch are separate modes over ONE capture pane: same device, same
-  // transport, same meter. Only the left-hand form swaps.
-  const capturing = mode === "rip" || mode === "punch";
-  $("#cv").hidden = capturing;
-  $("#captureview").hidden = !capturing;
-  $("#sourceform").hidden = mode !== "rip";
+  // Rip and Upload are one job from two sources, so they share a column and the
+  // names in it. Punch is its own form. Only the two that own the capture
+  // device get the pane beside it - an upload has no capture to meter.
+  const source = mode === "rip" || mode === "punch" || mode === "upload";
+  const metering = mode === "rip" || mode === "punch";
+  $("#cv").hidden = source;
+  $("#captureview").hidden = !source;
+  $("#sourceform").hidden = mode === "punch";
   $("#punchform").hidden = mode !== "punch";
-  $("#readout").hidden = capturing;
-  $("#lower").hidden = capturing;
-  if (capturing) startRipPoll(); else stopRipPoll();
+  $("#ripbits").hidden = mode !== "rip";
+  $("#uploadbits").hidden = mode !== "upload";
+  $("#capturepane").hidden = !metering;
+  $("#uploadpane").hidden = mode !== "upload";
+  $("#source-title").textContent = mode === "upload" ? "Add a file" : "Rip a side";
+  $("#readout").hidden = source;
+  $("#lower").hidden = source;
+  if (metering) startRipPoll(); else stopRipPoll();
   if (mode === "rip") loadOrphans();
   if (mode === "punch") loadPunchTracks();
-  if (!capturing) ed.render();
+  if (mode === "upload") loadIncoming();
+  if (!source) ed.render();
 }
 
 // --------------------------------------------------------------------- rip
@@ -1065,6 +1073,135 @@ function ripSlug() {
   const slug = a && b ? slugify(a, b) : "";
   $("#rip-slug").textContent = slug ? `→ raw/${slug}/side-${side}.flac` : "";
   return slug;
+}
+
+// ------------------------------------------------------------------ upload
+
+// A file that was recorded somewhere else. Rip and Upload are the same job -
+// get audio into the record the selector names - so they share the column and
+// the names in it, and everything after the side lands is identical.
+
+let picked = null;
+let sending = false;
+
+function setBar(fraction) {
+  $("#up-bar").querySelector("i").style.width =
+    `${Math.max(0, Math.min(1, fraction)) * 100}%`;
+}
+
+const mb = (n) => `${(n / 1e6).toFixed(0)} MB`;
+
+function showPicked(file) {
+  picked = file;
+  $("#up-what").textContent = file ? file.name : "Nothing chosen yet";
+  const slug = ripSlug();
+  $("#up-target").textContent = file
+    ? `${mb(file.size)}   →   side a of ${slug || "a record you have not named yet"}`
+    : "";
+  $("#up-go").disabled = !file || sending;
+}
+
+// The page cannot re-read a File across a reload, so resuming means picking the
+// same file again. The sidecar's name and size are what confirm it is the one.
+async function loadIncoming() {
+  showPicked(null);
+  for (const id of ["#up-err", "#up-done", "#up-state"]) $(id).textContent = "";
+  setBar(0);
+  $("#up-cancel").hidden = true;
+  const slug = ripSlug();
+  if (!slug) return;
+  try {
+    const held = await api(`/api/ingest/${slug}`);
+    if (!held.exists) return;
+    setBar(held.total ? held.have / held.total : 0);
+    $("#up-state").textContent =
+      `${held.name} — ${mb(held.have)} of ${mb(held.total)} already here. `
+      + `Pick the same file again to carry on.`;
+    $("#up-cancel").hidden = false;
+  } catch (e) { $("#up-err").textContent = e.message; }
+}
+
+// method first, deliberately: the frontend test's POST matcher does not allow a
+// `)` between the path and `method:`, and file.slice(...) has one.
+async function sendPiece(slug, at, blob) {
+  const r = await fetch(`/api/ingest/${slug}/chunk?at=${at}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/octet-stream" },
+    body: blob,
+  });
+  const body = await r.json().catch(() => null);
+  if (!r.ok) {
+    const e = new Error((body && body.error) || `chunk failed: ${r.status}`);
+    e.status = r.status;
+    throw e;
+  }
+  return body;
+}
+
+const TRIES = 3;
+
+async function uploadFile(file) {
+  const slug = ripSlug();
+  if (!slug) { $("#up-err").textContent = "name the record first"; return; }
+  $("#up-err").textContent = ""; $("#up-done").textContent = "";
+  sending = true; $("#up-go").disabled = true; $("#up-cancel").hidden = false;
+  try {
+    const begun = await postJSON(`/api/ingest/${slug}/begin`, {
+      name: file.name, size: file.size, type: file.type,
+      artist: $("#rip-artist").value.trim(),
+      album: $("#rip-album").value.trim(),
+      date: $("#md-date").value.trim(),
+      replace: true,
+    });
+    let at = begun.have, failures = 0;
+    while (at < file.size) {
+      const end = Math.min(at + begun.chunk, file.size);
+      try {
+        at = (await sendPiece(slug, at, file.slice(at, end))).have;
+        failures = 0;
+      } catch (e) {
+        // The server knows where it actually is; a mismatch is answered with
+        // the real offset rather than a restart.
+        const said = /is at (\d+)/.exec(e.message);
+        if (e.status === 409 && said) { at = Number(said[1]); continue; }
+        if (++failures >= TRIES) throw e;
+        continue;
+      }
+      setBar(at / file.size);
+      $("#up-state").textContent = `${mb(at)} of ${mb(file.size)}`;
+    }
+    $("#up-state").textContent = "normalising…";
+    const done = await runJob(slug, `/api/ingest/${slug}/finish`, {}, "normalising");
+    setBar(1);
+    $("#up-state").textContent = "";
+    $("#up-done").textContent =
+      `wrote side-${done.side}.flac — ${fmt(done.seconds)}, ${mb(done.bytes)}`;
+    $("#up-cancel").hidden = true;
+    // Where a finished rip leaves you: the record open and measured, and you
+    // choose when to go to Cut. setMode is only ever called by a tab click.
+    await refreshAlbums(slug);
+    status("side a is ready — check the boundaries in Cut");
+  } catch (e) {
+    $("#up-err").textContent = e.message;
+    $("#up-go").textContent = "Resume";
+  } finally {
+    sending = false;
+    $("#up-go").disabled = !picked;
+  }
+}
+
+async function cancelIncoming() {
+  const slug = ripSlug();
+  if (!slug) return;
+  if (!confirm("Discard what has arrived so far? This cannot be undone.")) return;
+  try {
+    const r = await postJSON(`/api/ingest/${slug}/cancel`, {});
+    status(`discarded ${mb(r.freed_bytes)}`);
+    $("#up-go").textContent = "Upload";
+    await loadIncoming();
+    if (r.forgot) await refreshAlbums(NEW_ALBUM);
+  } catch (e) { $("#up-err").textContent = e.message; }
 }
 
 // Archiving ends that record's life in the working area - raw/, review/ and the
@@ -1899,6 +2036,15 @@ function wire() {
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
   $("#imp-stale-clear").onclick = clearStale;
+  $("#up-pick").onclick = () => $("#up-file").click();
+  $("#up-file").onchange = (e) => {
+    showPicked(e.target.files[0]);
+    e.target.value = "";   // so re-picking the same file fires again
+  };
+  $("#up-go").onclick = () => { if (picked) uploadFile(picked); };
+  $("#up-cancel").onclick = cancelIncoming;
+  for (const id of ["#rip-artist", "#rip-album"])
+    $(id).addEventListener("input", () => { if (picked) showPicked(picked); });
   $("#imp-mbid").oninput = showCatalogueState;
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
