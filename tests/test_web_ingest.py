@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.store import files as F
 from ripdoctor.store import incoming as IN
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.ingest import CHUNK, MAX_UPLOAD
 from ripdoctor.web.service import Service
+from ripdoctor.work.jobs import Jobs
 from tests.pool import a_layout
+from tests.test_audio_ingest import a_stream
 from tests.test_web_routes import a_service, get, post, signed_in
 
 A_FILE = {"name": "album.flac", "size": 9, "artist": "A Band", "album": "A Record"}
@@ -213,3 +216,104 @@ def test_cancelling_removes_the_scratch_and_forgets_an_empty_name(
     assert body["freed_bytes"] > 0 and body["forgot"] is True
     assert IN.state(service.layout, "album") is None
     assert not service.layout.spec_file("album").is_file()
+
+
+# -------------------------------------------------------------------- finishing
+
+
+def whole(service: Service, body: bytes = b"fLaC\x00\x00\x00\x00\x00") -> None:
+    """An upload that has entirely arrived, ready to be finished."""
+    begun(service, size=len(body))
+    sending(service, 0, body)
+
+
+def finishing(service: Service) -> H.Response:
+    return post(build(service), "/api/ingest/album/finish", service, {})
+
+
+def a_runner_that_ingests(**over: object) -> FakeRunner:
+    """ffprobe answers about the stream, ffmpeg encodes, flac verifies."""
+    stream = {"codec_name": "flac", "channels": 2, "sample_rate": "48000"}
+    fake = FakeRunner(installed={"ffprobe", "ffmpeg", "flac"})
+    fake.expect("stream=codec_name", stdout=a_stream(**{**stream, **over}))
+    fake.expect("-progress", stdout=b"out_time_us=2540000\n")
+    return fake
+
+
+def test_a_finished_upload_becomes_a_verified_side(tmp_path: Path) -> None:
+    service = empty_pool(tmp_path)
+    service.runner = a_runner_that_ingests()
+    whole(service)
+    # The encode writes nothing, so stand in for what ffmpeg would have made.
+    IN.done_file(service.layout, "album").write_bytes(b"fLaC" + b"\x00" * 40)
+
+    body = finishing(service).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["side"] == "a" and body["result"]["seconds"] == 2.54
+    assert service.layout.albums() == ["album"]
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+    assert IN.state(service.layout, "album") is None
+
+
+def test_a_short_upload_is_refused_before_a_job_is_claimed(tmp_path: Path) -> None:
+    service = empty_pool(tmp_path)
+    begun(service, size=100)
+    sending(service, 0, b"abc")
+    r = finishing(service)
+    assert r.status == 409 and "only 3 of 100" in r.json()["error"]
+    assert not service.runner.calls
+
+
+def test_finishing_with_nothing_arriving_is_refused(tmp_path: Path) -> None:
+    assert finishing(empty_pool(tmp_path)).status == 409
+
+
+def test_a_file_with_no_audio_is_refused_before_anything_is_encoded(
+    tmp_path: Path,
+) -> None:
+    """Minutes of ffmpeg on a JPEG, and a side that would never decode."""
+    service = empty_pool(tmp_path)
+    service.runner = FakeRunner(installed={"ffprobe"}).expect(
+        "stream=codec_name", stdout=b'{"streams": []}'
+    )
+    whole(service)
+    body = finishing(service).json()
+    assert "no audio" in body["error"]
+    assert not [c for c in service.runner.calls if c[0] == "ffmpeg"]
+    assert service.layout.albums() == []
+
+
+def test_a_side_that_will_not_decode_is_not_placed(tmp_path: Path) -> None:
+    service = empty_pool(tmp_path)
+    service.runner = a_runner_that_ingests()
+    # On the program, not on "flac" - the ffmpeg argv carries `-c:a flac` and
+    # would match first, leaving the verify untested and the test green.
+    service.runner.expect(lambda argv: argv[0] == "flac", returncode=1)
+    whole(service)
+    IN.done_file(service.layout, "album").write_bytes(b"broken")
+
+    body = finishing(service).json()
+    assert "would not decode" in body["error"]
+    assert service.layout.albums() == []
+    assert not IN.done_file(service.layout, "album").exists()
+
+
+def test_a_file_that_probes_as_no_duration_is_refused(tmp_path: Path) -> None:
+    """What an embedded cover becoming a stream looks like from here."""
+    service = empty_pool(tmp_path)
+    service.runner = FakeRunner(installed={"ffprobe", "ffmpeg", "flac"})
+    service.runner.expect("stream=codec_name", stdout=a_stream())
+    service.runner.expect("-progress", stdout=b"")
+    whole(service)
+    assert "no playable audio" in finishing(service).json()["error"]
+
+
+def test_a_second_operation_on_the_same_record_is_refused(tmp_path: Path) -> None:
+    """Jobs are one per record. a_service runs them synchronously, so this one
+    needs a spawn that leaves the first job claimed."""
+    service = empty_pool(tmp_path)
+    service.runner = a_runner_that_ingests()
+    service.jobs = Jobs(spawn=lambda work: None)
+    whole(service)
+    assert finishing(service).status == 202
+    assert finishing(service).status == 409
