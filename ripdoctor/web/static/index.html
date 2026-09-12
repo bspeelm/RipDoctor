@@ -46,21 +46,31 @@
   <canvas id="cv"></canvas>
 
   <div id="captureview" hidden>
-    <div class="ripform" id="ripform">
+    <!-- One column, two jobs: getting audio into the record the selector
+         names. What the record is called is shared, for the same reason the
+         capture pane below is shared - two sets of name fields would be two
+         sources of truth for what gets written. -->
+    <div class="ripform" id="sourceform">
       <h2>Rip a side</h2>
-      <div class="fields">
-        <label>Artist <input id="rip-artist" placeholder="artist"></label>
-        <label>Album <input id="rip-album" placeholder="album"></label>
-        <label>Side <select id="rip-side" title="a side this record already has is a re-rip of it"></select></label>
-        <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
-          Stop at the run-out</label>
+      <div id="recordfields">
+        <div class="fields">
+          <label>Artist <input id="rip-artist" placeholder="artist"></label>
+          <label>Album <input id="rip-album" placeholder="album"></label>
+        </div>
+        <p class="dim mono" id="rip-slug"></p>
       </div>
-      <p class="dim mono" id="rip-slug"></p>
-      <div class="row btns">
-        <button id="rip-go">Start recording</button>
+      <div id="ripbits">
+        <div class="fields">
+          <label>Side <select id="rip-side" title="a side this record already has is a re-rip of it"></select></label>
+          <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
+            Stop at the run-out</label>
+        </div>
+        <div class="row btns">
+          <button id="rip-go">Start recording</button>
+        </div>
+        <div id="orphans" hidden></div>
+        <div id="ripsides" hidden></div>
       </div>
-      <div id="orphans" hidden></div>
-      <div id="ripsides" hidden></div>
     </div>
 
     <div class="ripform" id="punchform" hidden>
