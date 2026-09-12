@@ -1036,7 +1036,7 @@ function setMode(mode) {
   const capturing = mode === "rip" || mode === "punch";
   $("#cv").hidden = capturing;
   $("#captureview").hidden = !capturing;
-  $("#ripform").hidden = mode !== "rip";
+  $("#sourceform").hidden = mode !== "rip";
   $("#punchform").hidden = mode !== "punch";
   $("#readout").hidden = capturing;
   $("#lower").hidden = capturing;

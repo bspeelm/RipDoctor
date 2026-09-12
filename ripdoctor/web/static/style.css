@@ -123,6 +123,11 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 /* two columns: the fields are short, and a single 22rem stack of six of them
    ran taller than the meter beside it while leaving the right half empty */
 .ripform .fields{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .75rem}
+/* The source column is stacked blocks now, so each one stacks its own
+   contents at the same gap or the form reads as several forms. Named rather
+   than `.ripform > div`, which would also catch the captures list and both of
+   punch's blocks. */
+#recordfields,#ripbits{display:flex;flex-direction:column;gap:.55rem}
 .ripform .fields label{min-width:0}
 .ripform .fields .wide{grid-column:1/-1}
 .ripform .fields input[readonly]{opacity:.7;cursor:not-allowed}
