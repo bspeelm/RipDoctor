@@ -20,7 +20,8 @@ from ripdoctor.web import httpd as httpd_module
 from ripdoctor.web import static
 from ripdoctor.web.app import App
 from ripdoctor.web.auth import Sessions
-from ripdoctor.web.httpd import make_server
+from ripdoctor.web.httpd import MAX_BODY, make_server
+from ripdoctor.web.routes.ingest import CHUNK
 
 AUDIO = b"".join(bytes([i % 251]) for i in range(5000))
 
@@ -45,6 +46,10 @@ def server(tmp_path: Path) -> Iterator[tuple[str, int, Path]]:
     @app.route("GET", "/api/audio", needs_auth=False)
     def audio(_r: H.Request) -> H.Response:
         return H.file_at(str(root / "side.opus"))
+
+    @app.route("POST", "/api/piece", needs_auth=False)
+    def piece(r: H.Request) -> H.Response:
+        return H.ok({"have": len(r.body)})
 
     @app.route("GET", "/api/boom", needs_auth=False)
     def boom(_r: H.Request) -> H.Response:
@@ -246,3 +251,24 @@ def test_a_connection_that_never_asks_for_anything_is_not_an_error(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+# ------------------------------------------------------- the upload ceiling
+
+
+def test_a_whole_piece_survives_the_socket(server) -> None:  # type: ignore[no-untyped-def]
+    """The ingest chunk size has to stay under the adapter's body ceiling.
+
+    Nothing else would catch someone raising one of the two numbers: every
+    route test builds a Request directly, so the only place the ceiling is
+    real is here, over a socket.
+    """
+    assert CHUNK < MAX_BODY, "a piece cannot be larger than a body"
+    status, _h, body = call(
+        server,
+        "POST",
+        "/api/piece",
+        body=b"x" * CHUNK,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert status == 200 and f'"have": {CHUNK}'.encode() in body

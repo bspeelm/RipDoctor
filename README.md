@@ -10,7 +10,10 @@ vertical markers.](docs/images/cut_panel.png)
 ## What it does
 
 - **Records** a side from a turntable attached to the machine, with a live meter
-  and an auto-stop at the run-out. Or takes a FLAC you recorded elsewhere.
+  and an auto-stop at the run-out.
+- **Or takes a file you already have** - a download, or audio captured
+  elsewhere - uploaded from the browser and normalised on the way in. Anything
+  ffmpeg can read. Everything after that is identical to a rip.
 - **Finds the track boundaries** by looking for gaps in the 1-3 kHz band rather
   than at the full-band level, and by checking them against the track durations
   in MusicBrainz.
@@ -89,6 +92,7 @@ and each step of a record from the needle drop to the archive.
 | | |
 |---|---|
 | [Ripping a side](https://github.com/bspeelm/RipDoctor/wiki/Ripping-a-side) | recording, the meter, the auto-stop, salvaging an interrupted capture |
+| [Uploading a file](https://github.com/bspeelm/RipDoctor/wiki/Uploading-a-file) | bringing in audio that was not recorded here |
 | [First pass](https://github.com/bspeelm/RipDoctor/wiki/First-pass) | finding the release and fitting the boundaries |
 | [Checking the boundaries](https://github.com/bspeelm/RipDoctor/wiki/Checking-the-boundaries) | the ear check, and moving a cut |
 | [Cutting](https://github.com/bspeelm/RipDoctor/wiki/Cutting-tracks) and [importing](https://github.com/bspeelm/RipDoctor/wiki/Importing) | into `review/`, then into the library |
