@@ -226,6 +226,8 @@
       <p class="dim">Moves the cut tracks out of <code>review/</code> into the
         library, tagged from the plan you saved. The release below is the one it
         will match against; the transcript afterwards says what it did.</p>
+      <label class="inline"><input type="checkbox" id="imp-fromplan">
+        Ignore the catalogue &mdash; tag from the saved plan</label>
       <label>Release id <input id="imp-mbid" spellcheck="false" placeholder="pick one below, or paste an id"></label>
       <div id="imp-nocat" class="warn" hidden>
         <b>No release is pinned, so the catalogue is skipped.</b>
@@ -263,13 +265,17 @@
       </div>
       <div id="imp-replace-wrap" class="warn" hidden>
         <b>This album is already in the library.</b>
-        <p class="hint">Importing writes into that same directory, so a track
-          with the same name is overwritten. Nothing is deleted, and nothing
-          else in the directory is touched. The import stays disabled until
-          this is ticked.</p>
+        <p class="hint">The import stays disabled until this is ticked, and
+          what happens next is the choice below it.</p>
         <p class="mono" id="imp-replace-what"></p>
         <label class="inline"><input type="checkbox" id="imp-replace">
           I know there is already a copy there</label>
+        <label>What to do with it
+          <select id="imp-dupes">
+            <option value="replace">Replace it &mdash; the old copy is removed first</option>
+            <option value="keep">Keep both &mdash; the old copy stays where it is</option>
+            <option value="merge">Merge &mdash; add these tracks to the one already there</option>
+          </select></label>
       </div>
       <div class="row">
         <button type="button" id="imp-go">Import into the library</button>

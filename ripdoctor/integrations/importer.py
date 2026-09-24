@@ -87,6 +87,7 @@ class Importer(Protocol):
         library: str,
         *,
         mbid: str = "",
+        duplicates: str = "replace",
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome: ...
@@ -129,9 +130,12 @@ class Tagger:
         library: str,
         *,
         mbid: str = "",
+        duplicates: str = "replace",
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
+        # It writes into a directory rather than a database, so a same-named
+        # track is overwritten and there is no second question to answer.
         moved = T.apply(
             runner, plan, review, library, file_mode=file_mode, dir_mode=dir_mode
         )
@@ -162,8 +166,23 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # fails to split, and the album reads as having no tracks at all.
 _SEP = "\x1f"
 
-# What is typed at beets' matcher to accept the candidate it printed.
-_ACCEPT = b"A\n"
+# What is typed at beets' matcher to accept the candidate it printed, and then
+# at the question it asks when the album is already in the library. One answer
+# leaves that second question at end-of-input, which beets reports as a stdin
+# error three screens below the thing that actually went wrong. ADR-054.
+_APPLY = "A"
+DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
+
+# beets says this when it asked and nobody answered. Worth recognising: the
+# failure it causes looks like "the tracks are still in review", which is true
+# and is not the cause.
+_STARVED = "stdin stream ended"
+
+
+def answers(duplicates: str) -> bytes:
+    """Every answer beets may ask for, in the order it asks."""
+    return f"{_APPLY}\n{DUPLICATES.get(duplicates, 'R')}\n".encode()
+
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
 # user's own configuration rather than replacing it - two do not layer, the last
@@ -264,6 +283,7 @@ class Beets:
         library: str,
         *,
         mbid: str = "",
+        duplicates: str = "replace",
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
@@ -272,7 +292,9 @@ class Beets:
             # all. The plan is what is known, so it is written first. ADR-049.
             T.write_plan_tags(runner, plan, review)
         result = runner.run(
-            self._argv(self._import(review, mbid)), stdin=_ACCEPT, timeout=3600
+            self._argv(self._import(review, mbid)),
+            stdin=answers(duplicates),
+            timeout=3600,
         )
         output = _plain(result.text + result.err)
 
@@ -284,6 +306,12 @@ class Beets:
             # is still in review is the honest measure of what did not import.
             why = self.stale(runner, library, plan.artist, plan.album, mbid=mbid)
             said = f"\n\n{why.note()}" if why else ""
+            if _STARVED in output:
+                said = (
+                    "\n\nbeets asked a question this did not answer, and gave up "
+                    "waiting. That is the cause; what is left in review is the "
+                    "symptom."
+                ) + said
             raise ImportFailed(
                 f"{len(left)} of the tracks are still in review - beets did not "
                 f"take them.{said}\n\n{output[-2000:]}"

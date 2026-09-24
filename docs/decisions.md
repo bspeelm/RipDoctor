@@ -1725,3 +1725,46 @@ twice. Recorded as a decision so the absence reads as one.
 
 **The chunk size is served, not agreed.** The server names it when an upload
 begins. A number two programs both hard-code is a number that disagrees.
+
+## ADR-054 — The import answers every question, and can be told to ignore the catalogue
+
+**Status:** accepted. Set by the author, 2026-09-24.
+
+Two faults found while importing a pressing the catalogue does not describe.
+They are recorded together because they were met together: the first hid the
+second.
+
+**beets asks more than one question.** A single `A` was piped at its matcher.
+When the album is already in the library it asks again — skip, keep, remove or
+merge — and that question reached end of input. beets reports `stdin stream
+ended while input required` at the bottom of a long transcript, and the failure
+surfaced as "the tracks are still in review", which is true and is not the
+cause. Every answer beets can ask for is sent now, and when the transcript shows
+it ran out of input anyway, the error says so rather than reporting the count.
+
+**What to do about a copy already there is a choice, not a guess.** The dialog
+already made somebody tick "I know there is already a copy there", and that tick
+never left the browser: it gated a button and meant nothing. A person who
+acknowledges a duplicate is then asked what to do with it, because replacing,
+keeping both and merging are three different intentions and none of them is
+safe to assume.
+
+**An empty release id means no release.** The route read the dialog's field and
+fell back to the spec when it was blank. A first pass writes a release into the
+spec, so after one has run the field could not be cleared — clearing it put the
+old release back. The path added for records the catalogue does not have was
+therefore unreachable for almost every record. What the dialog shows is what is
+used, including when it shows nothing; a caller that sends no key at all still
+gets the spec's release, because absent and empty are different answers.
+
+**The escape hatch is a control rather than an empty field.** Clearing a box to
+mean "deliberately none" reads as "not filled in yet". A tick that says ignore
+the catalogue says what it does, leaves the release readable while it is being
+declined, and is visible without knowing it exists.
+
+**What is not fixed here.** Nothing checks that the cut and the pinned release
+agree before handing them to beets; a fourteen-track cut was matched against a
+twelve-track release and the two left over were the whole incident. Re-labelling
+checks the count but not the order, so a release with the same tracks in a
+different sequence passes and mis-titles silently. Both are recorded as issues
+rather than fixed alongside this.
