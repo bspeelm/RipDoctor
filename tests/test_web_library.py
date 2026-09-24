@@ -20,6 +20,7 @@ from ripdoctor.web import auth as A
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.library import spec_from
+from ripdoctor.web.service import Service
 from tests.pool import a_layout, a_runner, quiet_then_loud
 from tests.test_web_routes import a_service, get, post
 
@@ -728,3 +729,53 @@ def test_art_finds_the_album_when_only_the_spec_carries_its_name(
     service.runner = Imaging().expect("ffprobe", stdout=probed())
     assert uploading(service, JPEG).status == 200
     assert (album / "cover.jpg").is_file()
+
+
+# --------------------------------------------------- the escape hatch
+
+
+def pinned(service: Service, mbid: str) -> None:
+    """A record whose spec names a release, as a first pass leaves it."""
+    layout = service.layout
+    F.remember(layout, "album", album="A Record", artist="A Band", date="2022")
+    spec = F.read_spec(layout.spec_file("album"))
+    F.save(
+        layout,
+        "album",
+        replace(spec, mbid=mbid),
+        F.read_plan(layout.plan_file("album")),
+    )
+
+
+def importing_with(tmp_path: Path, body: dict) -> FakeRunner:
+    service, _library = ready_to_import(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    service.runner = FakeRunner(installed={"beet", "metaflac"}).expect("ls", stdout=b"")
+    pinned(service, "from-the-spec")
+    post(build(service), "/api/import/album", service, body)
+    return service.runner
+
+
+def test_an_empty_release_in_the_dialog_means_no_release(tmp_path: Path) -> None:
+    """Falling back on the spec made the no-catalogue path unreachable for any
+    record a first pass had touched, which is almost all of them."""
+    argv = importing_with(tmp_path, {"mbid": ""}).argv_for("import")
+    assert "--search-id" not in argv, "it used the spec's release anyway"
+    assert "-A" in argv
+
+
+def test_a_caller_that_says_nothing_still_gets_the_spec(tmp_path: Path) -> None:
+    """Absent and empty are different answers."""
+    argv = importing_with(tmp_path, {}).argv_for("import")
+    assert "--search-id" in argv and "from-the-spec" in argv
+
+
+def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
+    """beets asks a second question when the album is already there, and an
+    unanswered one ends the import with a message about stdin."""
+    runner = importing_with(tmp_path, {"duplicates": "keep"})
+    assert runner.stdin_for("import") == b"A\nK\n"
+
+
+def test_replacing_is_what_it_does_when_nothing_is_said(tmp_path: Path) -> None:
+    assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nR\n"

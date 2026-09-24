@@ -411,3 +411,38 @@ def test_a_refused_import_names_stale_rows_as_the_cause(tmp_path: Path) -> None:
     )
     with pytest.raises(I.ImportFailed, match="deleted outside beets"):
         I.Beets().apply(fake, a_plan(), str(review), "/music")
+
+
+# ------------------------------------------------- answering every question
+
+
+def test_the_duplicate_question_is_answered_too() -> None:
+    """beets asks again when the album is already in the library, and one
+    answer leaves that question at end-of-input."""
+    assert I.answers("replace") == b"A\nR\n"
+    assert I.answers("keep") == b"A\nK\n"
+    assert I.answers("merge") == b"A\nM\n"
+
+
+def test_an_answer_it_does_not_know_replaces_rather_than_starving() -> None:
+    """Whatever arrives, beets must not be left waiting."""
+    assert I.answers("nonsense") == b"A\nR\n"
+
+
+def test_the_chosen_answer_reaches_beets(tmp_path: Path) -> None:
+    review = Path(a_review(tmp_path))
+    fake = moving_beets(review)
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x", duplicates="keep")
+    assert fake.stdin_for("import") == b"A\nK\n"
+
+
+def test_a_starved_import_says_that_was_the_cause(tmp_path: Path) -> None:
+    """The count left in review is true and is not why it failed. A reader
+    should not have to know to look at the bottom of the transcript."""
+    review = Path(a_review(tmp_path))
+    fake = FakeRunner(installed={"beet"}).expect(
+        "import", stderr=b"error: stdin stream ended while input required"
+    )
+    fake.expect("ls", stdout=b"")
+    with pytest.raises(I.ImportFailed, match="asked a question this did not answer"):
+        I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")

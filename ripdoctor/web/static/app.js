@@ -769,11 +769,24 @@ async function archiveRun() {
 // difference decides what the tags say, so it is said in the dialog rather
 // than inferred from an empty field. ADR-049.
 function showCatalogueState() {
-  $("#imp-nocat").hidden = !!$("#imp-mbid").value.trim();
+  const byPlan = $("#imp-fromplan").checked;
+  $("#imp-nocat").hidden = !byPlan && !!$("#imp-mbid").value.trim();
+  // Left readable rather than removed: which release it would have used is
+  // worth seeing while deciding not to use it.
+  for (const id of ["#imp-mbid", "#imp-search"]) $(id).disabled = byPlan;
+}
+
+// The release the import will actually use. Empty is a decision here, not an
+// absence, so it is sent as one - the server falls back to the spec only for a
+// caller that says nothing at all.
+function importMbid() {
+  return $("#imp-fromplan").checked ? "" : $("#imp-mbid").value.trim();
 }
 
 function openImport() {
   $("#imp-mbid").value = S.meta.mbid || "";
+  $("#imp-fromplan").checked = false;
+  $("#imp-dupes").value = "replace";
   showCatalogueState();
   $("#imp-err").textContent = "";
   $("#imp-outwrap").hidden = true;
@@ -894,7 +907,7 @@ async function runImport() {
   // One question. There used to be two in a row, and the second quoted the
   // artist and album out of fields the import did not use - so it could ask
   // about a name and then tag with a different one.
-  const mbid = $("#imp-mbid").value.trim();
+  const mbid = importMbid();
   const how = mbid ? "matched against the release below"
                    : "tagged from the plan, with no catalogue match";
   if (!confirm(`Tag and place ${tracks} tracks as "${S.meta.artist} \u2014 `
@@ -907,7 +920,8 @@ async function runImport() {
   $("#imp-go").disabled = true;
   try {
     const r = await runJob(S.slug, `/api/import/${S.slug}`,
-                           { mbid }, "importing");
+                           { mbid, duplicates: $("#imp-dupes").value },
+                           "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
     $("#imp-done").hidden = false;
     showTranscript(r);   // collected all along, and hidden on every path
@@ -2046,6 +2060,7 @@ function wire() {
   for (const id of ["#rip-artist", "#rip-album"])
     $(id).addEventListener("input", () => { if (picked) showPicked(picked); });
   $("#imp-mbid").oninput = showCatalogueState;
+  $("#imp-fromplan").onchange = showCatalogueState;
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
   $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };

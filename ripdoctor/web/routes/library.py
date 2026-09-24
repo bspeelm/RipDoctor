@@ -260,11 +260,14 @@ def add(app: App, service: Service) -> None:
             service.runner, service.settings.importer, service.state_dir
         )
         spec_file = layout.spec_file(slug)
-        # The release chosen in the dialog wins over the one in the spec. It
-        # used to be read from the spec alone, so picking one and pressing
-        # Import imported the previous choice.
+        # What the dialog shows wins, including when it shows nothing. Falling
+        # back on a blank made the no-catalogue path unreachable for any record
+        # a first pass had touched, which is almost all of them. A caller that
+        # sends no key at all still gets the spec's release. ADR-054.
+        body = r.json()
         spec_mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
-        mbid = str(r.json().get("mbid", "")) or spec_mbid
+        mbid = str(body.get("mbid", "")) if "mbid" in body else spec_mbid
+        duplicates = str(body.get("duplicates", "replace"))
 
         review_dir = layout.review_dir(slug)
         if not any(review_dir.glob("*.flac")):
@@ -284,6 +287,7 @@ def add(app: App, service: Service) -> None:
                 review,
                 root,
                 mbid=mbid,
+                duplicates=duplicates,
                 file_mode=service.settings.file_mode,
                 dir_mode=service.settings.dir_mode,
             )

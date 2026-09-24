@@ -222,6 +222,10 @@ class FakeRunner:
 
     replies: list[tuple[Match, Result]] = field(default_factory=list)
     calls: list[tuple[str, ...]] = field(default_factory=list)
+    # What was piped in, per call. For a program driven by answers rather than
+    # flags - beets' matcher - the stdin is the behaviour, the way the argv is
+    # everywhere else, and an assertion needs it recorded.
+    fed: list[bytes | None] = field(default_factory=list)
     # None means every tool exists. An empty set means none do - which is a
     # thing a test needs to say, and cannot if the two are the same value.
     installed: set[str] | None = None
@@ -261,6 +265,7 @@ class FakeRunner:
         if not args:
             raise ValueError("empty argv")
         self.calls.append(args)
+        self.fed.append(stdin)
         if self.installed is not None and args[0] not in self.installed:
             raise ToolMissing(args[0])
         for match, reply in self.replies:
@@ -297,7 +302,14 @@ class FakeRunner:
 
     def argv_for(self, needle: str) -> tuple[str, ...]:
         """The one recorded call containing `needle`. Raises if not exactly one."""
-        hits = [c for c in self.calls if any(needle in a for a in c)]
+        return self.calls[self._one(needle)]
+
+    def stdin_for(self, needle: str) -> bytes | None:
+        """What was piped to the one call containing `needle`."""
+        return self.fed[self._one(needle)]
+
+    def _one(self, needle: str) -> int:
+        hits = [i for i, c in enumerate(self.calls) if any(needle in a for a in c)]
         if len(hits) != 1:
             raise AssertionError(f"{len(hits)} calls matched {needle!r}, wanted 1")
         return hits[0]
