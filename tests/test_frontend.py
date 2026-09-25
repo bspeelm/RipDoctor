@@ -165,3 +165,22 @@ def test_the_record_picker_cannot_set_the_header_width() -> None:
     assert re.search(r"header > button[^{]*\{[^}]*flex:none", css), (
         "the header actions can be squeezed off the edge"
     )
+
+
+def test_the_capture_controls_invent_no_rate_or_depth() -> None:
+    """A busy device cannot be asked what it accepts, and busy is the ordinary
+    case: a capture is running. A hardcoded fallback then offers a list the
+    configured depth is absent from, so the selection falls to the invented
+    value and a side records at the wrong width - silently, labelled as the
+    best the device can do.
+
+    Asserted on the source because there is no other gate: the failure needs a
+    busy sound card to reproduce, and twenty minutes to notice.
+    """
+    js = (STATIC / "app.js").read_text()
+    for body in re.findall(r"function fill(?:Rates|Formats)\(.*?\n\}", js, re.S):
+        fallback = re.search(r"\?\s*d\.(?:rates|formats)\s*(.*?);", body, re.S)
+        assert fallback, "the device's own answer is no longer what is preferred"
+        assert not re.search(r':\s*\[\s*["\']?[A-Z0-9]', fallback.group(1)), (
+            f"a capture setting is invented here rather than read:\n{fallback.group(1)}"
+        )

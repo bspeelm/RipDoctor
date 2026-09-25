@@ -1507,7 +1507,11 @@ function fillRates(info) {
   sel.innerHTML = "";
   // what the device actually accepts — offering 96k on hardware that cannot do
   // it just moves the failure into the middle of a side
-  const rates = (d && d.rates && d.rates.length) ? d.rates : [44100, 48000, 96000];
+  // A device that is busy cannot be asked what it accepts, and busy is the
+  // ordinary case here: a capture is running. What it is configured for is
+  // known either way, and is the only honest answer when it cannot be asked.
+  const rates = (d && d.rates && d.rates.length) ? d.rates
+              : (info && info.rate ? [info.rate] : []);
   // The configured rate, when this machine has one - it is the rate the
   // thresholds were measured at and the one the chain is actually running.
   const want = info && info.rate ? String(info.rate) : prev;
@@ -1530,18 +1534,29 @@ const DEPTH = { S16_LE: "16-bit", S24_3LE: "24-bit", S32_LE: "32-bit" };
 function fillFormats(info) {
   const d = ripDevices.find((x) => x.id === $("#rip-device").value);
   const sel = $("#rip-format");
-  const prev = (info && info.format)
+  const configured = (info && info.format) || "";
+  const prev = configured
     || sel.value
     || localStorage.getItem("ripdoctor:rip:format")
     || "";
   sel.innerHTML = "";
-  const formats = (d && d.formats && d.formats.length) ? d.formats : ["S16_LE"];
+  // Never a value of this file's own invention. A guess offered here is
+  // recorded at: the configured depth is absent from a made-up list, so the
+  // selection falls to the guess and a side is captured at the wrong width.
+  const asked = !!(d && d.formats && d.formats.length);
+  const formats = asked ? d.formats : (configured ? [configured] : []);
   for (const f of formats) {
-    const o = el("option", "", `${DEPTH[f] || f}${formats[0] === f ? "  (best here)" : ""}`);
+    const best = asked && formats[0] === f ? "  (best here)" : "";
+    const o = el("option", "", `${DEPTH[f] || f}${best}`);
     o.value = f;
     sel.appendChild(o);
   }
-  sel.value = formats.includes(prev) ? prev : formats[0];
+  if (!formats.length) {
+    const o = el("option", "", "could not ask the device");
+    o.value = ""; o.disabled = true;
+    sel.appendChild(o);
+  }
+  sel.value = formats.includes(prev) ? prev : (formats[0] || "");
 }
 
 async function loadDevices() {
