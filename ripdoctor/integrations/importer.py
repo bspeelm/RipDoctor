@@ -179,9 +179,17 @@ DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
 _STARVED = "stdin stream ended"
 
 
-def answers(duplicates: str) -> bytes:
-    """Every answer beets may ask for, in the order it asks."""
-    return f"{_APPLY}\n{DUPLICATES.get(duplicates, 'R')}\n".encode()
+def answers(duplicates: str, *, matching: bool) -> bytes:
+    """Every answer beets may ask for, in the order it asks.
+
+    Only a run that consults the catalogue is offered a candidate to accept.
+    With lookup off there is no such question, and sending one anyway puts an
+    answer the duplicate prompt does not recognise - which survives only
+    because beets asks again. ADR-054.
+    """
+    said = [_APPLY] if matching else []
+    said.append(DUPLICATES.get(duplicates, "R"))
+    return ("\n".join(said) + "\n").encode()
 
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
@@ -293,7 +301,7 @@ class Beets:
             T.write_plan_tags(runner, plan, review)
         result = runner.run(
             self._argv(self._import(review, mbid)),
-            stdin=answers(duplicates),
+            stdin=answers(duplicates, matching=bool(mbid)),
             timeout=3600,
         )
         output = _plain(result.text + result.err)

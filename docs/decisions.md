@@ -1762,6 +1762,12 @@ mean "deliberately none" reads as "not filled in yet". A tick that says ignore
 the catalogue says what it does, leaves the release readable while it is being
 declined, and is visible without knowing it exists.
 
+**Only the questions that will be asked are answered.** A run with lookup off
+is never offered a candidate, so it has one question rather than two. Sending
+the acceptance anyway puts a letter the duplicate prompt does not recognise,
+and it survives only because beets asks again — which is working by accident,
+and reads to anyone opening the file as though the sequence were understood.
+
 **What is not fixed here.** Nothing checks that the cut and the pinned release
 agree before handing them to beets; a fourteen-track cut was matched against a
 twelve-track release and the two left over were the whole incident. Re-labelling
