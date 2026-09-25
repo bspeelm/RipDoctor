@@ -33,7 +33,8 @@ label.inline input{width:auto}
 .tabs button:disabled{opacity:.6;cursor:not-allowed}
 
 #app{display:flex;flex-direction:column;height:100vh}
-header{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;
+header{display:flex;align-items:center;gap:.6rem;row-gap:.4rem;flex-wrap:wrap;
+  padding:.5rem .75rem;
   border-bottom:1px solid var(--line);background:var(--panel);flex:none}
 header strong{letter-spacing:.02em}
 .tabs{display:flex;gap:.25rem}
@@ -43,7 +44,21 @@ header strong{letter-spacing:.02em}
 #status{color:var(--dim);font-size:.8rem}
 /* Narrow, because it sits in front of the record picker and is a refinement of
    it rather than a field in its own right. */
-.pick{width:9rem}
+.pick{width:9rem;flex:none}
+
+/* A select sizes itself to its widest option, not its selected one, so one long
+   album title set the whole header's width and pushed the last actions off the
+   right edge. min-width:0 is what lets a flex item shrink below its content at
+   all; the cap stops it eating the row on a wide screen. */
+#album{flex:1 1 12rem;min-width:0;max-width:26rem}
+
+/* Everything else in the header keeps its size. A picker that is shorter than
+   it would like costs nothing; an action that is off the edge cannot be
+   reached, and nothing on screen says it is there. */
+header > button,header .tabs,header strong{flex:none}
+
+/* It is a sentence of varying length in the middle of a fixed row. */
+#status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 #prepare{display:flex;align-items:center;gap:.6rem;padding:.4rem .75rem;
   border-bottom:1px solid var(--line);font-size:.8rem;color:var(--dim);flex:none}
