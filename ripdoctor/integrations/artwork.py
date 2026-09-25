@@ -26,7 +26,7 @@ from pathlib import Path
 
 from ripdoctor.audio.runner import Runner
 from ripdoctor.integrations.musicbrainz import Fetcher, LookupFailed
-from ripdoctor.integrations.tagger import embed_art, has_art
+from ripdoctor.integrations.tagger import embed_art, has_art, set_modes
 
 ARCHIVE = "https://coverartarchive.org"
 
@@ -224,7 +224,13 @@ class Installed:
 
 
 def install(
-    runner: Runner, album_dir: str | Path, data: bytes, *, edge: int = SCALE_TO
+    runner: Runner,
+    album_dir: str | Path,
+    data: bytes,
+    *,
+    edge: int = SCALE_TO,
+    file_mode: int = 0o664,
+    dir_mode: int = 0o775,
 ) -> Installed:
     """Verify, scale, write the cover, and embed it into every track.
 
@@ -264,6 +270,9 @@ def install(
             done += 1
         except (ValueError, OSError) as e:
             failed.append(f"{track.name}: {e}")
+    # Embedding rewrites every track, and the cover is written here too, so
+    # both land at the writer's umask and undo what the import set. ADR-056.
+    set_modes(directory, file_mode, dir_mode)
     return Installed(cover, final, done, tuple(failed), len(tracks))
 
 

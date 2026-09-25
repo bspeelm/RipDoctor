@@ -155,7 +155,13 @@ def _install(service: Service, album: Path, data: bytes) -> H.Response:
     if len(data) > MAX_IMAGE:
         raise H.HttpError(413, "that image is too large")
     try:
-        done = ART.install(service.runner, album, data)
+        done = ART.install(
+            service.runner,
+            album,
+            data,
+            file_mode=service.settings.file_mode,
+            dir_mode=service.settings.dir_mode,
+        )
     except ValueError as e:
         # Refused before anything was touched, which is the whole point.
         raise H.HttpError(400, str(e)) from e

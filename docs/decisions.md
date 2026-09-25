@@ -1807,3 +1807,35 @@ says which.
 keeping a first pressing's capture, is a real reason to want both. It is off,
 because the common case is a re-rip made precisely because the new take is
 better.
+
+## ADR-056 — Whatever rewrites a library file restores its mode
+
+**Status:** accepted. Set by the author, 2026-09-24.
+
+The importer already ended by setting modes on what it had just filed, because
+the tagger rewrites every file as it writes tags and the rewrite lands at the
+writer's umask rather than inheriting the directory. Under a service that is
+0600.
+
+Installing artwork does the same thing and did not do the same repair. It writes
+a cover and then rewrites every track to embed it, so using the artwork panel
+after an import silently undid the import's own fix. Found on a live library:
+one album's tracks at 0600 against four hundred at 0664, and the album directory
+still carrying the setgid bit the importer's own chmod would have cleared —
+which is what identified the artwork step rather than the import as the last
+writer.
+
+**The failure is invisible from the inside.** Playback works for whoever owns
+the files, so nothing reports it; it surfaces when a music server running as
+another user, or a backup, cannot read what is there.
+
+**One implementation, in the module that already places files in a library.**
+The importer had a private copy and artwork had none. It lives in the tagger
+now, which already owns putting a track where the library wants it with the
+mode it should have, and which both callers already depend on — so neither
+acquires a dependency to get it.
+
+**The rule this generalises to:** anything that writes into the library sets
+the modes before it returns. A caller should not have to know which operations
+rewrite a file and which do not, because that knowledge is exactly what was
+missing here.
