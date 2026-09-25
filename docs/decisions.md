@@ -1867,3 +1867,38 @@ both album rows carried identical values in every field it matches on. That is
 unexplained and recorded as an issue. What is here is a detector — the fault
 becomes something the tool reports rather than something found in a player, and
 that is worth having whether or not the cause is the same next time.
+
+## ADR-058 — The capture controls never invent a setting
+
+**Status:** accepted. Set by the author, 2026-09-25.
+
+The rate and depth offered in the Rip panel came from asking the device what it
+accepts. When that answer was empty the list fell back to values written into
+the page — 16-bit, and a handful of common rates.
+
+**A device that is busy cannot be asked what it accepts, and busy is the
+ordinary case here.** Something is recording, or a capture did not shut down.
+That is exactly the moment somebody reloads the page and starts again.
+
+What made it expensive is what the fallback did next. The configured depth was
+not in the invented list, so the selection fell to the invented value, and the
+page labelled it as the best the device could do. With a direct hardware device
+there is no conversion between what the input delivers and what is asked for:
+the bytes are read misaligned and the side is noise. Twenty minutes of it,
+discovered on playback.
+
+**What it is configured for is known whether or not the device answers.** That
+is the only honest fallback, and it is what is offered now. Where nothing is
+known the control says the device could not be asked, rather than showing a
+choice that was never available.
+
+**A guess presented as a measurement is worse than no answer.** The label said
+"best here" about a value nothing had measured. The marking is only applied now
+to a list the device actually supplied.
+
+**What was considered and not done.** Refusing, on the server, any depth other
+than the configured one — the way a different capture device is refused unless
+asked for twice. It was written and then reverted: choosing the rate and depth
+per capture is a deliberate feature, a test defends it, and the fault was the
+page inventing a value rather than the server accepting one. Fixing the second
+thing would have left the first unfixed and taken a working feature with it.
