@@ -1839,3 +1839,31 @@ acquires a dependency to get it.
 the modes before it returns. A caller should not have to know which operations
 rewrite a file and which do not, because that knowledge is exactly what was
 missing here.
+
+## ADR-057 — More in the library than was cut is a fault, not a surplus
+
+**Status:** accepted. Set by the author, 2026-09-25.
+
+A re-import meant to replace an earlier copy left both. Every check downstream
+read it as success, because they all ask whether the library holds *at least*
+as many tracks as were cut. Twenty-eight is at least fourteen. The record was
+found later in the thing that serves the library, as two of the same album.
+
+**At least as many is the wrong question.** It was written for the case it
+guards — an import that half-finished, leaving the record short — and it was
+right about that. It is silent about the opposite, and the opposite is what an
+unreplaced copy looks like. The count a record should have is known exactly:
+the plan says how many tracks were cut.
+
+**The import says so, and the archive gate refuses.** Immediately after the
+import, because that is when somebody is looking at the result and when the
+earlier copy is still easy to name. And at the gate, because archiving clears
+the working copies on the strength of that count, and doing it over a doubled
+album is how a fault becomes permanent.
+
+**This does not fix the cause.** The duplicate this was found by was not
+detected as one by the importer: it logged no duplicate decision at all, and
+both album rows carried identical values in every field it matches on. That is
+unexplained and recorded as an issue. What is here is a detector — the fault
+becomes something the tool reports rather than something found in a player, and
+that is worth having whether or not the cause is the same next time.
