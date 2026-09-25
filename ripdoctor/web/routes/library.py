@@ -353,7 +353,13 @@ def add(app: App, service: Service) -> None:
                 job.step(name, what)
                 job.finished += 1
 
-            return AR.put_away(service.runner, layout, slug, progress=step)
+            return AR.put_away(
+                service.runner,
+                layout,
+                slug,
+                keep_superseded=service.settings.keep_superseded,
+                progress=step,
+            )
 
         try:
             return H.ok(service.jobs.start(slug, "archive", work).as_dict(), 202)

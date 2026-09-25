@@ -15,6 +15,7 @@ from __future__ import annotations
 import shutil
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,12 @@ def survey(
         "will_archive_to": str(layout.archive / slug),
         "sides": [s.as_dict() for s in sides],
         "will_remove": [str(p) for p in removable(layout, slug) if p.exists()],
+        # Named before the irreversible step rather than reported after it.
+        "will_replace": [
+            p.name
+            for p in sorted((layout.archive / slug).glob("side-*.flac"))
+            if (layout.raw / slug / p.name).is_file()
+        ],
     }
 
 
@@ -118,8 +125,9 @@ def repair_argv(source: str, dest: str) -> list[str]:
     ]
 
 
-# Where a re-ripped side's predecessor goes. Kept, not deleted: it is the only
-# copy of a take somebody may want back. ADR-046.
+# Where a re-ripped side's predecessor waits while its replacement is written
+# and read back. It is the rollback: a side that does not verify is undone by
+# putting this one back. What happens to it afterwards is ADR-055.
 SUPERSEDED = "_superseded"
 
 
@@ -140,9 +148,17 @@ def put_away(
     layout: Layout,
     slug: str,
     *,
+    keep_superseded: bool = False,
     progress: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    """Copy every side into the archive, read it back, then clear the rest."""
+    """Copy every side into the archive, read it back, then clear the rest.
+
+    A side being re-ripped has its predecessor moved aside first, and put back
+    if the replacement does not verify. Once every side has read back, the
+    predecessors are gone unless asked for: by then the new take has been cut,
+    tagged, filed and proved to be in the library, so the copy it insured
+    against losing is no longer the only one. ADR-055.
+    """
     source = layout.raw / slug
     if not source.is_dir():
         raise NotReady(f"nothing in raw for {slug}")
@@ -154,11 +170,14 @@ def put_away(
             progress(what, detail)
 
     archived, notes = [], []
+    # Held until every side has read back, not just this one: a later side
+    # failing must still be able to put the earlier ones back.
+    stepped: list[Path] = []
     for side in sorted(source.glob("side-*.flac")):
         target = dest / side.name
         superseded = _step_aside(target)
         if superseded:
-            notes.append(f"the previous {side.name} was moved to {SUPERSEDED}/")
+            stepped.append(superseded)
         if verify(runner, str(side)):
             say(side.name, "copying")
             shutil.copy2(side, target)
@@ -187,6 +206,15 @@ def put_away(
         raise NotReady(f"no sides in raw for {slug}")
 
     # Only now, with every side read back from where it will live.
+    for old_take in stepped:
+        if keep_superseded:
+            notes.append(f"the previous {old_take.name} is in {SUPERSEDED}/")
+            continue
+        old_take.unlink(missing_ok=True)
+        notes.append(f"the previous {old_take.name} was replaced")
+    with suppress(OSError):
+        (dest / SUPERSEDED).rmdir()
+
     removed = []
     for directory in (source, *removable(layout, slug)):
         if directory.is_dir():

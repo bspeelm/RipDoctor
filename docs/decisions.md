@@ -1774,3 +1774,36 @@ twelve-track release and the two left over were the whole incident. Re-labelling
 checks the count but not the order, so a release with the same tracks in a
 different sequence passes and mis-titles silently. Both are recorded as issues
 rather than fixed alongside this.
+
+## ADR-055 — A re-ripped side replaces its predecessor rather than keeping it
+
+**Status:** accepted. Set by the author, 2026-09-24. Supersedes part of ADR-046.
+
+ADR-046 made a re-rip archivable by moving the predecessor aside instead of
+refusing, and kept it on the grounds that it is the only copy of a take somebody
+may want back. That is true right up until it is not.
+
+**When the replacement is written, the predecessor's job is already done.**
+Archiving is the last step and it is gated: the record has been re-ripped, cut,
+checked, tagged, filed, and counted in the library. The predecessor insured
+against losing the only copy of a side, and by the time archiving runs there is
+a second one — cut into tracks and filed. Keeping it past that point doubles the
+archive for a recording the pool already holds the useful half of.
+
+**It is still the rollback, and that has not changed.** A side is moved aside,
+the replacement is written and read back, and a replacement that does not verify
+is undone by putting the earlier one back. What is new is only what happens
+after every side has read back: they are unlinked rather than left behind. Held
+until *every* side verifies, not each in turn, so a later side failing can still
+put the earlier ones back.
+
+**It is said before it happens.** The archive dialog already previews what it
+will do; it names the sides being replaced, and the confirmation says the
+earlier take is kept until the new one reads back and then goes. A pool that
+silently doubles and one that silently does not are both worse than one that
+says which.
+
+**`keep_superseded` is there for the other case.** Comparing two cartridges, or
+keeping a first pressing's capture, is a real reason to want both. It is off,
+because the common case is a re-rip made precisely because the new take is
+better.

@@ -59,6 +59,11 @@ class Settings:
     # is broken halfway through a record. ADR-038.
     importer: str = "beets"
 
+    # What happens to a re-ripped side's predecessor once the replacement has
+    # been cut, tagged, filed and read back from the archive. Off, because by
+    # then it is no longer the only copy of anything. ADR-055.
+    keep_superseded: bool = False
+
     # Cutting.
     lead: float = 1.3
     tail: float = 1.5

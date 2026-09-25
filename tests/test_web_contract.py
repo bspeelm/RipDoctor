@@ -71,6 +71,7 @@ OBJECTS = {
         "library_path",
         "library_tracks",
         "will_archive_to",
+        "will_replace",
         "sides",
         "will_remove",
     ),
