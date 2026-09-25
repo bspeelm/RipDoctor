@@ -66,6 +66,25 @@ def write_tags_argv(path: str, tags: dict[str, str]) -> list[str]:
     return argv
 
 
+def set_modes(where: Path, file_mode: int, dir_mode: int) -> int:
+    """Give a library directory and its files the modes they are meant to have.
+
+    Anything that rewrites a track leaves it at the writer's umask, which under
+    a service is 0600. A library only the owning process can read is one a share
+    cannot serve, and nothing reports it because playback still works for
+    whoever owns the files. Returns how many files were set. ADR-056.
+    """
+    if not where.is_dir():
+        return 0
+    where.chmod(dir_mode)
+    changed = 0
+    for p in where.iterdir():
+        if p.is_file():
+            p.chmod(file_mode)
+            changed += 1
+    return changed
+
+
 def write_tags(runner: Runner, path: str, tags: dict[str, str]) -> None:
     runner.run(write_tags_argv(path, tags), timeout=60).require()
 

@@ -330,7 +330,7 @@ class Beets:
         # beets rewrites every file as it writes tags, and the rewrite lands at
         # 0600 rather than inheriting the directory. Invisible while the player
         # runs as the owning user, and broken for anything else.
-        fixed = _normalise(where, file_mode, dir_mode) if where else 0
+        fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
@@ -417,18 +417,6 @@ def _query(album: str, mbid: str) -> list[str]:
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
-
-
-def _normalise(where: Path, file_mode: int, dir_mode: int) -> int:
-    if not where.is_dir():
-        return 0
-    where.chmod(dir_mode)
-    changed = 0
-    for p in where.iterdir():
-        if p.is_file():
-            p.chmod(file_mode)
-            changed += 1
-    return changed
 
 
 def choose(runner: Runner, name: str, state_dir: str | Path = "") -> Importer:

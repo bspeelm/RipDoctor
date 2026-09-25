@@ -212,3 +212,29 @@ def test_what_a_record_already_has_is_reportable(tmp_path: Path) -> None:
 
 def test_a_record_that_is_not_there_reports_nothing(tmp_path: Path) -> None:
     assert ART.current(a_runner(), tmp_path / "absent")["cover"] is None
+
+
+# ----------------------------------------------------- modes after writing
+
+
+def test_installing_art_leaves_the_tracks_readable(tmp_path: Path) -> None:
+    """Embedding rewrites every track, and a rewrite lands at the writer's
+    umask - 0600 under a service. A library only the owning process can read
+    is one a share cannot serve, and playback still works for the owner, so
+    nothing reports it. ADR-056."""
+    album = an_album(tmp_path)
+    for track in album.iterdir():
+        track.chmod(0o600)  # what a rewrite under a service leaves behind
+
+    ART.install(installing(), album, JPEG, file_mode=0o664, dir_mode=0o775)
+
+    left = {oct(p.stat().st_mode & 0o777) for p in album.iterdir()}
+    assert left == {"0o664"}, f"a file was left unreadable: {left}"
+    assert oct(album.stat().st_mode & 0o777) == "0o775"
+
+
+def test_the_cover_is_readable_too(tmp_path: Path) -> None:
+    """It is written here rather than by the importer, so nothing else sets it."""
+    album = an_album(tmp_path)
+    done = ART.install(installing(), album, JPEG, file_mode=0o664, dir_mode=0o775)
+    assert oct(done.cover.stat().st_mode & 0o777) == "0o664"
