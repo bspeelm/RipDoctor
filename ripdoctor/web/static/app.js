@@ -723,10 +723,16 @@ async function openArchive() {
     for (const sd of st.sides)
       lines.push(`  ${sd.name.padEnd(22)} ${(sd.bytes / 1e6).toFixed(0)} MB   `
         + (sd.valid === null ? "" : sd.valid ? "valid — copy as-is" : "TRUNCATED — re-encode"));
+    if ((st.will_replace || []).length) {
+      lines.push("");
+      lines.push("replacing in the archive (the earlier take goes):");
+      for (const name of st.will_replace) lines.push("  " + name);
+    }
     lines.push("");
     lines.push("then remove:");
     for (const d of st.will_remove) lines.push("  " + d);
     if (!st.ready) lines.push("\nNOT READY: " + st.why);
+    lastSurvey = st;
     $("#arc-plan").textContent = lines.join("\n");
     $("#arc-go").disabled = !st.ready;
   } catch (e) {
@@ -735,11 +741,18 @@ async function openArchive() {
   }
 }
 
+let lastSurvey = {};
+
 async function archiveRun() {
   // S.slug moves when the picker is rebuilt below, so remember what was archived
   const done = S.slug;
+  const replacing = (lastSurvey.will_replace || []).length;
   if (!confirm("Archive the raw sides and delete raw/, review/ and the cache?\n\n"
-             + "Each side is verified in archive/ before anything is removed.")) return;
+             + "Each side is verified in archive/ before anything is removed."
+             + (replacing
+                ? `\n\n${replacing} archived side(s) are being replaced. The earlier `
+                  + `take is kept until the new one reads back, then goes.`
+                : ""))) return;
   $("#arc-err").textContent = "";
   $("#arc-go").disabled = true;
   $("#arc-plan").textContent = "archiving — re-encoding truncated sides, this takes a minute…";

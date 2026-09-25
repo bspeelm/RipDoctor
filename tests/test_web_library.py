@@ -374,24 +374,57 @@ def test_a_side_that_does_not_read_back_stops_everything(tmp_path: Path) -> None
     assert (service.layout.raw / "album" / "side-a.flac").is_file()
 
 
-def test_a_re_ripped_side_supersedes_the_archived_one(tmp_path: Path) -> None:
-    """Archiving a record that was archived before used to be refused outright,
-    with nothing in the page to resolve it - so re-ripping a side of a finished
-    record dead-ended one step from the end. The old capture is kept, because it
-    is the only copy of a take somebody may want back."""
-    service, _library = arrived(tmp_path)
+def rerip(service: Service) -> bytes:
+    """Archive a record, then put a newer capture of one side in raw."""
     post(build(service), "/api/archive/album", service)
     first = (service.layout.archive / "album" / "side-a.flac").read_bytes()
-
     (service.layout.raw / "album").mkdir()
     (service.layout.raw / "album" / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 99)
+    return first
+
+
+def test_a_record_that_was_archived_before_can_be_archived_again(
+    tmp_path: Path,
+) -> None:
+    """A re-rip of one side of a finished record has to reach the end. Refusing
+    leaves it a step short with nothing in the page to resolve it."""
+    service, _library = arrived(tmp_path)
+    first = rerip(service)
     body = post(build(service), "/api/archive/album", service).json()
     assert not body["error"], body["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").read_bytes() != first
 
+
+def test_the_earlier_take_goes_once_the_new_one_has_read_back(
+    tmp_path: Path,
+) -> None:
+    """By then it has been cut, tagged, filed and read back. ADR-055."""
+    service, _library = arrived(tmp_path)
+    rerip(service)
+    body = post(build(service), "/api/archive/album", service).json()
+    assert not (service.layout.archive / "album" / "_superseded").exists()
+    assert any("replaced" in n for n in body["result"]["notes"])
+
+
+def test_the_earlier_take_is_kept_when_the_setting_asks_for_it(
+    tmp_path: Path,
+) -> None:
+    """Comparing two cartridges is a real reason to want both."""
+    service, _library = arrived(tmp_path)
+    service.settings = replace(service.settings, keep_superseded=True)
+    first = rerip(service)
+    body = post(build(service), "/api/archive/album", service).json()
     kept = sorted((service.layout.archive / "album" / "_superseded").glob("*.flac"))
     assert len(kept) == 1 and kept[0].read_bytes() == first
-    assert (service.layout.archive / "album" / "side-a.flac").read_bytes() != first
     assert any("_superseded" in n for n in body["result"]["notes"])
+
+
+def test_the_preview_names_the_sides_it_will_replace(tmp_path: Path) -> None:
+    """Said before the irreversible step, not reported after it."""
+    service, _library = arrived(tmp_path)
+    rerip(service)
+    body = get(build(service), "/api/archive/album", service).json()
+    assert body["will_replace"] == ["side-a.flac"]
 
 
 # --------------------------------------------------------------- artwork

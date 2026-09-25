@@ -8,10 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.naming import Unsafe
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack, Spec, SpecSide, SpecTrack
+from ripdoctor.store import archive as AR
 from ripdoctor.store import files as F
+from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains, under
+from tests.pool import a_runner
 
 # ------------------------------------------------------------ containment
 
@@ -466,3 +470,48 @@ def test_a_side_nowhere_at_all_is_named(tmp_path: Path) -> None:
     a_side(layout.raw / "album", "a")
     with pytest.raises(FileNotFoundError, match="no side"):
         layout.side_file("album", "z")
+
+
+# ------------------------------------------- what happens to an earlier take
+
+
+def a_rerip(tmp_path: Path) -> tuple[Layout, FakeRunner]:
+    """One side archived, and a newer capture of the same side in raw."""
+    layout = a_layout(tmp_path)
+    (layout.raw / "album").mkdir(parents=True, exist_ok=True)
+    (layout.raw / "album" / "side-a.flac").write_bytes(b"the newer take")
+    (layout.archive / "album").mkdir(parents=True, exist_ok=True)
+    (layout.archive / "album" / "side-a.flac").write_bytes(b"the older take")
+    return layout, a_runner()
+
+
+def test_the_earlier_take_is_gone_once_the_new_one_reads_back(
+    tmp_path: Path,
+) -> None:
+    """By then it has been cut, tagged, filed and read back, so it is not the
+    only copy of anything any more. ADR-055."""
+    layout, runner = a_rerip(tmp_path)
+    done = AR.put_away(runner, layout, "album")
+    assert not (layout.archive / "album" / AR.SUPERSEDED).exists()
+    assert (layout.archive / "album" / "side-a.flac").read_bytes() != b"the older take"
+    assert any("replaced" in n for n in done["notes"])
+
+
+def test_the_earlier_take_is_kept_when_asked_for(tmp_path: Path) -> None:
+    layout, runner = a_rerip(tmp_path)
+    done = AR.put_away(runner, layout, "album", keep_superseded=True)
+    kept = list((layout.archive / "album" / AR.SUPERSEDED).glob("*side-a.flac"))
+    assert len(kept) == 1 and kept[0].read_bytes() == b"the older take"
+    assert any(AR.SUPERSEDED in n for n in done["notes"])
+
+
+def test_a_side_that_will_not_read_back_puts_the_earlier_take_back(
+    tmp_path: Path,
+) -> None:
+    """The rollback is why the earlier take cannot simply be deleted first."""
+    layout, _ = a_rerip(tmp_path)
+    runner = a_runner()
+    runner.expect(lambda argv: argv[0] == "flac", returncode=1)
+    with pytest.raises(AR.NotReady):
+        AR.put_away(runner, layout, "album")
+    assert (layout.archive / "album" / "side-a.flac").read_bytes() == b"the older take"
