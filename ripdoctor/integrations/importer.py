@@ -333,6 +333,7 @@ class Beets:
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
+        notes.extend(too_many(count, sum(len(s.tracks) for s in plan.sides)))
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def locate(
@@ -413,6 +414,16 @@ def _query(album: str, mbid: str) -> list[str]:
     if mbid:
         return [f"mb_albumid:{mbid}"]
     return [f"album:{album}"] if album else []
+
+
+def too_many(count: int, expected: int) -> list[str]:
+    """Say so when the library holds more of a record than was cut. ADR-057."""
+    if count <= expected:
+        return []
+    return [
+        f"the library holds {count} tracks and this record has {expected} - "
+        "an earlier copy was not replaced, and both are there"
+    ]
 
 
 def _plain(text: str) -> str:

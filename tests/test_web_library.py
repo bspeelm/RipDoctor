@@ -812,3 +812,17 @@ def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
 
 def test_replacing_is_what_it_does_when_nothing_is_said(tmp_path: Path) -> None:
     assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nR\n"
+
+
+def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
+    """More than was cut is not a safer kind of enough: it is what an earlier
+    copy that was not replaced looks like, and clearing raw/ on the strength of
+    it archives over a record the library holds twice. ADR-057."""
+    service, library = with_library(tmp_path)
+    placed = library / "A Band" / "A Record"
+    placed.mkdir(parents=True)
+    for i in range(4):  # the plan has one track
+        (placed / f"{i:02d} One.flac").write_bytes(b"fLaC")
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"]
+    assert "not replaced" in body["why"], body["why"]

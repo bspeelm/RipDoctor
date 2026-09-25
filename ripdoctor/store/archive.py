@@ -82,7 +82,7 @@ def survey(
             sides.append(
                 Side(p.name, p.stat().st_size, verify(runner, str(p)) if read else None)
             )
-    ready = where is not None and count >= expected and bool(sides)
+    ready = where is not None and count == expected and bool(sides)
     why = ""
     if not sides:
         why = f"no sides in raw for {slug}"
@@ -90,6 +90,13 @@ def survey(
         why = "the record is not in the library yet"
     elif count < expected:
         why = f"only {count} of {expected} tracks are in the library"
+    elif count > expected:
+        # Clearing raw/ on the strength of this archives over a record the
+        # library holds twice. ADR-057.
+        why = (
+            f"the library holds {count} tracks and this record has {expected} - "
+            "an earlier copy was not replaced. Remove it, then archive."
+        )
     return {
         "ready": ready,
         "why": why,

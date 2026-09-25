@@ -463,3 +463,38 @@ def test_a_starved_import_says_that_was_the_cause(tmp_path: Path) -> None:
     fake.expect("ls", stdout=b"")
     with pytest.raises(I.ImportFailed, match="asked a question this did not answer"):
         I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
+
+
+# --------------------------------------------- a copy that was not replaced
+
+
+def test_more_in_the_library_than_was_cut_is_said_out_loud() -> None:
+    """A re-import meant to replace an earlier copy and did not leaves both,
+    and every check downstream reads "at least as many" as success. It is
+    otherwise found in whatever serves the library, as two of the same album."""
+    said = I.too_many(28, 14)
+    assert said and "28" in said[0] and "14" in said[0]
+    assert "not replaced" in said[0]
+
+
+def test_the_expected_count_is_not_a_complaint() -> None:
+    assert I.too_many(14, 14) == []
+
+
+def test_fewer_is_somebody_else_s_problem() -> None:
+    """Short is the archive gate's question, and it already asks it."""
+    assert I.too_many(12, 14) == []
+
+
+def test_a_doubled_library_is_noted_on_the_import(tmp_path: Path) -> None:
+    """Two of everything is what an unreplaced re-import leaves behind."""
+    review = Path(a_review(tmp_path))
+    cut = sum(len(side.tracks) for side in a_plan().sides)
+    rows = "\n".join(
+        f"A Record{SEP}/music/A Band/A Record/{i:02d} Track.flac"
+        for i in range(cut * 2)
+    )
+    fake = Moving(review, installed={"beet", "metaflac"})
+    fake.expect("ls", stdout=rows.encode())
+    done = I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
+    assert any("not replaced" in n for n in done.notes), done.notes
