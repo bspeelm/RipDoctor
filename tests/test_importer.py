@@ -419,14 +419,22 @@ def test_a_refused_import_names_stale_rows_as_the_cause(tmp_path: Path) -> None:
 def test_the_duplicate_question_is_answered_too() -> None:
     """beets asks again when the album is already in the library, and one
     answer leaves that question at end-of-input."""
-    assert I.answers("replace") == b"A\nR\n"
-    assert I.answers("keep") == b"A\nK\n"
-    assert I.answers("merge") == b"A\nM\n"
+    assert I.answers("replace", matching=True) == b"A\nR\n"
+    assert I.answers("keep", matching=True) == b"A\nK\n"
+    assert I.answers("merge", matching=True) == b"A\nM\n"
+
+
+def test_with_lookup_off_there_is_no_candidate_to_accept() -> None:
+    """Sending one anyway lands on the duplicate prompt, whose choices do not
+    include it. beets asks again and the next line carries, so it works by
+    accident - which is not a thing to rely on."""
+    assert I.answers("replace", matching=False) == b"R\n"
+    assert I.answers("keep", matching=False) == b"K\n"
 
 
 def test_an_answer_it_does_not_know_replaces_rather_than_starving() -> None:
     """Whatever arrives, beets must not be left waiting."""
-    assert I.answers("nonsense") == b"A\nR\n"
+    assert I.answers("nonsense", matching=True) == b"A\nR\n"
 
 
 def test_the_chosen_answer_reaches_beets(tmp_path: Path) -> None:
@@ -434,6 +442,15 @@ def test_the_chosen_answer_reaches_beets(tmp_path: Path) -> None:
     fake = moving_beets(review)
     I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x", duplicates="keep")
     assert fake.stdin_for("import") == b"A\nK\n"
+
+
+def test_the_no_catalogue_path_sends_only_the_duplicate_answer(
+    tmp_path: Path,
+) -> None:
+    review = Path(a_review(tmp_path))
+    fake = moving_beets(review)
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="", duplicates="keep")
+    assert fake.stdin_for("import") == b"K\n"
 
 
 def test_a_starved_import_says_that_was_the_cause(tmp_path: Path) -> None:
