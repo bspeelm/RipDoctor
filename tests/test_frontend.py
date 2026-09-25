@@ -145,3 +145,23 @@ def test_every_post_the_page_makes_has_a_post_route(script: Path) -> None:
         if not any(re.match(p, stem) for p in table for stem in stems):
             wrong.append(literal)
     assert not wrong, f"{script.name} posts to routes that take no POST: {wrong}"
+
+
+def test_the_record_picker_cannot_set_the_header_width() -> None:
+    """A select sizes itself to its widest option, not its selected one, so one
+    long album title pushed the last actions off the right edge where nothing
+    said they were there.
+
+    `min-width:0` is what lets a flex item shrink below its content at all, and
+    without it the rest of the rule does nothing. Asserted because a stylesheet
+    has no other gate: the failure is invisible until somebody's screen is
+    narrower than the developer's.
+    """
+    css = (STATIC / "style.css").read_text()
+    rule = re.search(r"#album\{([^}]*)\}", css)
+    assert rule, "no width rule for the record picker"
+    assert "min-width:0" in rule.group(1), "it cannot shrink below its content"
+    assert "max-width" in rule.group(1), "it can grow without limit"
+    assert re.search(r"header > button[^{]*\{[^}]*flex:none", css), (
+        "the header actions can be squeezed off the edge"
+    )
