@@ -155,14 +155,14 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
     if settings.importer == "beets":
         yield from _agree(settings, runner)
         yield from _plugins(settings, runner)
-        yield from _stale(runner)
+        yield from _stale(settings, runner)
 
 
-def _stale(runner: Runner) -> Iterator[Result]:
+def _stale(settings: Settings, runner: Runner) -> Iterator[Result]:
     """Rows beets holds for files that are gone. They stop an import part-way
     with a message that does not say why. ADR-050."""
     try:
-        missing, total = Beets().all_stale(runner)
+        missing, total = Beets().all_stale(runner, settings.library)
     except (ToolMissing, ToolFailed, OSError):
         return
     if not missing:

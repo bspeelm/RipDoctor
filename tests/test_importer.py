@@ -498,3 +498,56 @@ def test_a_doubled_library_is_noted_on_the_import(tmp_path: Path) -> None:
     fake.expect("ls", stdout=rows.encode())
     done = I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
     assert any("not replaced" in n for n in done.notes), done.notes
+
+
+# ------------------------------------- what beets says is relative to its root
+
+
+def a_filed_album(tmp_path: Path, names: tuple[str, ...]) -> tuple[str, bytes]:
+    """A library with real files, and beets' answer about them: relative
+    paths, which is what it reports and what a fake that returns absolute
+    ones quietly hides."""
+    album = tmp_path / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    for name in names:
+        (album / name).write_bytes(b"fLaC")
+    said = "\n".join(f"A Record{SEP}A Band/A Record/{name}" for name in names)
+    return str(tmp_path), said.encode()
+
+
+def test_a_relative_path_is_resolved_against_the_library(tmp_path: Path) -> None:
+    """Checked from wherever the process happens to be running, a relative
+    path is a file that does not exist - so every row reads as missing."""
+    library, said = a_filed_album(tmp_path, ("01 One.flac", "02 Two.flac"))
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
+    where, count = I.Beets().locate(fake, library, "A Band", "A Record")
+    assert count == 2
+    assert where is not None and where.is_absolute() and where.is_dir()
+
+
+def test_files_that_are_there_are_not_stale(tmp_path: Path) -> None:
+    """The panel said an album's files were gone while they sat in the
+    library, and clearing rows for a record that is present is the one thing
+    that must never happen."""
+    library, said = a_filed_album(tmp_path, ("01 One.flac",))
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
+    assert I.Beets().stale(fake, library, "A Band", "A Record") is None
+
+
+def test_files_that_are_really_gone_are_still_stale(tmp_path: Path) -> None:
+    said = f"A Record{SEP}A Band/A Record/01 Gone.flac".encode()
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
+    found = I.Beets().stale(fake, str(tmp_path), "A Band", "A Record")
+    assert found is not None and found.tracks == 1
+
+
+def test_an_absolute_path_is_left_alone(tmp_path: Path) -> None:
+    """Older beets reports absolute paths, and joining a root onto one would
+    produce a path under neither."""
+    album = tmp_path / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    (album / "01 One.flac").write_bytes(b"fLaC")
+    said = f"A Record{SEP}{album / '01 One.flac'}".encode()
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
+    where, _n = I.Beets().locate(fake, "/somewhere/else", "A Band", "A Record")
+    assert where == album
