@@ -551,3 +551,75 @@ def test_an_absolute_path_is_left_alone(tmp_path: Path) -> None:
     fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
     where, _n = I.Beets().locate(fake, "/somewhere/else", "A Band", "A Record")
     assert where == album
+
+
+# --------------------------------------------- replacing means replacing
+
+
+def a_library(tmp_path: Path, *names: str) -> tuple[str, bytes]:
+    album = tmp_path / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    for name in names:
+        (album / name).write_bytes(b"fLaC")
+    said = "\n".join(f"A Record{SEP}{album / n}" for n in names)
+    return str(tmp_path), said.encode()
+
+
+def replacing(library: str, said: bytes, review: Path) -> FakeRunner:
+    fake = Moving(review, installed={"beet", "metaflac"})
+    return fake.expect("ls", stdout=said)  # type: ignore[return-value]
+
+
+def test_replacing_removes_the_filed_audio_not_only_the_rows(
+    tmp_path: Path,
+) -> None:
+    """Its own "remove old" drops the rows and leaves the files, so the new
+    ones cannot take the old names and land beside them. Whatever serves the
+    library reads the directory, and shows both."""
+    library, said = a_library(tmp_path, "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review)
+
+    done = I.Beets().apply(
+        fake, a_plan(), str(review), library, mbid="x", replacing=True
+    )
+    assert not list((Path(library) / "A Band" / "A Record").glob("*.flac"))
+    assert any("removed 2 files" in n for n in done.notes)
+    assert [c for c in fake.calls if "remove" in c], "the rows were left behind"
+
+
+def test_nothing_is_deleted_without_the_acknowledgement(tmp_path: Path) -> None:
+    """Replace is the default answer to a question only asked when a copy is
+    already filed. On its own it must not delete anything."""
+    library, said = a_library(tmp_path, "01 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review)
+
+    I.Beets().apply(fake, a_plan(), str(review), library, mbid="x")
+    assert (Path(library) / "A Band" / "A Record" / "01 Old.flac").is_file()
+
+
+def test_a_path_outside_the_library_is_refused(tmp_path: Path) -> None:
+    """The paths come from another program and this deletes what they name."""
+    outside = tmp_path / "elsewhere" / "kept.flac"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"fLaC")
+    library = tmp_path / "music"
+    library.mkdir()
+    fake = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=f"A Record{SEP}{outside}".encode()
+    )
+    with pytest.raises(I.ImportFailed, match="outside"):
+        I.Beets().replace_filed(fake, str(library), "A Band", "A Record", mbid="x")
+    assert outside.is_file(), "it deleted something outside the library"
+
+
+def test_files_the_library_does_not_know_about_are_named(tmp_path: Path) -> None:
+    """What the directory holds and what the database holds are different
+    questions, and the second one was the only one being asked."""
+    library, said = a_library(tmp_path, "01 One.flac")
+    stray = Path(library) / "A Band" / "A Record" / "01 One.1.flac"
+    stray.write_bytes(b"fLaC")
+    fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
+    spare = I.Beets().unregistered(fake, library, "A Band", "A Record", mbid="x")
+    assert [p.name for p in spare] == ["01 One.1.flac"]
