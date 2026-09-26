@@ -1938,3 +1938,41 @@ and joining a root onto one produces a path under neither.
 described beets as returning absolute paths, because that is what somebody
 writing a fixture reaches for. They passed before the fix and after it. The
 tests that matter now use relative paths, which is what beets actually says.
+
+## ADR-060 — Replacing a filed copy removes its audio, and leftovers are named
+
+**Status:** accepted. Set by the author, 2026-09-25.
+
+The import dialog says, of the copy already in the library: *replace it — the
+old copy is removed first*. It was not.
+
+The importer's own "remove old" drops the database rows and leaves the audio
+where it is. The new files then cannot take the old names, so they land beside
+them with a suffix. The database is correct afterwards and says so; the
+directory holds two of everything. Whatever serves the library reads the
+directory, and shows two of everything — which is where it was found, three
+imports deep on one record, with a file carrying a `.2`.
+
+**Replacing removes the files, because that is what it says.** The rows are
+dropped as before and the audio the library named is deleted with them. Every
+path is proved to be inside the library root first: they come from another
+program and this deletes what they name.
+
+**Only with the acknowledgement.** "Replace" is the default answer to a
+question that is only asked when a copy is already filed, so on its own it must
+not delete anything — a first import would otherwise arrive with a licence to
+remove whatever it happened to match. The dialog already makes somebody tick
+that they know a copy is there, and that tick is now what permits the deletion
+rather than only enabling a button. A test holds it: without the tick, the
+filed audio survives.
+
+**What the directory holds is a different question from what the database
+holds, and only the second was being asked.** Counting rows said thirteen and
+was right while twenty-six files sat there. After an import the album's
+directory is compared against what the library accounts for, and anything left
+over is named, because that is what a player will show.
+
+**This does not explain the other one.** A separate record was imported twice
+without the importer detecting a duplicate at all, and that remains open. This
+is the case that is understood: the duplicate was detected, the answer was
+correct, and the promise made to the person was not kept.

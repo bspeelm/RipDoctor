@@ -268,6 +268,7 @@ def add(app: App, service: Service) -> None:
         spec_mbid = F.read_spec(spec_file).mbid if spec_file.is_file() else ""
         mbid = str(body.get("mbid", "")) if "mbid" in body else spec_mbid
         duplicates = str(body.get("duplicates", "replace"))
+        replacing = bool(body.get("replace"))
 
         review_dir = layout.review_dir(slug)
         if not any(review_dir.glob("*.flac")):
@@ -288,6 +289,7 @@ def add(app: App, service: Service) -> None:
                 root,
                 mbid=mbid,
                 duplicates=duplicates,
+                replacing=replacing,
                 file_mode=service.settings.file_mode,
                 dir_mode=service.settings.dir_mode,
             )

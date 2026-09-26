@@ -23,6 +23,7 @@ from typing import Protocol
 from ripdoctor.audio.runner import Runner, ToolMissing
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
+from ripdoctor.store.safety import contains
 
 FLAC = ".flac"
 
@@ -88,6 +89,7 @@ class Importer(Protocol):
         *,
         mbid: str = "",
         duplicates: str = "replace",
+        replacing: bool = False,
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome: ...
@@ -131,6 +133,7 @@ class Tagger:
         *,
         mbid: str = "",
         duplicates: str = "replace",
+        replacing: bool = False,
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
@@ -292,9 +295,17 @@ class Beets:
         *,
         mbid: str = "",
         duplicates: str = "replace",
+        replacing: bool = False,
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
+        cleared = 0
+        # Only with the acknowledgement: "replace" alone is a default, not a
+        # licence to delete. ADR-060.
+        if replacing and duplicates == "replace":
+            cleared = self.replace_filed(
+                runner, library, plan.artist, plan.album, mbid=mbid
+            )
         if not mbid:
             # Nothing to match against, and a cut file carries no tags at
             # all. The plan is what is known, so it is written first. ADR-049.
@@ -333,7 +344,15 @@ class Beets:
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
+        if cleared:
+            notes.append(f"removed {cleared} files of the copy already filed")
         notes.extend(too_many(count, sum(len(s.tracks) for s in plan.sides)))
+        spare = self.unregistered(runner, library, plan.artist, plan.album, mbid=mbid)
+        if spare:
+            notes.append(
+                f"{len(spare)} files in that directory are not in the library - "
+                f"starting {spare[0].name}. Whatever serves it will show them."
+            )
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def locate(
@@ -377,6 +396,42 @@ class Beets:
         if not paths or any(p.exists() for p in paths):
             return None
         return Stale(len(paths), paths[0].parent, " ".join(query))
+
+    def replace_filed(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> int:
+        """Remove the copy already filed, audio as well as rows. ADR-060."""
+        query = _query(album, mbid)
+        if not query:
+            return 0
+        filed = self._paths(runner, query, library)
+        if not filed:
+            return 0
+        root = Path(library).resolve()
+        gone = 0
+        for path in filed:
+            if not path.is_file():
+                continue
+            # They come from another program and this deletes what they name.
+            if not contains(root, path):
+                raise ImportFailed(f"refusing to delete {path}: outside {root}")
+            path.unlink()
+            gone += 1
+        runner.run(self._argv(["remove", "-f", *query]), timeout=600)
+        return gone
+
+    def unregistered(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> list[Path]:
+        """Audio in the album's directory the library does not account for.
+
+        What serves a library reads the directory, not the database. ADR-060.
+        """
+        where, _count = self.locate(runner, library, artist, album, mbid=mbid)
+        if where is None or not where.is_dir():
+            return []
+        known = set(self._paths(runner, _query(album, mbid) or [], library))
+        return sorted(p for p in where.glob("*.flac") if p not in known)
 
     def all_stale(self, runner: Runner, library: str = "") -> tuple[int, int]:
         """How many registered files are missing, of how many registered."""

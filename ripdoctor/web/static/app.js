@@ -933,7 +933,8 @@ async function runImport() {
   $("#imp-go").disabled = true;
   try {
     const r = await runJob(S.slug, `/api/import/${S.slug}`,
-                           { mbid, duplicates: $("#imp-dupes").value },
+                           { mbid, duplicates: $("#imp-dupes").value,
+                             replace: $("#imp-replace").checked },
                            "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
     $("#imp-done").hidden = false;
