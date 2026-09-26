@@ -346,13 +346,13 @@ class Beets:
         configured beets differently, which is all of them.
         """
         query = _query(album, mbid)
-        paths = self._paths(runner, query) if query else []
+        paths = self._paths(runner, query, library) if query else []
         if not paths:
             return None, 0
         return paths[0].parent, len(paths)
 
-    def _paths(self, runner: Runner, query: list[str]) -> list[Path]:
-        """Every file beets has registered under a query, in its own order."""
+    def _paths(self, runner: Runner, query: list[str], root: str = "") -> list[Path]:
+        """Every file beets registered, absolute, in its own order. ADR-059."""
         try:
             result = runner.run(
                 self._argv(["ls", "-f", _SEP.join(("$album", "$path")), *query]),
@@ -361,7 +361,7 @@ class Beets:
         except ToolMissing:
             return []
         return [
-            Path(line.split(_SEP)[-1])
+            _rooted(root, line.split(_SEP)[-1])
             for line in _plain(result.text).splitlines()
             if _SEP in line
         ]
@@ -373,14 +373,14 @@ class Beets:
         query = _query(album, mbid)
         if not query:
             return None
-        paths = self._paths(runner, query)
+        paths = self._paths(runner, query, library)
         if not paths or any(p.exists() for p in paths):
             return None
         return Stale(len(paths), paths[0].parent, " ".join(query))
 
-    def all_stale(self, runner: Runner) -> tuple[int, int]:
+    def all_stale(self, runner: Runner, library: str = "") -> tuple[int, int]:
         """How many registered files are missing, of how many registered."""
-        paths = self._paths(runner, [])
+        paths = self._paths(runner, [], library)
         return sum(1 for p in paths if not p.exists()), len(paths)
 
     def clear_stale(
@@ -399,10 +399,16 @@ class Beets:
             )
         query = _query(album, mbid) or []
         runner.run(self._argv(["remove", "-f", *query]), timeout=600)
-        left = self._paths(runner, query)
+        left = self._paths(runner, query, library)
         if left:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
+
+
+def _rooted(root: str, said: str) -> Path:
+    """What beets said, as something that can be stat'd. ADR-059."""
+    where = Path(said)
+    return where if where.is_absolute() or not root else Path(root) / where
 
 
 def _query(album: str, mbid: str) -> list[str]:

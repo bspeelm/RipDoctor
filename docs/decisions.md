@@ -1902,3 +1902,39 @@ asked for twice. It was written and then reverted: choosing the rate and depth
 per capture is a deliberate feature, a test defends it, and the fault was the
 page inventing a value rather than the server accepting one. Fixing the second
 thing would have left the first unfixed and taken a working feature with it.
+
+## ADR-059 — What the importer reports is relative to its own root
+
+**Status:** accepted. Set by the author, 2026-09-25.
+
+beets reports a file's path relative to the library root it was configured
+with. Every path it handed back was used as given: stat'd, checked for a
+parent directory, compared against what is on disk. Checked from wherever the
+server happens to be running, a relative path is a file that does not exist.
+
+**Three things were wrong at once, and only one of them announced itself.**
+
+The stale-row check reported that a record's files had been deleted outside
+beets while they sat in the library. It offered to clear the rows for a record
+that was entirely present — refused, because clearing verifies every path is
+absent first, which is the guard earning its place. The panel was still
+telling somebody something untrue about their library.
+
+The mode repair after an import silently did nothing. It takes the directory
+beets filed into, and a relative directory is not one, so it returned without
+setting anything and reported zero files changed. Nothing failed; the import
+looked clean and left files the owning process alone could read.
+
+The artwork panel's "where is this record filed" answer fell through to a path
+built from this project's own naming, which is right only by coincidence —
+the case ADR-048 exists to prevent, arriving by a different route.
+
+**One place resolves it, because one place produced it.** The paths are made
+absolute where they are read out of beets, against the library root the caller
+already has. An absolute path is returned unchanged: older beets reports those,
+and joining a root onto one produces a path under neither.
+
+**A fake that answered more tidily than the real thing hid it.** Every test
+described beets as returning absolute paths, because that is what somebody
+writing a fixture reaches for. They passed before the fix and after it. The
+tests that matter now use relative paths, which is what beets actually says.
