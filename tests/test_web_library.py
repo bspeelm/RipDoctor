@@ -826,3 +826,67 @@ def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
     body = get(build(service), "/api/archive/album", service).json()
     assert not body["ready"]
     assert "not replaced" in body["why"], body["why"]
+
+
+# ------------------------------------------------- forced placement (ADR-061)
+
+
+def drifting_levels(window: float) -> bytes:
+    """A side whose two gaps both sit later than the catalogue predicts."""
+    rows = []
+    for i in range(int(40.0 / window)):
+        t = i * window
+        quiet = 14.0 <= t < 17.0 or 27.0 <= t < 30.0
+        rows.append(f"frame:{i} pts:{i} pts_time:{t}")
+        rows.append(f"lavfi.astats.Overall.RMS_level={-85.0 if quiet else -25.0}")
+        rows.append(f"lavfi.astats.Overall.Peak_level={-70.0 if quiet else -9.0}")
+    return "\n".join(rows).encode()
+
+
+def drifting_service(tmp_path: Path, *replies: bytes):  # type: ignore[no-untyped-def]
+    layout = a_layout(tmp_path, sides=("a",))
+    service = a_service(tmp_path, layout=layout)
+    windows = int(40.0 / C.WINDOW)
+    service.runner = a_runner(
+        windows=windows, seconds=40.0, levels=drifting_levels(C.WINDOW)
+    )
+    C.build(service.runner, layout, "album", "a", dwell=0.0)
+    service.fetcher = Catalogue(*replies)  # type: ignore[assignment]
+    return service
+
+
+# 38s of catalogue into 40s of music: it is the displacement that does not fit,
+# not the durations.
+DRIFTS = [11000, 11000, 13000, 3000]
+
+
+def test_a_side_the_gaps_displace_off_the_end_is_refused(tmp_path: Path) -> None:
+    service = drifting_service(tmp_path, release(DRIFTS))
+    body = post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"}).json()
+    assert "side a" in body["error"], body["error"]
+    assert not service.layout.plan_file("album").exists()
+
+
+def test_forcing_places_that_side_from_the_catalogue_and_says_which(
+    tmp_path: Path,
+) -> None:
+    service = drifting_service(tmp_path, release(DRIFTS))
+    body = post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", "force": True}
+    ).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["forced"] == ["a"]
+    assert service.layout.plan_file("album").is_file()
+
+    plan = F.read_plan(service.layout.plan_file("album"))
+    starts = [t.start for t in plan.sides[0].tracks]
+    assert starts == [0.0, 11.0, 22.0, 35.0]
+
+
+def test_a_pass_that_needed_no_forcing_says_so(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    body = post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", "force": True}
+    ).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["forced"] == []

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ripdoctor.core import gaps
 from ripdoctor.core.envelope import Envelope
@@ -39,6 +39,11 @@ class OutOfSide(ValueError):
 # Beyond this the disagreement with the catalogue is worth flagging, not just
 # recording.
 OUTLIER = 15.0
+
+# Placing a side from the catalogue alone is the ordinary fit with nothing to
+# anchor to, so it needs no second code path. ADR-061.
+NO_GAPS = GapSet((), 0.0, 0.0, 0.0)
+FORCED = "forced, "
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +185,7 @@ def fit_plan(
     *,
     above: float | None = None,
     below: float | None = None,
+    force: bool = False,
 ) -> tuple[Plan, dict[str, tuple[Fitted, ...]]]:
     """Fit every side of a spec, and return the plan with its reasoning.
 
@@ -204,6 +210,19 @@ def fit_plan(
         # numbers the reference produced. A track that would start after its
         # side ends is the one shape those numbers cannot be cut from.
         bad = next((f for f in fitted if f.track.end <= f.track.start), None)
+        if bad is not None and force:
+            fitted = tuple(
+                replace(f, reason=FORCED + f.reason)
+                for f in fit_side(
+                    side,
+                    env,
+                    NO_GAPS,
+                    duration=env.duration,
+                    lead=spec.lead,
+                    tail=spec.tail,
+                )
+            )
+            bad = next((f for f in fitted if f.track.end <= f.track.start), None)
         if bad is not None:
             raise OutOfSide(side, bad.track.start)
         working[side.letter] = fitted
@@ -216,6 +235,11 @@ def fit_plan(
         date=spec.date,
     )
     return plan, working
+
+
+def was_forced(fitted: tuple[Fitted, ...]) -> bool:
+    """Whether this side was placed from the catalogue alone. ADR-061."""
+    return any(f.reason.startswith(FORCED) for f in fitted)
 
 
 def to_side(letter: str, fitted: tuple[Fitted, ...]) -> PlanSide:

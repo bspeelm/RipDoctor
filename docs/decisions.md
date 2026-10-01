@@ -1976,3 +1976,34 @@ over is named, because that is what a player will show.
 without the importer detecting a duplicate at all, and that remains open. This
 is the case that is understood: the duplicate was detected, the answer was
 correct, and the promise made to the person was not kept.
+
+## ADR-061 — a side can be placed from the catalogue alone, when it is asked for
+
+**Status:** accepted. Set by the author, 2026-10-01.
+
+ADR-045 ends a refusal by naming two ways out: another release, or an ear-set
+boundary. The second is harder than it reads. A refused fit saves nothing, so
+placing a side by ear means placing every boundary on it against a blank
+timeline — the catalogue's own arithmetic, which is usually right for the first
+track and approximately right after it, is discarded along with the one bad gap
+that caused the refusal.
+
+Asked to, the fit re-places a refused side with no gaps at all. Each track takes
+exactly its catalogue duration from the side's start, the last is clamped to the
+side's end, and every boundary on that side is marked as having been placed that
+way rather than found.
+
+**Nothing is scaled.** That is the line ADR-045 drew and it does not move here:
+no duration is stretched to make a side come out even. A record that fits is
+untouched, because the fallback is reachable only after the ordinary fit has
+already failed on that side. What this adds is a starting point instead of a
+blank side, and the boundaries that matter are still set by a person.
+
+**It is per-record and never the default.** A fit that silently placed
+boundaries from arithmetic would present a guess with the same confidence as a
+measurement, which is the failure the delta column exists to prevent.
+
+**It stays a refusal when even that will not fit.** Where the catalogue's own
+durations laid end to end put a track's start past the side's end, the side
+cannot hold these tracks under any placement, and ADR-045's message is the
+right answer.

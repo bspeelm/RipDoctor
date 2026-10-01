@@ -398,7 +398,7 @@ def cmd_fit(ctx: Context, args: argparse.Namespace) -> int:
         else {"below": ctx.thresholds.gap_below}
     )
     try:
-        plan, working = fit_plan(spec, lanes, **anchor)
+        plan, working = fit_plan(spec, lanes, force=args.force, **anchor)
     except OutOfSide as e:
         print(f"\nrefusing to write this plan: {e}", file=sys.stderr)
         return 1
@@ -603,6 +603,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("band", "full"),
         default="band",
         help="which lane the envelopes hold; the anchor follows it",
+    )
+    f.add_argument(
+        "--force",
+        action="store_true",
+        help="place a side the gaps will not fit from the catalogue alone",
     )
     f.set_defaults(run=cmd_fit)
 
