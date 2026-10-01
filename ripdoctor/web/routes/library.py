@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.fit import fit_plan, report
+from ripdoctor.core.fit import fit_plan, report, was_forced
 from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, validate
 from ripdoctor.core.sides import assign_sides, music_span
 from ripdoctor.integrations import importer as IMP
@@ -102,6 +102,7 @@ def add(app: App, service: Service) -> None:
         mbid = str(r.json().get("mbid", ""))
         if not mbid:
             raise H.HttpError(400, "a release is needed; search first")
+        force = bool(r.json().get("force", False))
         letters = layout.sides_on_disk(slug)
         if not letters:
             raise H.HttpError(404, f"no side files for {slug}")
@@ -131,13 +132,16 @@ def add(app: App, service: Service) -> None:
                 job.finished += 1
 
             spec = spec_from(slug, release, spans)
-            plan, working = fit_plan(spec, lanes, above=service.thresholds.gap_above)
+            plan, working = fit_plan(
+                spec, lanes, above=service.thresholds.gap_above, force=force
+            )
             validate(plan)
             F.save(layout, slug, spec, plan)
             return {
                 "album": plan.album,
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
+                "forced": [k for k, f in working.items() if was_forced(f)],
                 "report": "\n".join(
                     f"=== side {letter}\n{report(fitted)}"
                     for letter, fitted in working.items()

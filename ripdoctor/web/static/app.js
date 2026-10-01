@@ -987,6 +987,8 @@ function openFirstPass() {
   $("#fp-report").hidden = true;
   $("#fp-done").hidden = true;
   $("#fp-cancel").hidden = false;
+  $("#fp-force-row").hidden = true;
+  $("#fp-force").checked = false;
   $("#fpdlg").showModal();
 }
 
@@ -1038,7 +1040,8 @@ async function fpRun(rel) {
   $("#fp-results").innerHTML = "<p class=\"dim\">fitting…</p>";
   try {
     const r = await runJob(S.slug, `/api/firstpass/${S.slug}`,
-                           { mbid: rel.id }, "fitting");
+                           { mbid: rel.id, force: $("#fp-force").checked },
+                           "fitting");
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
     $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + r.report;
@@ -1046,11 +1049,16 @@ async function fpRun(rel) {
     $("#fp-cancel").hidden = true;
     S.sideData = {};
     await openAlbum(S.slug);
-    status("first pass applied — read the delta column, then check by ear");
+    const forced = (r.forced || []).join(", ");
+    status(forced
+      ? `first pass applied — side ${forced} placed from the catalogue alone, check it by ear`
+      : "first pass applied — read the delta column, then check by ear");
   } catch (e) {
     // keep the release list up so another one can be tried straight away
     renderReleases();
     $("#fp-err").textContent = e.message;
+    // Offered only after a refusal: a side that fits is never placed this way.
+    $("#fp-force-row").hidden = false;
   }
 }
 

@@ -365,3 +365,87 @@ def test_a_track_with_no_gap_near_it_falls_back_to_the_catalogue() -> None:
     fitted = fit_side(side, env, gapset, duration=208.0)
     assert fitted[0].reason == "no gap"
     assert fitted[0].track.end == 20.0
+
+
+# ----------------------------------------------- forced placement (ADR-061)
+
+
+def drifting_side() -> tuple[Envelope, P.SpecSide]:
+    """A side whose gaps are late enough to push the last track off the end.
+
+    The catalogue total fits the side with room to spare; it is the accumulated
+    displacement that does not, which is the case ADR-061 exists for.
+    """
+    env = build(
+        [
+            (10.0, -80),  # lead-in
+            (133.0, -25),
+            (6.0, -80),  # a gap 33s after the first track's predicted end
+            (129.0, -25),
+            (6.0, -80),
+            (120.0, -25),  # nothing to anchor to after this
+        ]
+    )
+    tracks = (
+        P.SpecTrack(number=1, title="One", cat=100.0),
+        P.SpecTrack(number=2, title="Two", cat=100.0),
+        P.SpecTrack(number=3, title="Three", cat=100.0),
+        P.SpecTrack(number=4, title="Four", cat=20.0),
+    )
+    return env, P.SpecSide(letter="a", start=10.0, end=340.0, tracks=tracks)
+
+
+def test_the_drifting_side_is_refused_while_its_catalogue_would_have_fitted() -> None:
+    env, side = drifting_side()
+    assert sum(t.cat for t in side.tracks) < side.end - side.start
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide):
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+
+
+def test_forced_placement_lays_the_catalogue_out_and_marks_every_boundary() -> None:
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    _plan, working = FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+    fitted = working["a"]
+
+    assert [f.track.start for f in fitted] == [10.0, 110.0, 210.0, 310.0]
+    assert fitted[-1].track.end == side.end
+    assert all(f.reason.startswith("forced") for f in fitted)
+
+
+def test_forcing_moves_nothing_on_a_record_that_already_fits() -> None:
+    """The guarantee ADR-045 was given: a fit that works is never touched by a
+    change aimed at one that does not."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(spec_side(),))
+
+    plain, _ = FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    forced, working = FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+
+    assert plain == forced
+    assert not any(f.reason.startswith("forced") for f in working["a"])
+
+
+def test_forcing_still_refuses_a_side_the_catalogue_cannot_fit_either() -> None:
+    """Laid end to end the durations overrun the side, so no placement helps and
+    the finding from ADR-045 is still the right answer."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    side = spec_side(n=3, cat=200.0, start=10.0, end=200.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide):
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+
+
+def test_an_ear_set_boundary_survives_forced_placement() -> None:
+    env, side = drifting_side()
+    kept = 150.0
+    tracks = (side.tracks[0], P.SpecTrack(number=2, title="Two", cat=100.0, end=kept))
+    side = P.SpecSide(
+        letter="a", start=side.start, end=side.end, tracks=tracks + side.tracks[2:]
+    )
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    _plan, working = FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+
+    second = working["a"][1]
+    assert second.track.end == kept and second.reason == "ear"
