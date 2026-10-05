@@ -91,6 +91,7 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 #tracks input:focus{background:#0f1114;outline:1px solid var(--accent)}
 #tracks .num{width:3rem}#tracks .t{width:6rem;text-align:right}
 #tracks .drift{text-align:right}
+#tracks .drift.forced{color:var(--warn);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
 .big{color:var(--warn)}
 /* The table was taking half a wide screen while sitting nearly empty and the
    album panel scrolled at 21rem. Cap the table, let the panels take real width,

@@ -106,6 +106,9 @@ class PlanTrack:
     start: float
     end: float
     cat: float
+    # Placed from the catalogue rather than found, so `delta` is zero by
+    # construction and says nothing about whether the boundary is right.
+    forced: bool = False
 
     @property
     def length(self) -> float:
@@ -150,6 +153,7 @@ class Plan:
                             start=float(t["start"]),
                             end=float(t["end"]),
                             cat=float(t.get("cat", 0.0)),
+                            forced=bool(t.get("forced", False)),
                         )
                         for t in s.get("tracks", [])
                     ),
@@ -179,6 +183,7 @@ class Plan:
                             "start": round(t.start, 2),
                             "end": round(t.end, 2),
                             "cat": t.cat,
+                            **({"forced": True} if t.forced else {}),
                         }
                         for t in s.tracks
                     ],

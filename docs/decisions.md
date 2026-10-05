@@ -1999,6 +1999,13 @@ untouched, because the fallback is reachable only after the ordinary fit has
 already failed on that side. What this adds is a starting point instead of a
 blank side, and the boundaries that matter are still set by a person.
 
+**The mark is on the track, not only on the report.** A forced boundary's delta
+is zero by construction — the track was handed exactly its catalogue duration —
+so a delta column showing that number reads as a flawless fit on precisely the
+side that most needs listening to. The plan carries the mark, the table prints
+it in place of the number, and moving the boundary clears it: a boundary
+somebody set is theirs rather than the catalogue's.
+
 **It is per-record and never the default.** A fit that silently placed
 boundaries from arithmetic would present a guess with the same confidence as a
 measurement, which is the failure the delta column exists to prevent.
