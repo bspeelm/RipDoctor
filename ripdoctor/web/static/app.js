@@ -427,7 +427,12 @@ function renderTracks() {
     const len = t.end - t.start;
     tr.appendChild(el("td", "t", fmt(len)));
     const dr = el("td", "drift");
-    if (t.cat) {
+    if (t.forced) {
+      dr.textContent = "forced";
+      dr.className = "drift forced";
+      dr.title = "placed from the catalogue, not found — this column is zero by "
+               + "construction and cannot tell you whether the boundary is right";
+    } else if (t.cat) {
       const d = len - t.cat;
       dr.textContent = (d >= 0 ? "+" : "") + d.toFixed(2);
       if (Math.abs(d) > 10) dr.className = "drift big";
@@ -526,6 +531,7 @@ function splitAtPlayhead() {
 
   list.push({ number: newNum, title: "Untitled", start: round2(nextStart), end: t.end });
   t.end = round2(prevEnd);
+  t.forced = false;
   list.sort((a, b) => a.start - b.start);
   markDirty(); renderTracks(); ed.setTracks(list);
   select(newNum, "start");
@@ -554,7 +560,8 @@ function updateReadout() {
   const d = t.cat ? len - t.cat : null;
   $("#ro-track").textContent =
     `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s` +
-    (d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
+    (t.forced ? "  — forced, placed from the catalogue; check it by ear"
+     : d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
 
   // the nudge2 question: is this cut still inside a real silence?
   const gs = S.sideData[S.side].gaps.band.gaps;
@@ -2036,6 +2043,7 @@ function wire() {
       t = Math.max(0, Math.min(d, t));
       if (edge === "start") tr.start = Math.min(t, tr.end - 0.2);
       else tr.end = Math.max(t, tr.start + 0.2);
+      tr.forced = false;
       markDirty(); ed.render(); updateReadout(); renderTracks();
     },
     (num, edge) => { ed.sel = num == null ? null : { track: num, edge }; renderTracks(); updateReadout(); },
@@ -2255,6 +2263,7 @@ function wire() {
       const step = (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1);
       if (sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
       else t.end = Math.max(t.end + step, t.start + 0.2);
+      t.forced = false;
       markDirty(); ed.render(); updateReadout(); renderTracks();
     } else if (e.key === "s" || e.key === "S") {
       e.preventDefault(); splitAtPlayhead();

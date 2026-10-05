@@ -813,3 +813,28 @@ def test_a_record_named_only_by_its_spec_opens_with_that_name(tmp_path: Path) ->
     F.remember(service.layout, "album", album="Second", artist="First", date="2019")
     body = get(build(service), "/api/album/album", service).json()
     assert (body["artist"], body["album"], body["date"]) == ("First", "Second", "2019")
+
+
+def test_a_forced_boundary_survives_a_save_and_reaches_the_page(
+    tmp_path: Path,
+) -> None:
+    """The report that says `forced` is gone on the next page load, so the mark
+    has to be on the track. Without it the delta column reads +0.00 for every
+    forced boundary, which is the shape of a perfect fit."""
+    service = a_service(tmp_path)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["forced"] = True
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["forced"] is True
+
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].tracks[0].forced
+
+
+def test_a_found_boundary_carries_no_mark(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    assert post(build(service), "/api/plan/album", service, a_plan_body()).status == 200
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["forced"] is False

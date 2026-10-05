@@ -449,3 +449,23 @@ def test_an_ear_set_boundary_survives_forced_placement() -> None:
 
     second = working["a"][1]
     assert second.track.end == kept and second.reason == "ear"
+
+
+def test_a_forced_boundary_is_marked_on_the_track_that_is_saved() -> None:
+    """The report is transient; the plan is what a reader comes back to."""
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    plan, _ = FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+
+    tracks = plan.sides[0].tracks
+    assert all(t.forced for t in tracks)
+    assert all(t.forced for t in P.Plan.from_dict(plan.to_dict()).sides[0].tracks)
+
+
+def test_a_boundary_that_was_found_is_not_marked() -> None:
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(spec_side(),))
+    plan, _ = FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+
+    assert not any(t.forced for t in plan.sides[0].tracks)
+    assert "forced" not in json.dumps(plan.to_dict())

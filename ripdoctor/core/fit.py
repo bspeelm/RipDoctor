@@ -243,7 +243,13 @@ def was_forced(fitted: tuple[Fitted, ...]) -> bool:
 
 
 def to_side(letter: str, fitted: tuple[Fitted, ...]) -> PlanSide:
-    return PlanSide(file=f"side-{letter}.flac", tracks=tuple(f.track for f in fitted))
+    return PlanSide(
+        file=f"side-{letter}.flac",
+        tracks=tuple(
+            replace(f.track, forced=True) if f.reason.startswith(FORCED) else f.track
+            for f in fitted
+        ),
+    )
 
 
 def report(fitted: tuple[Fitted, ...]) -> str:
