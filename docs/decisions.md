@@ -2043,13 +2043,21 @@ of recovering from a closed tab. It is not a record. No name is remembered, no
 spec or plan is written, and it never appears in the record picker, because it
 has no sides and nothing to cut.
 
-**The match is confirmed, never assumed.** Run with stdin closed, beets prints
-its whole candidate and dies without touching a file — the same mechanism the
-cut path's preview uses. What is shown is then pinned: the release id is read
-back out of that output and passed to the import as `--search-id`, so the run
-that commits cannot quietly choose differently from the one that was agreed. No
-release id in the output means no confident match, and that is reported rather
-than imported.
+**The match is confirmed, never assumed, and showing it is harder than it
+looks.** beets has no dry run, and no answer on its input is one either: a match
+it rates strongly is applied without ever prompting, so a look that merely
+closed or fed stdin files the record — moves the files, writes the tags,
+registers the release — with nobody having agreed to anything. A look is
+therefore an import against a library that is thrown away, with `move`, `copy`
+and `write` all off, which leaves every file byte-identical and the real library
+untouched. Without a throwaway library to run against it refuses, because the
+fallback would be the real one.
+
+What is shown is then pinned: the release id is read back out of that output and
+passed to the import as `--search-id`, so the run that commits cannot quietly
+choose differently from the one that was agreed. No single release id in the
+output means beets was offering a choice rather than making one, and that is
+reported rather than imported.
 
 **Nothing is kept.** A download can be fetched again from where it was bought,
 so storing a second copy buys nothing. The scratch upload is cleared only after

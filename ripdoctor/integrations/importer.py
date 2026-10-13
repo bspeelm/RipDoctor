@@ -203,10 +203,30 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 # a refused one. ADR-042.
 OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
 
-# The match prompt's default is Apply, and beets reads a closed stdin as the
-# default - so a look with nothing to answer with files the record. Skipping
-# is the answer that reads the candidate and leaves it where it is. ADR-062.
+# Only for the weak matches beets does ask about: it lists the candidates and
+# this declines them, which is the right outcome, because a look that had to
+# choose between several would be choosing. A strong match is never asked
+# about at all - see PREVIEW. ADR-062.
 LOOK_ONLY = b"S\n"
+
+# A match beets rates strongly is applied without prompting, so no answer on
+# stdin makes `beet import` non-committal - a look that only closed or fed the
+# input filed the record. A look is therefore an import into a library that is
+# thrown away, with nothing moved, copied or written. ADR-062.
+PREVIEW = (
+    "library: {db}\n"
+    "directory: {files}\n"
+    "import:\n"
+    "  quiet: no\n"
+    "  timid: no\n"
+    "  move: no\n"
+    "  copy: no\n"
+    "  write: no\n"
+    "  resume: no\n"
+    "  incremental: no\n"
+)
+PREVIEW_FILE = "beets-preview.yaml"
+PREVIEW_DB = "beets-preview.db"
 OVERRIDE_FILE = "beets-override.yaml"
 
 
@@ -222,6 +242,8 @@ class Beets:
 
     name: str = "beets"
     config: str = ""
+    preview_config: str = ""
+    preview_db: str = ""
 
     @classmethod
     def with_override(cls, state_dir: str | Path) -> Beets:
@@ -229,7 +251,12 @@ class Beets:
         where = Path(state_dir) / OVERRIDE_FILE
         where.parent.mkdir(parents=True, exist_ok=True)
         where.write_text(OVERRIDE)
-        return cls(config=str(where))
+        db = where.parent / PREVIEW_DB
+        look = where.parent / PREVIEW_FILE
+        look.write_text(
+            PREVIEW.format(db=db, files=where.parent / "beets-preview-files")
+        )
+        return cls(config=str(where), preview_config=str(look), preview_db=str(db))
 
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
@@ -263,23 +290,38 @@ class Beets:
                 return os.path.expanduser(value.strip())
         return ""
 
-    def _argv(self, args: list[str]) -> list[str]:
+    def _argv(self, args: list[str], config: str = "") -> list[str]:
         head = ["beet"]
-        if self.config:
-            head += ["--config", self.config]
+        chosen = config or self.config
+        if chosen:
+            head += ["--config", chosen]
         return head + args
+
+    def _looking(self, args: list[str]) -> list[str]:
+        """The same command against a library that is about to be deleted.
+
+        Fresh every time: rows left by the last look would make the next one
+        report the record as a duplicate of itself.
+        """
+        if not self.preview_config:
+            # Falling back on the real configuration here would file the record
+            # instead of showing it, which is the one thing a look must not do.
+            raise ImportFailed(
+                "a look needs a library to throw away and none is configured"
+            )
+        Path(self.preview_db).unlink(missing_ok=True)
+        return self._argv(args, self.preview_config)
 
     def preview(
         self, runner: Runner, plan: Plan, review: str, library: str, *, mbid: str = ""
     ) -> str:
         """The closest thing to a dry run that exists.
 
-        beets has none. Answered with a skip it prints the whole candidate and
-        moves nothing; apply runs the identical command with the answer that
-        takes it.
+        beets has none, and a strong match is taken without asking, so this
+        runs against a throwaway library and moves, copies and writes nothing.
         """
         result = runner.run(
-            self._argv(self._import(review, mbid)), stdin=LOOK_ONLY, timeout=1800
+            self._looking(self._import(review, mbid)), stdin=LOOK_ONLY, timeout=1800
         )
         return _plain(result.text + result.err)
 
@@ -363,11 +405,11 @@ class Beets:
     def propose(self, runner: Runner, directory: str) -> tuple[str, str]:
         """What beets would make of an album that arrived already tagged.
 
-        The same mechanism as `preview`: answered with a skip, beets prints its
-        whole candidate and leaves every file where it is. ADR-062.
+        The same mechanism as `preview`: a throwaway library, and nothing
+        moved, copied or written. ADR-062.
         """
         result = runner.run(
-            self._argv(["import", directory]), stdin=LOOK_ONLY, timeout=1800
+            self._looking(["import", directory]), stdin=LOOK_ONLY, timeout=1800
         )
         output = _plain(result.text + result.err)
         return proposed(output), output

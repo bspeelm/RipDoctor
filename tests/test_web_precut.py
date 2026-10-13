@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.config.settings import Settings
-from ripdoctor.integrations.importer import LOOK_ONLY
+from ripdoctor.integrations.importer import PREVIEW_FILE
 from ripdoctor.store import incoming as IN
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
@@ -43,6 +43,8 @@ def a_precut_service(
 ) -> Service:
     service = a_service(tmp_path, layout=a_layout(tmp_path))
     service.settings = Settings(library=str(tmp_path / "lib"), importer=importer)
+    # Without one there is no throwaway library, and a look would be an import.
+    service.state_dir = str(tmp_path / "state")
     service.runner = runner or FakeRunner(installed={"beet"}).expect(
         "import", stdout=MATCH
     )
@@ -58,8 +60,9 @@ class Moving(FakeRunner):
 
     def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
         args = [str(a) for a in argv]
-        # The look is answered with a skip, and a skip moves nothing.
-        if "import" in args and stdin and stdin != LOOK_ONLY:
+        # Only the real import takes the files; the look runs against a
+        # throwaway library and moves nothing.
+        if "import" in args and not any(PREVIEW_FILE in a for a in args):
             for f in self.staged.glob("*.flac"):
                 f.unlink()
         return super().run(argv, stdin=stdin, timeout=timeout)
@@ -96,12 +99,18 @@ def test_an_album_unpacks_and_beets_is_asked_what_it_is(tmp_path: Path) -> None:
 
 
 def test_asking_what_it_is_moves_nothing(tmp_path: Path) -> None:
-    """Answered with a skip, so beets reads the candidate and takes nothing.
-    Closing stdin instead looks like a dry run and is not one: the prompt's
-    default is Apply, and beets takes the default on EOF."""
+    """The look runs against a library that is thrown away, with nothing moved,
+    copied or written. No answer on stdin would do: beets applies a match it
+    rates strongly without ever prompting."""
     service = a_precut_service(tmp_path)
     upload(service, an_album())
-    assert service.runner.fed == [LOOK_ONLY]  # type: ignore[union-attr]
+
+    argv = service.runner.argv_for("import")  # type: ignore[union-attr]
+    looked = Path(tmp_path / "state" / PREVIEW_FILE)
+    assert str(looked) in argv
+    assert str(tmp_path / "state" / "beets-override.yaml") not in argv
+    for refusal in ("move: no", "copy: no", "write: no"):
+        assert refusal in looked.read_text()
 
 
 def test_a_file_that_is_not_an_album_is_refused(tmp_path: Path) -> None:
