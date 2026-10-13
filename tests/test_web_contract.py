@@ -77,6 +77,7 @@ OBJECTS = {
     ),
     "/api/punch/album": ("slug", "album", "artist", "tracks"),
     "/api/ingest/album": ("exists",),
+    "/api/precut": ("upload", "staged", "chunk"),
 }
 
 # The back-outs. Each is a POST, and each one's answer is read straight into a

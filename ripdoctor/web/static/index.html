@@ -26,6 +26,7 @@
       <button data-mode="rip">Rip</button>
       <button data-mode="punch">Punch</button>
       <button data-mode="upload">Upload</button>
+      <button data-mode="precut">Pre-cut</button>
     </span>
     <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
            title="narrows the list beside it; every record is in there, archived ones included">
@@ -84,6 +85,31 @@
         <input type="file" id="up-file" accept="audio/*,video/*" hidden>
         <p class="err" id="up-err"></p>
       </div>
+    </div>
+
+    <div class="ripform" id="precutform" hidden>
+      <h2>Pre-cut album import</h2>
+      <p class="dim">An album that is already one file per track &mdash; a
+        download you bought. There is nothing to cut, so this goes straight to
+        tagging: beets matches it, replaygain sets the levels, and the cover is
+        fetched and embedded, exactly as a finished rip is.</p>
+      <div class="row btns">
+        <button type="button" id="pc-pick">Choose a download&hellip;</button>
+        <button type="button" id="pc-go" disabled>Upload</button>
+        <button type="button" id="pc-cancel" class="ghost" hidden>Cancel</button>
+      </div>
+      <input type="file" id="pc-file" accept=".zip,application/zip" hidden>
+      <label id="pc-duprow" hidden>If it is already in the library
+        <select id="pc-dup">
+          <option value="replace">Replace what is there</option>
+          <option value="keep">Keep both</option>
+          <option value="skip">Skip it</option>
+          <option value="merge">Merge them</option>
+        </select></label>
+      <div class="row btns">
+        <button type="button" id="pc-import" hidden>Import this release</button>
+      </div>
+      <p class="err" id="pc-err"></p>
     </div>
 
     <div class="ripform" id="punchform" hidden>
@@ -171,6 +197,20 @@
         way in and checked that it decodes before it becomes a side &mdash; and
         a lossy source stays lossy, so this does not improve a download.
         Boundaries are found and checked by ear afterwards, in <b>Cut</b>.</p>
+    </div>
+
+    <div class="ripmeter" id="precutpane" hidden>
+      <h2 id="pc-what">Nothing chosen yet</h2>
+      <p class="dim mono" id="pc-tracks"></p>
+      <div class="row"><div class="bar" id="pc-bar"><i></i></div></div>
+      <p class="dim" id="pc-state"></p>
+      <pre id="pc-report" hidden></pre>
+      <p class="dim" id="pc-done"></p>
+      <p class="hint">Nothing is filed until you say so. beets is asked what the
+        album is with nothing to read, so it prints what it found and stops
+        without moving a file &mdash; and the release you accept is the one
+        pinned when it runs for real. The upload is cleared only once the
+        library is confirmed to hold the tracks.</p>
     </div>
   </div>
 

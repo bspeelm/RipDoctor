@@ -9,6 +9,7 @@ from ripdoctor.web.routes import (
     cutting,
     ingest,
     library,
+    precut,
     punching,
     records,
     session,
@@ -26,4 +27,5 @@ def build(service: Service, *, static: object = None) -> App:
     art.add(app, service)
     punching.add(app, service)
     ingest.add(app, service)
+    precut.add(app, service)
     return app

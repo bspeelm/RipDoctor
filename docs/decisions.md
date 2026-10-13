@@ -2014,3 +2014,50 @@ measurement, which is the failure the delta column exists to prevent.
 durations laid end to end put a track's start past the side's end, the side
 cannot hold these tracks under any placement, and ADR-045's message is the
 right answer.
+
+## ADR-062 — a second intake, for a record that arrives already cut
+
+**Status:** accepted. Set by the author, 2026-10-13.
+
+**The argument against, first.** `docs/north-star.md` says the middle verb is
+the point, and that anything which only moves audio around is in scope only
+insofar as it feeds the judgement about where a track ends. An album bought as
+a download has no boundaries to find and nothing to check by ear. By the
+project's own test it does not belong here, and one `beet import` already does
+the whole job.
+
+What survives that is not the command. It is everything around the command, and
+all of it already lives here: the configuration override without which a
+preview is impossible, the answers beets will ask for in the order it asks
+them, the mode repair after beets rewrites a file at 0600, the stale rows a
+previous copy left behind, the check that what reached the library is what was
+sent, and a report of what happened rather than what was asked for. An album
+imported by hand gets none of that. A second place that re-derived it would be
+the duplication worth refusing — so this adds no import logic, and reuses that
+stage whole.
+
+**One album at a time, under a reserved name.** The upload is the album, so
+there is no identifier to invent and nothing a restart can strand: the scratch
+store is keyed by one reserved slug, and asking what is in progress is the whole
+of recovering from a closed tab. It is not a record. No name is remembered, no
+spec or plan is written, and it never appears in the record picker, because it
+has no sides and nothing to cut.
+
+**The match is confirmed, never assumed.** Run with stdin closed, beets prints
+its whole candidate and dies without touching a file — the same mechanism the
+cut path's preview uses. What is shown is then pinned: the release id is read
+back out of that output and passed to the import as `--search-id`, so the run
+that commits cannot quietly choose differently from the one that was agreed. No
+release id in the output means no confident match, and that is reported rather
+than imported.
+
+**Nothing is kept.** A download can be fetched again from where it was bought,
+so storing a second copy buys nothing. The scratch upload is cleared only after
+the library copy is confirmed present, which is the same order the archive step
+uses: nothing is cleared until the record is proved to be somewhere else.
+
+**The ceiling moves 7400 → 7700.** ADR-052 moved it to 7400 for the first
+intake and said the next move should be smaller, with something retired to fit
+it. This is the second intake and it retires nothing, which is the weaker
+position. What it does instead is add no fourth concept: a zip, a directory,
+and the import stage that already existed.

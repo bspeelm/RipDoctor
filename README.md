@@ -14,6 +14,9 @@ vertical markers.](docs/images/cut_panel.png)
 - **Or takes a file you already have** - a download, or audio captured
   elsewhere - uploaded from the browser and normalised on the way in. Anything
   ffmpeg can read. Everything after that is identical to a rip.
+- **Or takes an album that is already cut** - a download bought one file per
+  track, which has no boundaries to find. It goes straight to the tagging step,
+  so everything in the library is handled the same way.
 - **Finds the track boundaries** by looking for gaps in the 1-3 kHz band rather
   than at the full-band level, and by checking them against the track durations
   in MusicBrainz.
@@ -93,6 +96,7 @@ and each step of a record from the needle drop to the archive.
 |---|---|
 | [Ripping a side](https://github.com/bspeelm/RipDoctor/wiki/Ripping-a-side) | recording, the meter, the auto-stop, salvaging an interrupted capture |
 | [Uploading a file](https://github.com/bspeelm/RipDoctor/wiki/Uploading-a-file) | bringing in audio that was not recorded here |
+| [Pre-cut album import](https://github.com/bspeelm/RipDoctor/wiki/Pre-cut-album-import) | an album bought already split into tracks |
 | [First pass](https://github.com/bspeelm/RipDoctor/wiki/First-pass) | finding the release and fitting the boundaries |
 | [Checking the boundaries](https://github.com/bspeelm/RipDoctor/wiki/Checking-the-boundaries) | the ear check, and moving a cut |
 | [Cutting](https://github.com/bspeelm/RipDoctor/wiki/Cutting-tracks) and [importing](https://github.com/bspeelm/RipDoctor/wiki/Importing) | into `review/`, then into the library |

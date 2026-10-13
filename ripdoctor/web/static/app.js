@@ -1069,6 +1069,111 @@ async function fpRun(rel) {
   }
 }
 
+// ----------------------------------------------------------------- pre-cut
+
+let pcPicked = null, pcMbid = "";
+
+async function loadPrecut() {
+  try {
+    const held = await api("/api/precut");
+    const staged = held.staged || [];
+    $("#pc-tracks").textContent = staged.length
+      ? `${staged.length} files unpacked and waiting` : "";
+    $("#pc-import").hidden = !staged.length || !pcMbid;
+    $("#pc-cancel").hidden = !held.upload && !staged.length;
+    if (held.upload && !staged.length)
+      $("#pc-what").textContent =
+        `${held.upload.name} — ${mb(held.upload.have)} of ${mb(held.upload.total)} here`;
+  } catch (e) { $("#pc-err").textContent = e.message; }
+}
+
+async function sendPrecut(file) {
+  $("#pc-err").textContent = ""; $("#pc-done").textContent = "";
+  $("#pc-report").hidden = true; $("#pc-import").hidden = true;
+  $("#pc-go").disabled = true; $("#pc-cancel").hidden = false;
+  try {
+    const begun = await postJSON("/api/precut/begin",
+      { name: file.name, size: file.size, replace: true });
+    let at = begun.have, failures = 0;
+    while (at < file.size) {
+      const end = Math.min(at + begun.chunk, file.size);
+      try {
+        at = (await pushChunk(`/api/precut/chunk?at=${at}`,
+                              file.slice(at, end))).have;
+        failures = 0;
+      } catch (e) {
+        const said = /is at (\d+)/.exec(e.message);
+        if (e.status === 409 && said) { at = Number(said[1]); continue; }
+        if (++failures >= TRIES) throw e;
+        continue;
+      }
+      setBar(at / file.size, "#pc-bar");
+      $("#pc-state").textContent = `${mb(at)} of ${mb(file.size)}`;
+    }
+    $("#pc-state").textContent = "unpacking, and asking beets what it is…";
+    const found = await runJob("precut", "/api/precut/finish", {}, "reading it");
+    setBar(1, "#pc-bar");
+    pcMbid = found.mbid || "";
+    $("#pc-state").textContent = "";
+    $("#pc-tracks").textContent = `${found.tracks.length} tracks`
+      + (found.art.length ? `, ${found.art.length} image` : "");
+    $("#pc-report").hidden = false;
+    $("#pc-report").textContent = found.report;
+    $("#pc-duprow").hidden = !pcMbid;
+    $("#pc-import").hidden = !pcMbid;
+    status(pcMbid
+      ? "read the match, then import it"
+      : "beets did not settle on one release — nothing will be filed");
+    if (!pcMbid)
+      $("#pc-err").textContent =
+        "beets offered no single release. Check the tags in the download, or "
+        + "import it with beets directly.";
+  } catch (e) {
+    $("#pc-err").textContent = e.message;
+    $("#pc-go").textContent = "Resume";
+  } finally {
+    $("#pc-go").disabled = !pcPicked;
+  }
+}
+
+async function takePrecut() {
+  $("#pc-err").textContent = "";
+  $("#pc-import").disabled = true;
+  $("#pc-state").textContent = "importing…";
+  try {
+    const done = await runJob("precut", "/api/precut/take",
+      { mbid: pcMbid, duplicates: $("#pc-dup").value }, "importing");
+    $("#pc-state").textContent = "";
+    $("#pc-done").textContent = `${done.tracks} tracks filed`
+      + (done.library ? ` at ${done.library}` : "")
+      + (done.notes.length ? ` — ${done.notes.join("; ")}` : "");
+    $("#pc-import").hidden = true;
+    $("#pc-cancel").hidden = true;
+    $("#pc-what").textContent = "Nothing chosen yet";
+    $("#pc-tracks").textContent = "";
+    pcPicked = null; pcMbid = "";
+    setBar(0, "#pc-bar");
+    status("filed — replaygain and the cover were applied on the way in");
+  } catch (e) {
+    $("#pc-err").textContent = e.message;
+  } finally {
+    $("#pc-import").disabled = false;
+  }
+}
+
+async function cancelPrecut() {
+  if (!confirm("Drop the upload and the unpacked files?")) return;
+  try {
+    await postJSON("/api/precut/cancel", {});
+    pcPicked = null; pcMbid = "";
+    $("#pc-what").textContent = "Nothing chosen yet";
+    $("#pc-tracks").textContent = ""; $("#pc-report").hidden = true;
+    $("#pc-import").hidden = true; $("#pc-cancel").hidden = true;
+    $("#pc-go").textContent = "Upload"; $("#pc-go").disabled = true;
+    setBar(0, "#pc-bar");
+  } catch (e) { $("#pc-err").textContent = e.message; }
+}
+
 // -------------------------------------------------------------------- modes
 
 function setMode(mode) {
@@ -1077,11 +1182,16 @@ function setMode(mode) {
   // Rip and Upload are one job from two sources, so they share a column and the
   // names in it. Punch is its own form. Only the two that own the capture
   // device get the pane beside it - an upload has no capture to meter.
-  const source = mode === "rip" || mode === "punch" || mode === "upload";
+  const source = mode === "rip" || mode === "punch" || mode === "upload"
+    || mode === "precut";
   const metering = mode === "rip" || mode === "punch";
   $("#cv").hidden = source;
   $("#captureview").hidden = !source;
-  $("#sourceform").hidden = mode === "punch";
+  // A pre-cut album is not a record: it has no sides and nothing to cut, so
+  // the record's own fields have no bearing on it. ADR-062.
+  $("#sourceform").hidden = mode === "punch" || mode === "precut";
+  $("#precutform").hidden = mode !== "precut";
+  $("#precutpane").hidden = mode !== "precut";
   $("#punchform").hidden = mode !== "punch";
   $("#ripbits").hidden = mode !== "rip";
   $("#uploadbits").hidden = mode !== "upload";
@@ -1094,6 +1204,7 @@ function setMode(mode) {
   if (mode === "rip") loadOrphans();
   if (mode === "punch") loadPunchTracks();
   if (mode === "upload") loadIncoming();
+  if (mode === "precut") loadPrecut();
   if (!source) ed.render();
 }
 
@@ -1127,8 +1238,8 @@ function ripSlug() {
 let picked = null;
 let sending = false;
 
-function setBar(fraction) {
-  $("#up-bar").querySelector("i").style.width =
+function setBar(fraction, sel = "#up-bar") {
+  $(sel).querySelector("i").style.width =
     `${Math.max(0, Math.min(1, fraction)) * 100}%`;
 }
 
@@ -1167,7 +1278,11 @@ async function loadIncoming() {
 // method first, deliberately: the frontend test's POST matcher does not allow a
 // `)` between the path and `method:`, and file.slice(...) has one.
 async function sendPiece(slug, at, blob) {
-  const r = await fetch(`/api/ingest/${slug}/chunk?at=${at}`, {
+  return pushChunk(`/api/ingest/${slug}/chunk?at=${at}`, blob);
+}
+
+async function pushChunk(url, blob) {
+  const r = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/octet-stream" },
@@ -2095,6 +2210,17 @@ function wire() {
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
   $("#imp-stale-clear").onclick = clearStale;
+  $("#pc-pick").onclick = () => $("#pc-file").click();
+  $("#pc-file").onchange = (e) => {
+    pcPicked = e.target.files[0] || null;
+    e.target.value = "";
+    $("#pc-go").disabled = !pcPicked;
+    $("#pc-what").textContent = pcPicked
+      ? `${pcPicked.name} — ${mb(pcPicked.size)}` : "Nothing chosen yet";
+  };
+  $("#pc-go").onclick = () => { if (pcPicked) sendPrecut(pcPicked); };
+  $("#pc-import").onclick = takePrecut;
+  $("#pc-cancel").onclick = cancelPrecut;
   $("#up-pick").onclick = () => $("#up-file").click();
   $("#up-file").onchange = (e) => {
     showPicked(e.target.files[0]);
