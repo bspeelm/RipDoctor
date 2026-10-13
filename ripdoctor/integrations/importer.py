@@ -202,6 +202,31 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 # which every track is written twice and a finished import cannot be told from
 # a refused one. ADR-042.
 OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
+
+# Only for the weak matches beets does ask about: it lists the candidates and
+# this declines them, which is the right outcome, because a look that had to
+# choose between several would be choosing. A strong match is never asked
+# about at all - see PREVIEW. ADR-062.
+LOOK_ONLY = b"S\n"
+
+# A match beets rates strongly is applied without prompting, so no answer on
+# stdin makes `beet import` non-committal - a look that only closed or fed the
+# input filed the record. A look is therefore an import into a library that is
+# thrown away, with nothing moved, copied or written. ADR-062.
+PREVIEW = (
+    "library: {db}\n"
+    "directory: {files}\n"
+    "import:\n"
+    "  quiet: no\n"
+    "  timid: no\n"
+    "  move: no\n"
+    "  copy: no\n"
+    "  write: no\n"
+    "  resume: no\n"
+    "  incremental: no\n"
+)
+PREVIEW_FILE = "beets-preview.yaml"
+PREVIEW_DB = "beets-preview.db"
 OVERRIDE_FILE = "beets-override.yaml"
 
 
@@ -217,6 +242,8 @@ class Beets:
 
     name: str = "beets"
     config: str = ""
+    preview_config: str = ""
+    preview_db: str = ""
 
     @classmethod
     def with_override(cls, state_dir: str | Path) -> Beets:
@@ -224,7 +251,12 @@ class Beets:
         where = Path(state_dir) / OVERRIDE_FILE
         where.parent.mkdir(parents=True, exist_ok=True)
         where.write_text(OVERRIDE)
-        return cls(config=str(where))
+        db = where.parent / PREVIEW_DB
+        look = where.parent / PREVIEW_FILE
+        look.write_text(
+            PREVIEW.format(db=db, files=where.parent / "beets-preview-files")
+        )
+        return cls(config=str(where), preview_config=str(look), preview_db=str(db))
 
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
@@ -258,23 +290,38 @@ class Beets:
                 return os.path.expanduser(value.strip())
         return ""
 
-    def _argv(self, args: list[str]) -> list[str]:
+    def _argv(self, args: list[str], config: str = "") -> list[str]:
         head = ["beet"]
-        if self.config:
-            head += ["--config", self.config]
+        chosen = config or self.config
+        if chosen:
+            head += ["--config", chosen]
         return head + args
+
+    def _looking(self, args: list[str]) -> list[str]:
+        """The same command against a library that is about to be deleted.
+
+        Fresh every time: rows left by the last look would make the next one
+        report the record as a duplicate of itself.
+        """
+        if not self.preview_config:
+            # Falling back on the real configuration here would file the record
+            # instead of showing it, which is the one thing a look must not do.
+            raise ImportFailed(
+                "a look needs a library to throw away and none is configured"
+            )
+        Path(self.preview_db).unlink(missing_ok=True)
+        return self._argv(args, self.preview_config)
 
     def preview(
         self, runner: Runner, plan: Plan, review: str, library: str, *, mbid: str = ""
     ) -> str:
         """The closest thing to a dry run that exists.
 
-        beets has none. Run with stdin closed it prints the whole candidate,
-        asks for an answer, and dies without touching a file; apply runs the
-        identical command with the answer piped in.
+        beets has none, and a strong match is taken without asking, so this
+        runs against a throwaway library and moves, copies and writes nothing.
         """
         result = runner.run(
-            self._argv(self._import(review, mbid)), stdin=b"", timeout=1800
+            self._looking(self._import(review, mbid)), stdin=LOOK_ONLY, timeout=1800
         )
         return _plain(result.text + result.err)
 
@@ -353,6 +400,59 @@ class Beets:
                 f"{len(spare)} files in that directory are not in the library - "
                 f"starting {spare[0].name}. Whatever serves it will show them."
             )
+        return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
+
+    def propose(self, runner: Runner, directory: str) -> tuple[str, str]:
+        """What beets would make of an album that arrived already tagged.
+
+        The same mechanism as `preview`: a throwaway library, and nothing
+        moved, copied or written. ADR-062.
+        """
+        result = runner.run(
+            self._looking(["import", directory]), stdin=LOOK_ONLY, timeout=1800
+        )
+        output = _plain(result.text + result.err)
+        return proposed(output), output
+
+    def take(
+        self,
+        runner: Runner,
+        directory: str,
+        library: str,
+        *,
+        mbid: str,
+        tracks: tuple[str, ...],
+        duplicates: str = "replace",
+        file_mode: int = 0o664,
+        dir_mode: int = 0o775,
+    ) -> Outcome:
+        """Import an album that arrived already cut, pinned to the agreed
+        release so the run that commits cannot choose a different one."""
+        result = runner.run(
+            self._argv(["import", "--search-id", mbid, directory]),
+            stdin=answers(duplicates, matching=True),
+            timeout=3600,
+        )
+        output = _plain(result.text + result.err)
+
+        left = [n for n in tracks if (Path(directory) / n).exists()]
+        if left:
+            said = (
+                "\n\nbeets asked a question this did not answer, and gave up waiting."
+                if _STARVED in output
+                else ""
+            )
+            raise ImportFailed(
+                f"{len(left)} of the tracks are still waiting - beets did not "
+                f"take them.{said}\n\n{output[-2000:]}"
+            )
+
+        where, count = self.locate(runner, library, "", "", mbid=mbid)
+        notes = []
+        fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
+        if fixed:
+            notes.append(f"set {fixed} files' modes")
+        notes.extend(too_many(count, len(tracks)))
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def locate(
@@ -475,6 +575,17 @@ def _query(album: str, mbid: str) -> list[str]:
     if mbid:
         return [f"mb_albumid:{mbid}"]
     return [f"album:{album}"] if album else []
+
+
+# beets prints the release it settled on as a URL. More than one means it is
+# offering a choice rather than making one, and that is not a proposal. ADR-062.
+_RELEASE = re.compile(r"musicbrainz\.org/release/([0-9a-fA-F-]{36})")
+
+
+def proposed(output: str) -> str:
+    """The one release beets settled on, or nothing if it did not settle."""
+    found = list(dict.fromkeys(_RELEASE.findall(output)))
+    return found[0] if len(found) == 1 else ""
 
 
 def too_many(count: int, expected: int) -> list[str]:

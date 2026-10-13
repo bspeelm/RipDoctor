@@ -112,7 +112,9 @@ def test_the_release_is_pinned_rather_than_guessed(tmp_path: Path) -> None:
     """Freshly cut files carry no tags at all, so even the right release scores
     about half and a quiet import skips it without a word."""
     fake = beets_runner()
-    I.Beets().preview(fake, a_plan(), str(tmp_path), "/music", mbid="aaa")
+    I.Beets.with_override(tmp_path).preview(
+        fake, a_plan(), str(tmp_path), "/music", mbid="aaa"
+    )
     argv = fake.argv_for("import")
     assert "--search-id" in argv and argv[argv.index("--search-id") + 1] == "aaa"
 
@@ -121,17 +123,53 @@ def test_with_no_release_it_imports_as_an_album_rather_than_matching(
     tmp_path: Path,
 ) -> None:
     fake = beets_runner()
-    I.Beets().preview(fake, a_plan(), str(tmp_path), "/music")
+    I.Beets.with_override(tmp_path).preview(fake, a_plan(), str(tmp_path), "/music")
     assert "-A" in fake.argv_for("import")
 
 
-def test_the_preview_runs_with_nothing_on_its_input(tmp_path: Path) -> None:
-    """beets has no dry run. Run with stdin closed it prints the whole
-    candidate, asks for an answer, and dies without touching a file."""
-    import inspect
+def test_a_look_runs_against_a_library_it_is_about_to_throw_away(
+    tmp_path: Path,
+) -> None:
+    """beets has no dry run, and no answer on stdin is one either: a match it
+    rates strongly is applied without ever prompting, so a look that merely
+    closed or fed the input filed the record - moved the files, wrote the tags
+    and registered the release, with nobody having agreed to it."""
+    beets = I.Beets.with_override(tmp_path)
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
+    beets.propose(fake, "/incoming")
 
-    source = inspect.getsource(I.Beets.preview)
-    assert 'stdin=b""' in source
+    argv = fake.argv_for("import")
+    assert beets.preview_config in argv
+    assert beets.config not in argv
+    looked = Path(tmp_path / I.PREVIEW_FILE).read_text()
+    for refusal in ("move: no", "copy: no", "write: no"):
+        assert refusal in looked
+    assert str(tmp_path / I.PREVIEW_DB) in looked
+
+
+def test_a_look_starts_from_an_empty_library_every_time(tmp_path: Path) -> None:
+    """Rows kept from the last look would make the next one report the record
+    as a duplicate of itself."""
+    beets = I.Beets.with_override(tmp_path)
+    left = Path(beets.preview_db)
+    left.write_bytes(b"old rows")
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
+    beets.propose(fake, "/incoming")
+
+    assert not left.exists()
+
+
+def test_taking_it_uses_the_real_library_not_the_throwaway(tmp_path: Path) -> None:
+    beets = I.Beets.with_override(tmp_path)
+    fake = (
+        FakeRunner(installed={"beet"})
+        .expect(lambda a: a[0] == "beet" and "import" in a, stdout=b"added")
+        .expect("ls", stdout=b"")
+    )
+    beets.take(fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=())
+
+    argv = fake.argv_for("import")
+    assert beets.config in argv and beets.preview_config not in argv
 
 
 def test_applying_answers_the_matcher(tmp_path: Path) -> None:
@@ -156,7 +194,9 @@ def test_a_path_beets_names_but_does_not_have_is_not_a_crash(
 def test_colour_codes_do_not_reach_the_page(tmp_path: Path) -> None:
     fake = beets_runner()
     fake.expect("import", stdout=b"\x1b[31mSkipping\x1b[0m the album")
-    text = I.Beets().preview(fake, a_plan(), str(tmp_path), "/music")
+    text = I.Beets.with_override(tmp_path).preview(
+        fake, a_plan(), str(tmp_path), "/music"
+    )
     assert "\x1b" not in text and "Skipping the album" in text
 
 
@@ -623,3 +663,84 @@ def test_files_the_library_does_not_know_about_are_named(tmp_path: Path) -> None
     fake = FakeRunner(installed={"beet"}).expect("ls", stdout=said)
     spare = I.Beets().unregistered(fake, library, "A Band", "A Record", mbid="x")
     assert [p.name for p in spare] == ["01 One.1.flac"]
+
+
+# --------------------------------------------- an album that arrives cut
+
+
+MATCHED = """/incoming (10 items)
+Correcting tags from:
+    A Band - A Record
+To:
+    A Band - A Record
+URL:
+    https://musicbrainz.org/release/1b7c2f4e-7d8a-4e2c-9f11-6a3d5e8c0b92
+(Similarity: 97.4%) (Digital Media, 2026, US)
+[A]pply, More candidates, Skip, Use as-is?
+"""
+
+
+def test_the_release_beets_settled_on_is_read_out_of_what_it_printed() -> None:
+    assert I.proposed(MATCHED) == "1b7c2f4e-7d8a-4e2c-9f11-6a3d5e8c0b92"
+
+
+def test_several_candidates_are_an_offer_rather_than_a_proposal() -> None:
+    """Asked to choose, beets has not chosen, and importing one of them would
+    be this project deciding something it said a person would."""
+    two = (
+        MATCHED
+        + "\n2. https://musicbrainz.org/release/"
+        + "b" * 8
+        + "-1111-2222-3333-444455556666"
+    )
+    assert I.proposed(two) == ""
+
+
+def test_no_release_at_all_is_not_a_proposal() -> None:
+    assert I.proposed("Skipping album\nNo matching release found") == ""
+
+
+def test_a_look_reads_the_match_without_pinning_anything(tmp_path: Path) -> None:
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
+    mbid, output = I.Beets.with_override(tmp_path).propose(fake, "/incoming")
+
+    assert mbid == "1b7c2f4e-7d8a-4e2c-9f11-6a3d5e8c0b92"
+    assert "Correcting tags" in output
+    # Nothing is pinned yet; that is what agreeing to the match is for.
+    assert "--search-id" not in fake.argv_for("import")
+
+
+def test_a_look_with_nowhere_to_throw_away_refuses_rather_than_importing() -> None:
+    """The fallback would be the real configuration, and running there files
+    the record instead of showing it - the one thing a look must not do."""
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
+    with pytest.raises(I.ImportFailed, match="throw away"):
+        I.Beets().propose(fake, "/incoming")
+    assert not fake.calls
+
+
+def test_taking_it_pins_the_release_that_was_shown(tmp_path: Path) -> None:
+    fake = (
+        FakeRunner(installed={"beet"})
+        .expect(lambda argv: argv[0] == "beet" and "import" in argv, stdout=b"added")
+        .expect("ls", stdout=b"")
+    )
+    I.Beets().take(fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",))
+
+    argv = fake.argv_for("import")
+    assert "--search-id" in argv and argv[argv.index("--search-id") + 1] == "abc"
+    assert fake.fed[0] == b"A\nR\n"
+
+
+def test_a_track_left_behind_is_a_failure_rather_than_a_silence(
+    tmp_path: Path,
+) -> None:
+    """beets leaves the files where they were when it declines, so what is
+    still waiting is the honest measure of what did not import."""
+    (tmp_path / "01.flac").write_bytes(b"a")
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=b"Skipping album")
+
+    with pytest.raises(I.ImportFailed, match="still waiting"):
+        I.Beets().take(
+            fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",)
+        )
