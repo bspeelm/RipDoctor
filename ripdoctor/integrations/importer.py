@@ -202,6 +202,11 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 # which every track is written twice and a finished import cannot be told from
 # a refused one. ADR-042.
 OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
+
+# The match prompt's default is Apply, and beets reads a closed stdin as the
+# default - so a look with nothing to answer with files the record. Skipping
+# is the answer that reads the candidate and leaves it where it is. ADR-062.
+LOOK_ONLY = b"S\n"
 OVERRIDE_FILE = "beets-override.yaml"
 
 
@@ -269,12 +274,12 @@ class Beets:
     ) -> str:
         """The closest thing to a dry run that exists.
 
-        beets has none. Run with stdin closed it prints the whole candidate,
-        asks for an answer, and dies without touching a file; apply runs the
-        identical command with the answer piped in.
+        beets has none. Answered with a skip it prints the whole candidate and
+        moves nothing; apply runs the identical command with the answer that
+        takes it.
         """
         result = runner.run(
-            self._argv(self._import(review, mbid)), stdin=b"", timeout=1800
+            self._argv(self._import(review, mbid)), stdin=LOOK_ONLY, timeout=1800
         )
         return _plain(result.text + result.err)
 
@@ -358,10 +363,12 @@ class Beets:
     def propose(self, runner: Runner, directory: str) -> tuple[str, str]:
         """What beets would make of an album that arrived already tagged.
 
-        The same mechanism as `preview`: stdin closed, beets prints its whole
-        candidate and dies without touching a file. ADR-062.
+        The same mechanism as `preview`: answered with a skip, beets prints its
+        whole candidate and leaves every file where it is. ADR-062.
         """
-        result = runner.run(self._argv(["import", directory]), stdin=b"", timeout=1800)
+        result = runner.run(
+            self._argv(["import", directory]), stdin=LOOK_ONLY, timeout=1800
+        )
         output = _plain(result.text + result.err)
         return proposed(output), output
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.config.settings import Settings
+from ripdoctor.integrations.importer import LOOK_ONLY
 from ripdoctor.store import incoming as IN
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
@@ -57,7 +58,8 @@ class Moving(FakeRunner):
 
     def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
         args = [str(a) for a in argv]
-        if "import" in args and stdin:
+        # The look is answered with a skip, and a skip moves nothing.
+        if "import" in args and stdin and stdin != LOOK_ONLY:
             for f in self.staged.glob("*.flac"):
                 f.unlink()
         return super().run(argv, stdin=stdin, timeout=timeout)
@@ -94,10 +96,12 @@ def test_an_album_unpacks_and_beets_is_asked_what_it_is(tmp_path: Path) -> None:
 
 
 def test_asking_what_it_is_moves_nothing(tmp_path: Path) -> None:
-    """beets is run with stdin closed, so it cannot have taken anything."""
+    """Answered with a skip, so beets reads the candidate and takes nothing.
+    Closing stdin instead looks like a dry run and is not one: the prompt's
+    default is Apply, and beets takes the default on EOF."""
     service = a_precut_service(tmp_path)
     upload(service, an_album())
-    assert service.runner.fed == [b""]  # type: ignore[union-attr]
+    assert service.runner.fed == [LOOK_ONLY]  # type: ignore[union-attr]
 
 
 def test_a_file_that_is_not_an_album_is_refused(tmp_path: Path) -> None:

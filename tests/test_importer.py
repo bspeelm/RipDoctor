@@ -125,13 +125,16 @@ def test_with_no_release_it_imports_as_an_album_rather_than_matching(
     assert "-A" in fake.argv_for("import")
 
 
-def test_the_preview_runs_with_nothing_on_its_input(tmp_path: Path) -> None:
-    """beets has no dry run. Run with stdin closed it prints the whole
-    candidate, asks for an answer, and dies without touching a file."""
-    import inspect
+def test_the_preview_answers_the_matcher_with_a_skip(tmp_path: Path) -> None:
+    """beets has no dry run, and a closed stdin is not one either: the match
+    prompt's default is Apply and beets takes the default on EOF, so a preview
+    with nothing to answer with files the record. The skip reads the candidate
+    and leaves every file where it is."""
+    fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
+    plan = Plan(slug="a", album="A Record", artist="A Band", sides=())
+    I.Beets().preview(fake, plan, str(tmp_path), "/library", mbid="abc")
 
-    source = inspect.getsource(I.Beets.preview)
-    assert 'stdin=b""' in source
+    assert fake.fed == [I.LOOK_ONLY] != [b""]
 
 
 def test_applying_answers_the_matcher(tmp_path: Path) -> None:
@@ -660,15 +663,17 @@ def test_no_release_at_all_is_not_a_proposal() -> None:
     assert I.proposed("Skipping album\nNo matching release found") == ""
 
 
-def test_proposing_closes_stdin_so_nothing_is_touched() -> None:
-    """beets with nothing to read prints the candidate and dies where it
-    stands; an answer is what makes it move a file."""
+def test_looking_at_a_match_skips_it_rather_than_closing_stdin() -> None:
+    """A closed stdin is not a dry run. beets reads it as the match prompt's
+    default, and that default is Apply - so a look with nothing to answer with
+    files the record, replaygain and all, without anyone agreeing to it. The
+    skip is what reads the candidate and leaves every file where it is."""
     fake = FakeRunner(installed={"beet"}).expect("import", stdout=MATCHED.encode())
     mbid, output = I.Beets().propose(fake, "/incoming")
 
     assert mbid == "1b7c2f4e-7d8a-4e2c-9f11-6a3d5e8c0b92"
     assert "Correcting tags" in output
-    assert fake.fed == [b""]
+    assert fake.fed == [I.LOOK_ONLY] != [b""]
     assert "--search-id" not in fake.argv_for("import")
 
 
