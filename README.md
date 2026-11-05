@@ -17,6 +17,9 @@ vertical markers.](docs/images/cut_panel.png)
 - **Or takes an album that is already cut** - a download bought one file per
   track, which has no boundaries to find. It goes straight to the tagging step,
   so everything in the library is handled the same way.
+- **Or takes a tape** - one uncut lossless recording of songs from different
+  albums, with a list of what is in it. The songs are filed under their own albums
+  and a playlist keeps them in order. See [Tapes](#tapes).
 - **Finds the track boundaries** by looking for gaps in the 1-3 kHz band rather
   than at the full-band level, and by checking them against the track durations
   in MusicBrainz.
@@ -97,6 +100,7 @@ and each step of a record from the needle drop to the archive.
 | [Ripping a side](https://github.com/bspeelm/RipDoctor/wiki/Ripping-a-side) | recording, the meter, the auto-stop, salvaging an interrupted capture |
 | [Uploading a file](https://github.com/bspeelm/RipDoctor/wiki/Uploading-a-file) | bringing in audio that was not recorded here |
 | [Pre-cut album import](https://github.com/bspeelm/RipDoctor/wiki/Pre-cut-album-import) | an album bought already split into tracks |
+| [Tapes](https://github.com/bspeelm/RipDoctor/wiki/Tapes) | one uncut recording of songs from different albums, from upload to playlist and archive |
 | [First pass](https://github.com/bspeelm/RipDoctor/wiki/First-pass) | finding the release and fitting the boundaries |
 | [Checking the boundaries](https://github.com/bspeelm/RipDoctor/wiki/Checking-the-boundaries) | the ear check, and moving a cut |
 | [Cutting](https://github.com/bspeelm/RipDoctor/wiki/Cutting-tracks) and [importing](https://github.com/bspeelm/RipDoctor/wiki/Importing) | into `review/`, then into the library |
@@ -104,6 +108,67 @@ and each step of a record from the needle drop to the archive.
 | [Re-ripping](https://github.com/bspeelm/RipDoctor/wiki/Re-ripping-a-side) and [punching](https://github.com/bspeelm/RipDoctor/wiki/Punching-a-track) | redoing one side, or one track |
 | [Command line](https://github.com/bspeelm/RipDoctor/wiki/Command-line) | all 15 commands and their options |
 | [Troubleshooting](https://github.com/bspeelm/RipDoctor/wiki/Troubleshooting) | errors, and what each one means |
+
+## Tapes
+
+A tape is one uncut recording of songs that belong to different albums, such as a
+mixtape in a single file. Its steps are the same as a record's, and only tagging
+and filing work per song. The [Tapes wiki page](https://github.com/bspeelm/RipDoctor/wiki/Tapes)
+walks through it. The name in brackets after each claim is the test that proves it.
+
+The list is a CSV with one playlist per file
+(`test_two_playlists_in_one_file_are_told_to_split`), or is built by hand on the
+tape's page, and both produce the same document
+(`test_a_csv_and_a_list_by_hand_write_the_same_document`):
+
+```
+playlist,owned,position,title,artist,album,duration
+Road Trip,no,1,First Song,A Band,A Record,3:45
+Road Trip,no,2,"Second Song, Part One",Another Band,Another Record,4:02
+```
+
+- Every column has to be there (`test_a_missing_column_is_named`). `owned` is not
+  used, because the library itself is asked
+  (`test_the_owned_column_changes_nothing`).
+- Positions start at 1 with none missing
+  (`test_positions_that_do_not_begin_at_one_were_renumbered_and_are_now_refused`,
+  `test_a_gap_in_positions_names_what_is_missing`).
+- A bad row is refused with its row number and what to change
+  (`test_a_bad_list_is_refused_with_its_row_and_changes_nothing`).
+
+What it does with the list:
+
+- **A song in doubt waits for you.** Silences at -60 dBFS are candidates, and the
+  list's lengths, in order, decide which are song boundaries
+  (`test_gaps_are_taken_at_a_fixed_level_whatever_the_music_is`). A song with a
+  silence inside it is always flagged
+  (`test_a_song_with_a_silence_inside_is_placed_whole_and_flagged`), a list out of
+  order is never reordered
+  (`test_a_list_out_of_order_is_a_mismatch_and_is_never_reordered`), and nothing
+  is cut while a doubt stands
+  (`test_cut_is_refused_while_a_doubt_is_unheard_and_cuts_nothing`).
+- **A song already in the library is not filed again.** It shows as
+  `already there` and the playlist points at the copy you have
+  (`test_a_song_owned_by_recording_id_is_not_imported_and_says_where`,
+  `test_a_song_owned_on_another_album_keeps_its_line_through_a_rebuild`). That
+  takes evidence: a row with another recording id is another recording
+  (`test_a_row_with_another_recording_id_never_owns_a_pinned_song`), and a row
+  with the same title, artist and length but no id waits for you to listen
+  (`test_a_row_with_no_recording_id_is_for_a_person_to_confirm_on_a_pinned_song`).
+- **A filed song keeps its release**
+  (`test_a_song_in_the_library_keeps_the_release_it_was_filed_as`), and a song whose
+  filing failed can still be changed
+  (`test_a_song_whose_filing_failed_can_still_be_changed`).
+- **The playlist is an `.m3u8` file** in the library's `Playlists` folder
+  (`test_the_file_lands_in_the_library_playlists_folder_as_utf8`), with paths
+  relative to it (`test_the_text_is_the_header_then_relative_lines_in_list_order_with_lf`).
+- **The uncut file is archived only once every song resolves**
+  (`test_archive_is_refused_with_every_reason_while_a_song_is_unresolved`).
+
+Filing a tape merges songs into albums, and beets crashes doing that when a library
+row holds a relative path, which an older library can. `ripdoctor doctor` counts
+those rows and prints the fix
+(`test_library_rows_with_relative_paths_are_counted_with_the_fix`).
 
 ## Two things it will not do
 
