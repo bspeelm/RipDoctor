@@ -319,7 +319,9 @@ def add(app: App, service: Service) -> None:
                 return song
         raise H.HttpError(404, f"{tape.name} has no such song")
 
-    def by_person(tape: TP.Tape, song: TP.Song, choice: TM.Choice | None) -> H.Response:
+    def settled_by_person(
+        tape: TP.Tape, song: TP.Song, choice: TM.Choice | None
+    ) -> H.Response:
         changed = TP.settle(tape, song.number, choice)
         T.save(layout, changed)
         return H.ok(view(changed))
@@ -332,9 +334,10 @@ def add(app: App, service: Service) -> None:
         body = r.json()
         given = str(body.get("release", "")).strip()
         position = _position(body)
-        for candidate in song.proposal.candidates if song.proposal else ():
+        offered = song.proposal.candidates if song.proposal else ()
+        for candidate in offered:
             if candidate.release == given and candidate.number and position is None:
-                return by_person(tape, song, candidate)
+                return settled_by_person(tape, song, candidate)
         try:
             found = MB.release_by_id(
                 MB.Paced(service.fetcher, service.pace),
@@ -348,13 +351,13 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, str(e)) from e
         except MB.LookupFailed as e:
             raise H.HttpError(503, str(e)) from e
-        return by_person(tape, song, choice)
+        return settled_by_person(tape, song, choice)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/from-list")
     @settled
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
-        return by_person(tape, song_of(tape, r), None)
+        return settled_by_person(tape, song_of(tape, r), None)
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled
