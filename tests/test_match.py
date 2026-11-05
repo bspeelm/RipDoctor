@@ -87,17 +87,20 @@ def test_of_several_editions_the_nearest_length_wins() -> None:
 def test_of_equally_near_editions_the_earliest_date_wins() -> None:
     got = M.propose(
         wanted(),
-        [edition("late", date="2001"), edition("early", date="1985-03")],
+        [edition("a-late", date="2001"), edition("z-early", date="1985-03")],
     )
-    assert got.choice is not None and got.choice.release == "early"
+    assert got.choice is not None and got.choice.release == "z-early"
 
 
 def test_less_than_a_second_is_not_nearer_than_a_whole_second_list_can_say() -> None:
     got = M.propose(
         wanted(),
-        [edition("later", length=200.1), edition("earlier", length=200.3, date="1985")],
+        [
+            edition("a-late", length=200.1),
+            edition("z-early", length=200.3, date="1985"),
+        ],
     )
-    assert got.choice is not None and got.choice.release == "earlier"
+    assert got.choice is not None and got.choice.release == "z-early"
 
 
 def test_two_release_groups_that_fit_go_to_review_and_name_both() -> None:
@@ -184,6 +187,7 @@ def test_releases_with_no_such_track_are_a_doubt_not_no_release() -> None:
         ("Don\u2019t  Stop", "Don't Stop"),
         ("Back \u2013 Again", "Back - Again"),
         ("STRASSE", "Stra\u00dfe"),
+        ("Brand\u2122", "BrandTM"),
     ],
 )
 def test_non_ascii_and_punctuation_variants_are_the_same_title(
