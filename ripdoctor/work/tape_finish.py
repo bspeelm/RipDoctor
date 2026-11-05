@@ -80,7 +80,7 @@ def rebuild(place: Place, beets: Beets, tape_id: str, now: float) -> P.State:
         state = replace(prior, outcome=P.UNKNOWN, note=note, at=now)
         S.save(place.layout, tape_id, state)
         return state
-    entries = tuple(P.resolve(s, held) for s in tape.songs)
+    entries = P.resolved(tape, held)
     moved = P.with_paths(tape, entries)
     if moved != tape:
         T.save(place.layout, moved)

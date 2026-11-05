@@ -194,16 +194,28 @@ class _Filing:
                 cleared.add(row.path)
         return cleared
 
-    def found_again(self, run: F.Run, song: TP.Song) -> bool:
+    def taken(self, song: TP.Song) -> set[str]:
+        """Rows other songs on this tape have been recorded against."""
+        return {
+            s.path
+            for s in self.tape.songs
+            if s.filing in F.FINISHED and s.number != song.number
+        }
+
+    def found_again(self, run: F.Run, track: F.Track) -> bool:
         """Whether an attempt that got as far as beets answers for this song. Importing
         again could file it twice, so this comes before the pre-check, whose length
         rule goes by the list and may not recognise what the person accepted."""
+        song, taken = track.song, self.taken(track.song)
         rows = self.read_back(run, song)
-        path = F.recovered(song, rows)
-        if path:
-            self.complete(song, F.ALREADY, path)
+        paths = F.recovered(song, rows, taken=taken, track=track.number)
+        if len(paths) == 1:
+            self.complete(song, F.ALREADY, paths[0])
             return True
-        stray = F.astray(song, rows)
+        if paths:
+            self.tell(song, F.UNKNOWN, note=_which(paths))
+            return True
+        stray = F.astray(song, rows, taken=taken, track=track.number)
         if stray:
             self.tell(
                 song, F.FAILED, note=_outside(stray, self.library), keep_begun=True
@@ -216,12 +228,14 @@ class _Filing:
         for track in run.tracks:
             song = track.song
             self.job.step(TP.label(song), "asking the library")
-            if song.import_begun and self.found_again(run, song):
+            if song.import_begun and self.found_again(run, track):
                 continue
             by_id, by_name = self.beets.owned(
                 self.runner, self.library, F.recording_of(song), F.lead(song.artist)
             )
-            said = F.precheck(song, self.sited(by_id), self.sited(by_name))
+            said = F.precheck(
+                song, self.sited(by_id), self.sited(by_name), self.taken(song)
+            )
             if said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY:
@@ -343,11 +357,16 @@ class _Filing:
             except Exception as e:  # not knowing is kept as that, against this song
                 self.tell(song, F.UNKNOWN, note=_unconfirmed(e))
                 continue
-            had = {r.path for r in before}
-            path, stray = F.arrived(song, rows, had), F.astray(song, rows, had)
+            had, taken = {r.path for r in before}, self.taken(song)
+            home = F.arrivals(song, rows, had, taken=taken, track=track.number)
+            stray = F.astray(song, rows, had, taken=taken, track=track.number)
             copy = copies[song.number]
-            if path:
-                self.complete(song, F.FILED, path, doubled, _complaint(took), unclear)
+            if len(home) > 1:
+                self.tell(song, F.UNKNOWN, note=_which(home))
+            elif home:
+                self.complete(
+                    song, F.FILED, home[0], doubled, _complaint(took), unclear
+                )
             elif copy.exists():
                 note = f"beets did not take it: {took.why()}"
                 if str(copy) in cleared:
@@ -392,6 +411,14 @@ def _unconfirmed(why: Exception) -> str:
     return (
         f"beets may have this and could not be asked: {why} - file again to ask "
         "again, which looks for it before anything is imported"
+    )
+
+
+def _which(paths: list[str]) -> str:
+    return (
+        f"{len(paths)} rows could be this song and nothing tells them apart: "
+        f"{', '.join(paths)} - clear the wrong one with beet remove and file again, "
+        "or skip this song"
     )
 
 

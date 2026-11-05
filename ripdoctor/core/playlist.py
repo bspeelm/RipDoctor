@@ -177,7 +177,9 @@ def _still_the_song(song: TP.Song, row: F.Row) -> bool:
     return F.alike(song, row)
 
 
-def _at_recorded_path(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+def _at_recorded_path(
+    song: TP.Song, rows: Sequence[F.Row], _track: int
+) -> Entry | None:
     """Where filing proved it is, while the file is there and its row is the song."""
     if song.filing in F.FINISHED:
         for row in rows:
@@ -186,9 +188,9 @@ def _at_recorded_path(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
     return None
 
 
-def _one_of(song: TP.Song, same: Sequence[F.Row]) -> Entry | None:
-    """More than one candidate narrows to the chosen release, then to the path filing
-    proved, and is never guessed."""
+def _one_of(song: TP.Song, same: Sequence[F.Row], track: int) -> Entry | None:
+    """More than one candidate narrows to the chosen release, then to the track number,
+    then to the path filing proved, and is never guessed."""
     if not same:
         return None
     here = [r for r in same if r.present]
@@ -197,7 +199,9 @@ def _one_of(song: TP.Song, same: Sequence[F.Row]) -> Entry | None:
         return Entry(song.number, state=MISSING, why=why)
     choice = F.choice_of(song)
     release = [r for r in here if choice and r.release == choice.release]
-    for pool in (here, release, [r for r in here if r.path == song.path]):
+    numbered = [r for r in here if track and r.track == track]
+    recorded = [r for r in here if r.path == song.path]
+    for pool in (here, release, numbered, recorded):
         if len(pool) == 1:
             return Entry(song.number, pool[0].path)
     named = ", ".join(r.path for r in here)
@@ -205,12 +209,14 @@ def _one_of(song: TP.Song, same: Sequence[F.Row]) -> Entry | None:
     return Entry(song.number, state=AMBIGUOUS, why=why)
 
 
-def _by_recording(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+def _by_recording(song: TP.Song, rows: Sequence[F.Row], _track: int) -> Entry | None:
+    """A track number says nothing here: one recording is on many albums."""
     recording = F.recording_of(song)
-    return _one_of(song, [r for r in rows if recording and r.recording == recording])
+    same = [r for r in rows if recording and r.recording == recording]
+    return _one_of(song, same, 0)
 
 
-def _by_name(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+def _by_name(song: TP.Song, rows: Sequence[F.Row], track: int) -> Entry | None:
     """For a song with no id, once filing finished: a name alone is any song of that
     name. A song filed here is on its own album too; one found already owned is on
     whatever album held it."""
@@ -221,7 +227,7 @@ def _by_name(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
         choice = F.choice_of(song)
         albums = {fold(song.album), *([fold(choice.release_title)] if choice else [])}
         same = [r for r in same if fold(r.album) in albums]
-    return _one_of(song, same)
+    return _one_of(song, same, track)
 
 
 def _no_answer(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
@@ -237,15 +243,36 @@ def _no_answer(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
     return Entry(song.number, state=MISSING, why=why)
 
 
-def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
-    """The one file that is this song, or why not."""
-    if song.skip:
-        return Entry(song.number, state=TP.SKIPPED, why="skipped")
+def _answers(
+    songs: Sequence[TP.Song], rows: Sequence[F.Row], tracks: dict[int, int]
+) -> tuple[Entry, ...]:
+    """A row answers for one song. The strongest evidence claims first, so a song
+    found by its name never takes a row another song can prove is its own."""
+    found = {
+        s.number: Entry(s.number, state=TP.SKIPPED, why="skipped")
+        for s in songs
+        if s.skip
+    }
+    claimed: set[str] = set()
     for step in (_at_recorded_path, _by_recording, _by_name):
-        found = step(song, rows)
-        if found:
-            return found
-    return _no_answer(song, rows)
+        for song in songs:
+            if song.number not in found:
+                free = [r for r in rows if r.path not in claimed]
+                entry = step(song, free, tracks.get(song.number, 0))
+                if entry:
+                    found[song.number] = entry
+                    claimed.add(entry.path)
+    return tuple(found.get(s.number) or _no_answer(s, rows) for s in songs)
+
+
+def resolved(tape: TP.Tape, rows: Sequence[F.Row]) -> tuple[Entry, ...]:
+    """The one file that is each song, or why not."""
+    return _answers(tape.songs, rows, F.track_numbers(tape))
+
+
+def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
+    """One song alone, with no other to claim a row before it."""
+    return _answers((song,), rows, {})[0]
 
 
 def with_paths(tape: TP.Tape, entries: Iterable[Entry]) -> TP.Tape:

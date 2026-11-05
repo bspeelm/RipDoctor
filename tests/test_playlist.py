@@ -306,6 +306,46 @@ def test_with_no_id_a_row_with_no_album_is_not_this_song() -> None:
     assert P.resolve(listed_song(), [held("/l/x.flac", album="")]).state == P.MISSING
 
 
+def twins_on_a_tape() -> TP.Tape:
+    return a_tape(
+        a_song(1, "One", filing=F.FILED, path="/l/gone-1.flac"),
+        a_song(2, "One", filing=F.FILED, path="/l/gone-2.flac"),
+    )
+
+
+def test_each_row_answers_for_one_song_chosen_by_its_track_number() -> None:
+    rows = [
+        held("/l/b.flac", album="A Record", track=2),
+        held("/l/a.flac", album="A Record", track=1),
+    ]
+    found = P.resolved(twins_on_a_tape(), rows)
+    assert [e.path for e in found] == ["/l/a.flac", "/l/b.flac"]
+
+
+def test_one_row_cannot_be_two_songs_and_the_second_is_named() -> None:
+    found = P.resolved(
+        twins_on_a_tape(), [held("/l/a.flac", album="A Record", track=1)]
+    )
+    assert found[0].path == "/l/a.flac"
+    assert found[1].state == P.MISSING and "/l/a.flac" in found[1].why
+
+
+def test_rows_nothing_tells_apart_are_named_for_every_song_they_could_be() -> None:
+    rows = [held("/l/x.flac", album="A Record"), held("/l/y.flac", album="A Record")]
+    found = P.resolved(twins_on_a_tape(), rows)
+    assert [e.state for e in found] == [P.AMBIGUOUS, P.AMBIGUOUS]
+    assert "/l/x.flac" in found[1].why and "/l/y.flac" in found[1].why
+
+
+def test_a_row_a_song_is_recorded_at_is_not_taken_by_a_song_that_came_first() -> None:
+    tape = a_tape(
+        a_song(1, "One", filing=F.FILED, path="/l/gone.flac"),
+        a_song(2, "One", filing=F.FILED, path="/l/a.flac"),
+    )
+    found = P.resolved(tape, [held("/l/a.flac", album="A Record", track=1)])
+    assert found[1].path == "/l/a.flac" and found[0].state == P.MISSING
+
+
 def test_a_skipped_song_is_never_asked_about_and_stays_skipped() -> None:
     song = filed_song(skip=True)
     assert P.resolve(song, [held("/l/x.flac", "rec-One")]).state == TP.SKIPPED

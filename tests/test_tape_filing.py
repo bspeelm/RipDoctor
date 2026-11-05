@@ -237,6 +237,62 @@ def test_a_pinned_song_arrives_by_its_recording_id_alone() -> None:
     assert F.arrived(song, [a_row("Whatever")]) == "/lib/one.flac"
 
 
+def twins() -> tuple[TP.Song, F.Row, F.Row]:
+    first = a_row("One", 100.0, album="A Record", path="/lib/1.flac", track=1)
+    second = a_row("One", 200.0, album="A Record", path="/lib/2.flac", track=2)
+    return a_song(2, "One"), first, second
+
+
+def test_the_same_title_twice_on_an_album_is_told_apart_by_track_number() -> None:
+    song, first, second = twins()
+    assert F.arrivals(song, [first, second], track=2) == ["/lib/2.flac"]
+    assert F.arrivals(song, [first, second], track=1) == ["/lib/1.flac"]
+
+
+def test_a_from_list_song_is_never_given_a_row_of_another_track_number() -> None:
+    song, first, _ = twins()
+    assert F.arrivals(song, [first], track=2) == []
+
+
+def test_a_row_another_song_claimed_is_not_an_arrival() -> None:
+    song, first, second = twins()
+    assert F.arrivals(song, [first, second], taken={second.path}, track=0) == [
+        first.path
+    ]
+
+
+def test_with_no_track_numbers_the_same_title_is_told_apart_by_length() -> None:
+    song = a_song(1, "One", length=100.0)
+    short = a_row("One", 100.0, album="A Record", path="/lib/s.flac")
+    long = a_row("One", 300.0, album="A Record", path="/lib/l.flac")
+    assert F.arrivals(song, [short, long]) == [short.path]
+
+
+def test_rows_nothing_tells_apart_are_all_named_and_none_chosen() -> None:
+    song = a_song(1, "One")
+    rows = [a_row("One", album="A Record", path=f"/lib/{n}.flac") for n in "ab"]
+    assert F.arrivals(song, rows) == ["/lib/a.flac", "/lib/b.flac"]
+    assert F.arrived(song, rows) == ""
+
+
+def test_a_row_another_song_on_the_tape_answers_for_is_not_owned_by_this_one() -> None:
+    assert (
+        F.precheck(a_song(2, "One"), [], [a_row()], {"/lib/one.flac"}).action == F.FILE
+    )
+    said = F.precheck(a_pinned_song(), [a_row()], [], {"/lib/one.flac"})
+    assert said.action == F.FAILED and "another song" in said.note
+
+
+def test_track_numbers_are_the_catalogue_s_or_a_place_among_the_album_s_songs() -> None:
+    tape = a_tape(
+        a_song(1, "One", proposal=from_a_release("r1", 4, "One")),
+        a_song(2, "Two"),
+        a_song(3, "Three", skip=True),
+        a_song(4, "Four"),
+    )
+    assert F.track_numbers(tape) == {1: 4, 2: 1, 4: 2}
+
+
 def test_a_row_without_its_file_is_not_an_arrival() -> None:
     song = a_song(1, "One", proposal=from_a_release("r1", 1, "One"))
     assert F.arrived(song, [a_row(present=False)]) == ""
@@ -312,14 +368,14 @@ def test_with_no_id_an_interrupted_import_is_found_by_the_list_or_cut_length() -
     here = a_row("One", 5.0, album="A Record")
     listed = a_row("One", 31.0, album="A Record", path="/lib/listed.flac")
     stranger = a_row("One", 599.0, album="A Record", path="/lib/stranger.flac")
-    assert F.recovered(song, [stranger]) == ""
-    assert F.recovered(song, [stranger, here]) == "/lib/one.flac"
-    assert F.recovered(song, [stranger, listed]) == "/lib/listed.flac"
-    assert F.recovered(song, [a_row("One", None, album="A Record")]) == ""
+    assert F.recovered(song, [stranger]) == []
+    assert F.recovered(song, [stranger, here]) == ["/lib/one.flac"]
+    assert F.recovered(song, [stranger, listed]) == ["/lib/listed.flac"]
+    assert F.recovered(song, [a_row("One", None, album="A Record")]) == []
 
 
 def test_an_interrupted_import_with_an_id_is_found_by_it_alone() -> None:
-    assert F.recovered(a_pinned_song(), [a_row("Whatever", None)]) == "/lib/one.flac"
+    assert F.recovered(a_pinned_song(), [a_row("Whatever", None)]) == ["/lib/one.flac"]
 
 
 def test_an_outcome_survives_the_document() -> None:

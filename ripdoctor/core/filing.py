@@ -82,13 +82,9 @@ def recording_of(song: Song) -> str:
     return choice.recording if choice else ""
 
 
-def runs(tape: Tape) -> tuple[Run, ...]:
-    """What is unfinished, one run per album.
-
-    Two releases in one run makes beets ask which, and a second lookup-off run for
-    one album makes a second album row. A from-list song is numbered among all its
-    album's songs, finished ones too, so a retry gives it the same number.
-    """
+def _albums(tape: Tape) -> dict[tuple[str, str, str], list[Track]]:
+    """A from-list song is numbered among all its album's songs, finished ones too,
+    so a retry gives it the same number."""
     albums: dict[tuple[str, str, str], list[Track]] = {}
     for song in tape.songs:
         if song.skip:
@@ -101,9 +97,21 @@ def runs(tape: Tape) -> tuple[Run, ...]:
             key = ("", fold(lead(song.artist)), fold(song.album))
             track = Track(song, len(albums.get(key, ())) + 1, song.title)
         albums.setdefault(key, []).append(track)
+    return albums
 
+
+def track_numbers(tape: Tape) -> dict[int, int]:
+    """The number each song not skipped is filed under, by its place on the tape."""
+    return {
+        t.song.number: t.number for tracks in _albums(tape).values() for t in tracks
+    }
+
+
+def runs(tape: Tape) -> tuple[Run, ...]:
+    """What is unfinished, one run per album. Two releases in one run makes beets ask
+    which, and a second lookup-off run for one album makes a second album row."""
     planned = []
-    for (release, artist, album), tracks in albums.items():
+    for (release, artist, album), tracks in _albums(tape).items():
         first = tracks[0].song
         unfinished = tuple(t for t in tracks if t.song.filing not in FINISHED)
         if unfinished:
@@ -171,7 +179,12 @@ def _unconfirmed(row: Row, recording: str) -> Verdict:
     )
 
 
-def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdict:
+def precheck(
+    song: Song,
+    by_id: Sequence[Row],
+    by_name: Sequence[Row],
+    taken: Collection[str] = (),
+) -> Verdict:
     """Whether the library has this song. Merging a copy of an owned one files it
     as another track, so this answers before every import.
 
@@ -179,16 +192,28 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
     row of another id is another recording, and a row of none is for a person to
     confirm. With no id to go by, a cleaned title also hits a live album, so the
     length must agree, and a row with no length to compare is said aloud. Only a
-    file that is there and in the library counts as owning it.
+    file that is there and in the library counts as owning it, and a row in `taken`
+    answers for another song on this tape.
     """
-    for row in by_id:
+    free = [r for r in by_id if r.path not in taken]
+    for row in free:
         if row.present and row.home:
             return Verdict(ALREADY, row.path)
+    if free:
+        return _unusable(free[0])
     if by_id:
-        return _unusable(by_id[0])
+        return Verdict(
+            FAILED,
+            note=f"the only row with this recording, {by_id[0].path}, answers for "
+            "another song on this tape - skip one of them",
+        )
 
     recording = recording_of(song)
-    named = [r for r in by_name if alike(song, r) and not (recording and r.recording)]
+    named = [
+        r
+        for r in by_name
+        if r.path not in taken and alike(song, r) and not (recording and r.recording)
+    ]
     agreeing = [r for r in named if same_length(song, r)]
     for row in agreeing:
         if row.present and row.home:
@@ -214,34 +239,74 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
     return Verdict(FILE)
 
 
-def _is_the_song(song: Song, row: Row) -> bool:
+def _is_the_song(song: Song, row: Row, track: int) -> bool:
+    """A from-list song's number is ours, written to the file and kept by a lookup-off
+    run, where a release may number its tracks otherwise."""
     if recording_of(song):
         return True
-    from_list = choice_of(song) is None
-    return _cleaned(row.title) in _titles(song) and (
-        not from_list or fold(row.album) == fold(song.album)
+    if choice_of(song):
+        return _cleaned(row.title) in _titles(song)
+    return (
+        _cleaned(row.title) in _titles(song)
+        and fold(row.album) == fold(song.album)
+        and (not track or not row.track or row.track == track)
     )
 
 
-def _row_of(
-    song: Song, rows: Sequence[Row], before: Collection[str], *, home: bool
-) -> str:
-    for row in rows:
-        fresh = row.present and row.path not in before
-        if fresh and row.home == home and _is_the_song(song, row):
-            return row.path
-    return ""
+def _rows_of(
+    song: Song,
+    rows: Sequence[Row],
+    before: Collection[str],
+    taken: Collection[str],
+    track: int,
+    *,
+    home: bool,
+) -> list[Row]:
+    """The rows this could be, told apart by track number and then by length, since
+    one album may have the same title twice."""
+    pool = [
+        r
+        for r in rows
+        if r.present
+        and r.path not in before
+        and r.path not in taken
+        and r.home == home
+        and _is_the_song(song, r, track)
+    ]
+    pool = [r for r in pool if track and r.track == track] or pool
+    return [r for r in pool if same_length(song, r)] or pool
+
+
+def arrivals(
+    song: Song,
+    rows: Sequence[Row],
+    before: Collection[str] = (),
+    *,
+    taken: Collection[str] = (),
+    track: int = 0,
+) -> list[str]:
+    """Where the song could be now, more than one when nothing tells them apart. A row
+    that was already there is not it, and neither is one another song has claimed,
+    whose file is missing or is not in the library."""
+    return [r.path for r in _rows_of(song, rows, before, taken, track, home=True)]
 
 
 def arrived(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str:
-    """Where the song is now, or nothing: a row that was already there is not it,
-    and neither is one whose file is missing or is not in the library."""
-    return _row_of(song, rows, before, home=True)
+    found = arrivals(song, rows, before)
+    return found[0] if len(found) == 1 else ""
 
 
-def astray(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str:
+def astray(
+    song: Song,
+    rows: Sequence[Row],
+    before: Collection[str] = (),
+    *,
+    taken: Collection[str] = (),
+    track: int = 0,
+) -> str:
     """Where an import put the song if that is not in the library, or nothing."""
-    return _row_of(song, rows, before, home=False)
+    found = _rows_of(song, rows, before, taken, track, home=False)
+    return found[0].path if found else ""
 
 
 def _as_cut(song: Song, row: Row) -> bool:
@@ -250,17 +315,25 @@ def _as_cut(song: Song, row: Row) -> bool:
     return abs(row.length - (song.cut.end - song.cut.start)) <= LENGTH_TOLERANCE
 
 
-def recovered(song: Song, rows: Sequence[Row]) -> str:
-    """Where an earlier attempt's import put the song, if it did. Nothing says what
-    was there before that attempt, so with no id the row's length must agree, with
-    the list or with the cut handed over: a person may have heard a list be wrong."""
-    return arrived(
+def recovered(
+    song: Song,
+    rows: Sequence[Row],
+    *,
+    taken: Collection[str] = (),
+    track: int = 0,
+) -> list[str]:
+    """Where an earlier attempt's import may have put the song. Nothing says what was
+    there before that attempt, so with no id the row's length must agree, with the
+    list or with the cut handed over: a person may have heard a list be wrong."""
+    return arrivals(
         song,
         [
             r
             for r in rows
             if recording_of(song) or same_length(song, r) or _as_cut(song, r)
         ],
+        taken=taken,
+        track=track,
     )
 
 

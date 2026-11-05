@@ -26,7 +26,7 @@ from tests.test_web_library import ready_to_import
 from tests.test_web_precut import MATCH, MBID, Moving, a_precut_service, an_album
 from tests.test_web_precut import upload as upload_album
 from tests.test_web_routes import get, post
-from tests.test_web_tape_cut import Cutting, job_of
+from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed, settle_all
 from tests.test_web_tape_file import Beet, cut_tape, file_it, pinned
 from tests.test_web_tapes import a_service, a_tape_runner
 
@@ -401,6 +401,42 @@ def test_a_song_with_no_id_is_found_by_title_artist_and_album(
     rebuild(app, tape, service)
     assert lines_of(service, tape)[2] == "../Elsewhere/1.flac"
     assert runner.asked[-1][-1] == "artist:A Band"
+
+
+def test_the_same_title_twice_on_a_from_list_album_gets_two_rows_and_two_lines(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service, TWO.replace("Two,A Band", "One,A Band"))
+    settle_all(app, tape, service)
+    assert cut(app, tape, service).status == 202
+    assert not file_it(app, tape, service)["error"]
+    assert [s.path.rsplit("/", 1)[1] for s in songs_of(service, tape)] == [
+        "01 One.flac",
+        "02 One.flac",
+    ]
+    wanted = ["../from-list/01 One.flac", "../from-list/02 One.flac"]
+    assert lines_of(service, tape)[2:] == wanted
+    assert not rebuild(app, tape, service)["error"]
+    assert lines_of(service, tape)[2:] == wanted
+    assert state_of(service, tape).left_out == ()
+
+
+def test_the_same_title_twice_is_told_apart_when_a_rebuild_follows_it_to_a_new_album(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service, TWO.replace("Two,A Band", "One,A Band"))
+    settle_all(app, tape, service)
+    assert cut(app, tape, service).status == 202
+    assert not file_it(app, tape, service)["error"]
+    library = Path(service.settings.library)
+    runner = beet_of(service)
+    for number in (1, 2):
+        old = path_of_song(service, tape, number)
+        runner.moves(old, library / "moved" / f"{3 - number}.flac")
+    assert not rebuild(app, tape, service)["error"]
+    assert lines_of(service, tape)[2:] == ["../moved/2.flac", "../moved/1.flac"]
 
 
 def test_a_song_owned_on_another_album_keeps_its_line_through_a_rebuild(
