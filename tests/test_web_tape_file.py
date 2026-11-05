@@ -499,6 +499,46 @@ def test_a_nonzero_exit_with_the_song_verifiably_there_counts_as_filed(
     assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
 
 
+def test_a_nonzero_exit_with_the_song_there_says_what_beets_did_not_finish_on_the_page(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    original = beet_of(service)._import
+
+    def locked(args: tuple[str, ...]) -> Result:
+        original(args)
+        return Result(args, 1, b"", b"sqlite3.OperationalError: database is locked\n")
+
+    beet_of(service)._import = locked  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    for outcome in view["filing"]:
+        assert outcome["state"] == F.FILED
+        assert "beets exited 1" in outcome["note"]
+        assert "art" in outcome["note"]
+        assert "database is locked" in outcome["note"]
+
+
+def test_a_zero_exit_with_the_song_there_has_no_complaint_to_make(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    file_it(app, tape, service)
+    assert [s.filing_note for s in songs(service, tape)] == ["", ""]
+
+
+def test_a_nonzero_exit_with_the_row_only_on_our_copy_is_not_filed(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    beet_of(service).refuses["rel-1"] = b"sqlite3.OperationalError: locked\n"
+    assert file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.FAILED
+
+
 def test_a_tool_that_fails_while_tagging_fails_that_album_and_no_other(
     service: Service,
 ) -> None:

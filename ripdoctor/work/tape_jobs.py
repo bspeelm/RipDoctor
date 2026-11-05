@@ -12,7 +12,7 @@ from ripdoctor.audio.runner import Runner
 from ripdoctor.core import filing as F
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import tagger as TG
-from ripdoctor.integrations.importer import Beets, ImportFailed
+from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
@@ -261,7 +261,7 @@ class _Filing:
             path, stray = F.arrived(song, rows, had), F.astray(song, rows, had)
             copy = copies[song.number]
             if path:
-                self.complete(song, F.FILED, path, doubled, unclear)
+                self.complete(song, F.FILED, path, doubled, _complaint(took), unclear)
             elif copy.exists():
                 note = f"beets did not take it: {took.why()}"
                 if str(copy) in cleared:
@@ -298,6 +298,17 @@ class _Filing:
             for track in run.tracks:
                 if track.song.number in self.unanswered:
                     self.tell(track.song, F.FAILED, note=str(e))
+
+
+def _complaint(took: TapeRun) -> str:
+    """A song the library holds stays filed whatever beets exited with, since a
+    retry would file it twice. What it did not finish, art first, is said instead."""
+    if took.returncode == 0:
+        return ""
+    return (
+        f"beets exited {took.returncode} after filing this, so its art or tags may "
+        f"be incomplete: {took.why()}"
+    )
 
 
 def _tags(run: F.Run, track: F.Track) -> dict[str, str]:
