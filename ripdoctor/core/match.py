@@ -29,13 +29,20 @@ _VARIANTS = str.maketrans(
         **dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-"),
     }
 )
+_GUEST = r"(?:feat\.|ft\.|featuring\b)"
 _CREDIT = re.compile(
-    r"\s*[(\[]\s*(?:feat|ft|featuring|with)\b[^)\]]*[)\]]"
-    r"|\s+(?:feat|ft|featuring)\b\.?\s.*$",
+    rf"\s*[(\[]\s*{_GUEST}\s*((?:(?!\s-\s)[^)\]])*)[)\]]"
+    rf"|\s+-\s*{_GUEST}\s*([^()\[\]]*)$",
     re.I,
 )
+_LISTED_GUESTS = re.compile(rf"\s+{_GUEST}\s.*$", re.I)
+_REMASTER_WORDS = (
+    r"(?=[^()\[\]]*remaster)(?:(?:remaster(?:ed|s)?|digital(?:ly)?|version|\d{4})\s*)+"
+)
 _REMASTER = re.compile(
-    r"\s*(?:-\s*|[(\[])[^()\[\]-]*\bremaster(?:ed|s)?\b[^()\[\]-]*[)\]]?\s*$", re.I
+    rf"(?:\s+-\s*{_REMASTER_WORDS}|\s*\(\s*{_REMASTER_WORDS}\)"
+    rf"|\s*\[\s*{_REMASTER_WORDS}\])\s*$",
+    re.I,
 )
 _LIVE = re.compile(r"\blive\b", re.I)
 _LEAD = re.compile(r"\s*[,;&]\s*")
@@ -123,8 +130,23 @@ def fold(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", wide).translate(_VARIANTS).split())
 
 
+def _exact(text: str) -> str:
+    """What acceptance compares: canonical form, case and typographic variants only.
+
+    Compatibility folding would make a superscript or a sharp s the same letter as
+    something else, and a title that only agrees that way is a person's to judge.
+    """
+    plain = unicodedata.normalize("NFC", text.translate(_VARIANTS)).lower()
+    return " ".join(plain.split())
+
+
 def _bare(text: str) -> str:
-    return _REMASTER.sub("", _CREDIT.sub("", text)).strip()
+    """Without a guest clause or a remaster suffix; a title that is only one stays."""
+    return _REMASTER.sub("", _CREDIT.sub("", text)).strip() or text
+
+
+def _guests(text: str) -> set[str]:
+    return {(a or b).strip() for a, b in _CREDIT.findall(text)}
 
 
 def _loose(text: str) -> str:
@@ -136,7 +158,8 @@ def search_artists(artist: str) -> tuple[str, ...]:
 
     The whole credit comes first because a comma can be part of one name.
     """
-    credit = _CREDIT.sub("", artist.translate(_VARIANTS)).strip()
+    credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", artist.translate(_VARIANTS)))
+    credit = credit.strip()
     lead = _LEAD.split(credit)[0]
     return (credit,) if lead == credit else (credit, lead)
 
@@ -159,11 +182,14 @@ def release_id(text: str) -> str:
 
 
 def _grade(wanted: str, found: str) -> int:
-    ours, theirs = fold(wanted), fold(found)
+    ours, theirs = _exact(wanted), _exact(found)
     a, b = _bare(ours), _bare(theirs)
-    if a == b and bool(_LIVE.search(ours)) == bool(_LIVE.search(theirs)):
+    guests = _guests(ours), _guests(theirs)
+    same_guests = guests[0] == guests[1] or not all(guests)
+    same_live = bool(_LIVE.search(ours)) == bool(_LIVE.search(theirs))
+    if a == b and same_guests and same_live:
         return EXACT
-    p, q = _loose(a), _loose(b)
+    p, q = _loose(fold(a)), _loose(fold(b))
     if not p or not q:
         return NOTHING
     begins = min(len(p), len(q)) >= 3 and (p.startswith(q) or q.startswith(p))
@@ -176,7 +202,8 @@ def _off(track: CatalogueTrack, length: float) -> float:
 
 
 def _agrees(listed: str, credited: str) -> bool:
-    ours, theirs = fold(_CREDIT.sub("", listed)), fold(credited)
+    credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", listed))
+    ours, theirs = fold(credit), fold(credited)
     if theirs == "various artists" or ours == theirs:
         return True
     return bool(set(_NAMES.split(ours)) & set(_NAMES.split(theirs)))
@@ -253,7 +280,10 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
     """What stops this edition being accepted, in words a person can act on."""
     c = fit.choice
     if fit.grade == CLOSE:
-        return f"only a close title: {c.track_title!r} on {c.release_title}"
+        return (
+            f"only a close title: the list has {wanted.title!r}, "
+            f"{c.release_title} has {c.track_title!r}"
+        )
     if fit.grade == NOTHING:
         return f"{c.release_title} has no track like this title"
     if not fit.official:
