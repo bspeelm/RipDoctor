@@ -2074,14 +2074,16 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 9000,
-a working limit, and at 1,300 lines it is the largest move yet. ADR-036 said
-the next move should be smaller and retire something, and ADR-062 repeated
-that while falling short of it. This breaks it again, by more, and retires
-nothing. The trim ADR-036 promised is still owed. Per-song filing and resume
-are also more moving parts than the album flow has. What survives that is that
-the author wants this, and that gap finding, cutting, the beets stage and the
-archive copy already exist. The number is a limit rather than an estimate,
+**The argument against, first, is cost.** The ceiling moves 7700 → 10,000,
+a working limit, and at 2,300 lines it is the largest move yet. It took two
+moves for this one feature: the first limit, 9000, proved too low with ear
+checking, cutting and filing still to build. ADR-036 said the next move should
+be smaller and retire something, and ADR-062 repeated that while falling short
+of it. This breaks it again, by more, and retires nothing. The trim ADR-036
+promised is still owed. Per-song filing and resume are also more moving parts
+than the album flow has. What survives that is that the author wants this, and
+that gap finding, cutting, the beets stage and the archive copy already exist.
+The number is a limit rather than an estimate, for the same reason as the first,
 and it is lowered to the real size plus a small margin once this is built. The
 comment ratio does not move.
 
