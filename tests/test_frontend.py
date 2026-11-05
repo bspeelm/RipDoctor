@@ -261,3 +261,8 @@ def test_a_job_s_error_is_still_there_after_a_reload() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"async function openTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tape.job?.error" in body
+
+
+def test_a_song_on_an_archived_tape_is_not_called_uncut() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert 't.playlist.done && row.cut === "not cut" ? "cleared" : row.cut' in js

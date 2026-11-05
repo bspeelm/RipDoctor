@@ -1457,7 +1457,7 @@ function showFiling(t) {
 
 const PLAYLIST_WORDS = {
   written: "file rewritten", unchanged: "file unchanged, so left untouched",
-  unknown: "the library could not be asked", nothing: "no song resolved",
+  unknown: "the library could not be asked", nothing: "nothing written",
   failed: "the file could not be written",
 };
 
@@ -1480,6 +1480,7 @@ function showPlaylist(t) {
   const why = p?.done ? "archived, and listed here as done"
     : unfiled ? "waits until the songs are filed" : p?.archive_refusal ?? "";
   $("#tp-arch-why").textContent = why;
+  $("#tp-arch-why").className = p?.done ? "dim" : "warn";
   $("#tp-arch-why").hidden = !why;
 }
 
@@ -1566,7 +1567,9 @@ function earRow(row, t) {
   judge.append(el("div", "dim", song.set_by === "ear" ? "set by ear" : song.heard ? "heard" : ""));
   tr.append(judge);
 
-  const cut = el("td", row.cut === "failed" || row.cut === "out of date" ? "mark" : "dim", row.cut);
+  // Archiving clears the cuts of songs already proved to be in the library.
+  const cutSaid = t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
+  const cut = el("td", row.cut === "failed" || row.cut === "out of date" ? "mark" : "dim", cutSaid);
   if (row.cut === "failed") cut.append(el("div", "why", song.cut.why));
   tr.append(cut);
   return tr;
