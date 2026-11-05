@@ -7,7 +7,6 @@ import io
 import math
 import re
 import unicodedata
-from collections import Counter
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from itertools import accumulate, pairwise
@@ -592,24 +591,42 @@ def _same_song(song: Song) -> tuple[str, str, str, int]:
     return song.title, song.artist, song.album, round(song.length)
 
 
-def _rows_left(rows: list[Song], room: int) -> list[Song]:
-    """Which of several identical rows stay when a list keeps only `room` of them:
-    a person's choices before the rest, each still in its place among the others."""
-    chosen = sorted(rows, key=lambda s: s.settled_by != PERSON)[:room]
-    return sorted(chosen, key=lambda s: s.number)
+def _rows_left(rows: list[Song], places: Collection[int]) -> list[Song]:
+    """Which of several identical rows stay when a list has these places for them: a
+    person's choices first, then a row whose place is still its own."""
+    chosen = sorted(
+        rows, key=lambda s: (s.settled_by != PERSON, s.number not in places)
+    )
+    return chosen[: len(places)]
+
+
+def _seated(rows: list[Song], places: list[int]) -> dict[int, Song]:
+    """A row keeps a place that is still its own and the rest pair off in order, unless
+    that would swap identical rows, as a song put before them would have it."""
+    left = sorted(_rows_left(rows, places), key=lambda s: s.number)
+    own = {s.number: s for s in left if s.number in places}
+    free = [p for p in places if p not in own]
+    others = [s for s in left if s.number not in own]
+    seated = {**own, **dict(zip(free, others, strict=False))}
+    numbers = [seated[p].number for p in sorted(seated)]
+    if numbers == sorted(numbers):
+        return seated
+    return dict(zip(places, left, strict=False))
 
 
 def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
-    """A song the new list leaves as it was keeps its match, wherever it moved.
-
-    Identical rows pair off in order, first with first, so each keeps its own.
-    """
+    """A song the new list leaves as it was keeps its match, wherever it moved, and
+    among identical rows each keeps its own."""
     old: dict[tuple[str, str, str, int], list[Song]] = {}
     for song in tape.songs:
         old.setdefault(_same_song(song), []).append(song)
-    room = Counter(_same_song(s) for s in songs)
-    kept = {key: _rows_left(rows, room[key]) for key, rows in old.items()}
-    still = {s.number for rows in kept.values() for s in rows}
+    places: dict[tuple[str, str, str, int], list[int]] = {}
+    for song in songs:
+        places.setdefault(_same_song(song), []).append(song.number)
+    kept: dict[int, Song] = {}
+    for key, rows in old.items():
+        kept.update(_seated(rows, places.get(key, [])))
+    still = {s.number for s in kept.values()}
     lost = [
         s.title for s in tape.songs if s.settled_by == PERSON and s.number not in still
     ]
@@ -620,10 +637,9 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
         )
 
     def kept_as(song: Song) -> Song:
-        rows = kept.get(_same_song(song))
-        if not rows:
+        was = kept.get(song.number)
+        if was is None:
             return song
-        was = rows.pop(0)
         return replace(
             song, proposal=was.proposal, settled_by=was.settled_by, skip=was.skip
         )

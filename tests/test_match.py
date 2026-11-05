@@ -831,6 +831,44 @@ def test_dropping_one_of_two_chosen_identical_rows_is_refused() -> None:
         TP.relist(tape, (TP.Song(1, "A Song", "A Band", "A Record", 200.0),))
 
 
+def test_a_person_s_choice_and_a_skip_on_identical_rows_each_stay_on_their_row() -> (
+    None
+):
+    mine = M.track_on(wanted(), edition("mine"))
+    tape = TP.skip(TP.settle(identical_rows(3), 1, mine), 2)
+    got = TP.relist(tape, fresh(tape)).songs
+    assert [s.settled_by for s in got] == [M.PERSON, "", ""]
+    assert [s.skip for s in got] == [False, True, False]
+    assert got[0].proposal is not None and got[0].proposal.choice == mine
+
+
+def test_a_row_edited_above_identical_ones_leaves_each_of_them_its_own() -> None:
+    tape = TP.skip(TP.settle(identical_rows(3), 2, None), 3)
+    rows = (TP.Song(1, "Changed", "A Band", "A Record", 90.0), *fresh(tape)[1:])
+    got = TP.relist(tape, rows).songs
+    assert [s.settled_by for s in got] == ["", M.PERSON, ""]
+    assert [s.skip for s in got] == [False, False, True]
+
+
+def test_a_row_edited_between_identical_ones_leaves_each_of_them_its_own() -> None:
+    tape = TP.skip(TP.settle(identical_rows(3), 1, None), 3)
+    rows = (
+        fresh(tape)[0],
+        TP.Song(2, "Changed", "A Band", "A Record", 90.0),
+        fresh(tape)[2],
+    )
+    got = TP.relist(tape, rows).songs
+    assert [s.settled_by for s in got] == [M.PERSON, "", ""]
+    assert [s.skip for s in got] == [False, False, True]
+
+
+def test_a_choice_outranks_a_row_that_only_kept_its_place() -> None:
+    tape = TP.settle(identical_rows(2), 2, None)
+    rows = (fresh(tape)[0], TP.Song(2, "Changed", "A Band", "A Record", 90.0))
+    got = TP.relist(tape, rows).songs
+    assert [s.settled_by for s in got] == [M.PERSON, ""]
+
+
 def test_a_new_row_identical_to_a_chosen_one_starts_unchosen() -> None:
     tape = TP.settle(identical_rows(1), 1, None)
     rows = fresh(identical_rows(2))
