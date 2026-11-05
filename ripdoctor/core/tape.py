@@ -7,6 +7,7 @@ import io
 import math
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from itertools import accumulate, pairwise
@@ -585,26 +586,43 @@ def _same_song(song: Song) -> tuple[str, str, str, int]:
     return song.title, song.artist, song.album, round(song.length)
 
 
+def _rows_left(rows: list[Song], room: int) -> list[Song]:
+    """Which of several identical rows stay when a list keeps only `room` of them:
+    a person's choices before the rest, each still in its place among the others."""
+    chosen = sorted(rows, key=lambda s: s.settled_by != PERSON)[:room]
+    return sorted(chosen, key=lambda s: s.number)
+
+
 def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
-    """A song the new list leaves as it was keeps its match, wherever it moved."""
-    new = {_same_song(s) for s in songs}
+    """A song the new list leaves as it was keeps its match, wherever it moved.
+
+    Identical rows pair off in order, first with first, so each keeps its own.
+    """
+    old: dict[tuple[str, str, str, int], list[Song]] = {}
+    for song in tape.songs:
+        old.setdefault(_same_song(song), []).append(song)
+    room = Counter(_same_song(s) for s in songs)
+    kept = {key: _rows_left(rows, room[key]) for key, rows in old.items()}
+    still = {s.number for rows in kept.values() for s in rows}
     lost = [
-        s.title
-        for s in tape.songs
-        if s.settled_by == PERSON and _same_song(s) not in new
+        s.title for s in tape.songs if s.settled_by == PERSON and s.number not in still
     ]
     if lost:
         raise ChoiceSet(
             f"you chose the release for {', '.join(lost)}, and this list changes or "
             "drops them - keep those songs as they were"
         )
-    old = {_same_song(s): s for s in tape.songs}
-    return tuple(
-        replace(s, proposal=was.proposal, settled_by=was.settled_by, skip=was.skip)
-        if (was := old.get(_same_song(s)))
-        else s
-        for s in songs
-    )
+
+    def kept_as(song: Song) -> Song:
+        rows = kept.get(_same_song(song))
+        if not rows:
+            return song
+        was = rows.pop(0)
+        return replace(
+            song, proposal=was.proposal, settled_by=was.settled_by, skip=was.skip
+        )
+
+    return tuple(kept_as(s) for s in songs)
 
 
 def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:

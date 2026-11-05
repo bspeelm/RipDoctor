@@ -764,6 +764,69 @@ def test_a_new_list_may_not_lose_a_persons_choice() -> None:
         TP.relist(tape, (tape.songs[1],))
 
 
+def identical_rows(count: int = 2) -> TP.Tape:
+    songs = tuple(
+        TP.Song(n, "A Song", "A Band", "A Record", 200.0) for n in range(1, count + 1)
+    )
+    return replace(TP.named("mix", "Mix", 1.0), songs=songs)
+
+
+def fresh(tape: TP.Tape) -> tuple[TP.Song, ...]:
+    return tuple(
+        TP.Song(s.number, s.title, s.artist, s.album, s.length) for s in tape.songs
+    )
+
+
+def test_resaving_a_list_keeps_a_choice_on_the_first_of_two_identical_rows() -> None:
+    tape = TP.settle(identical_rows(), 1, None)
+    assert [s.settled_by for s in TP.relist(tape, fresh(tape)).songs] == [M.PERSON, ""]
+
+
+def test_a_choice_on_the_second_identical_row_is_not_copied_to_the_first() -> None:
+    tape = TP.settle(identical_rows(), 2, None)
+    assert [s.settled_by for s in TP.relist(tape, fresh(tape)).songs] == ["", M.PERSON]
+
+
+def test_each_of_two_identical_rows_keeps_its_own_choice_through_a_resave() -> None:
+    mine = M.track_on(wanted(), edition("mine"))
+    tape = TP.settle(TP.settle(identical_rows(), 1, mine), 2, None)
+    got = TP.relist(tape, fresh(tape)).songs
+    assert got[0].proposal is not None and got[0].proposal.choice == mine
+    assert got[1].proposal is not None and got[1].proposal.choice is None
+
+
+def test_identical_rows_keep_their_order_when_a_song_is_put_before_them() -> None:
+    mine = M.track_on(wanted(), edition("mine"))
+    tape = TP.settle(TP.settle(identical_rows(), 1, mine), 2, None)
+    rows = (
+        TP.Song(1, "New", "A Band", "A Record", 90.0),
+        TP.Song(2, "A Song", "A Band", "A Record", 200.0),
+        TP.Song(3, "A Song", "A Band", "A Record", 200.0),
+    )
+    got = TP.relist(tape, rows).songs
+    assert got[0].settled_by == ""
+    assert got[1].proposal is not None and got[1].proposal.choice == mine
+    assert got[2].proposal is not None and got[2].proposal.choice is None
+
+
+def test_dropping_the_unchosen_of_two_identical_rows_keeps_the_choice() -> None:
+    tape = TP.settle(identical_rows(), 2, None)
+    only = (TP.Song(1, "A Song", "A Band", "A Record", 200.0),)
+    assert [s.settled_by for s in TP.relist(tape, only).songs] == [M.PERSON]
+
+
+def test_dropping_one_of_two_chosen_identical_rows_is_refused() -> None:
+    tape = TP.settle(TP.settle(identical_rows(), 1, None), 2, None)
+    with pytest.raises(TP.ChoiceSet, match="A Song"):
+        TP.relist(tape, (TP.Song(1, "A Song", "A Band", "A Record", 200.0),))
+
+
+def test_a_new_row_identical_to_a_chosen_one_starts_unchosen() -> None:
+    tape = TP.settle(identical_rows(1), 1, None)
+    rows = fresh(identical_rows(2))
+    assert [s.settled_by for s in TP.relist(tape, rows).songs] == [M.PERSON, ""]
+
+
 def test_placing_boundaries_keeps_what_was_settled() -> None:
     tape = TP.settle(a_tape(), 1, None)
     placed = TP.place(tape, TP.Music(0.0, 380.0, ()))

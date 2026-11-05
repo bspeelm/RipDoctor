@@ -563,6 +563,18 @@ def test_a_new_list_may_not_lose_a_choice_over_the_wire(service, catalogue) -> N
     assert "A Song" in got.json()["error"]
 
 
+def test_the_same_list_sent_again_keeps_the_choice_on_its_own_row(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    rows = [row("A Song"), row("A Song"), row("B Song", length="3:00")]
+    tape = a_tape(app, service, rows)
+    post(app, f"/api/tapes/{tape}/songs/2/from-list", service)
+    sent = post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows})
+    assert sent.status == 200
+    assert [s["settled_by"] for s in sent.json()["songs"]] == ["", M.PERSON, ""]
+
+
 def test_a_proposal_is_on_disk_and_reads_back(service) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     tape = a_tape(app, service)
