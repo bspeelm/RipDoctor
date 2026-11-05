@@ -113,6 +113,7 @@ class Song:
     heard: bool = False
     skip: bool = False
     cut: CutRecord | None = None
+    filing_note: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +135,7 @@ class Song:
             "heard": self.heard,
             "skip": self.skip,
             "cut": asdict(self.cut) if self.cut else None,
+            "filing_note": self.filing_note,
         }
 
     @classmethod
