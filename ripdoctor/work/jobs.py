@@ -130,6 +130,8 @@ class Jobs:
         def run() -> None:
             try:
                 job.result = work(job)
+            except ValueError as e:  # how a job refuses, written for the person
+                job.error = str(e)
             except Exception as e:  # carried into the job, not swallowed
                 job.error = f"{type(e).__name__}: {e}"
             finally:

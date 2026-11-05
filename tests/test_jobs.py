@@ -182,3 +182,13 @@ def test_a_claim_is_refused_while_a_job_runs_and_let_go_after_an_error() -> None
     with pytest.raises(ValueError, match="went wrong"), jobs.claim("other", "change"):
         raise ValueError("went wrong")
     assert jobs.start("other", "cut", lambda job: None)
+
+
+def test_a_refusal_reads_as_itself_and_not_as_an_exception_name() -> None:
+    jobs = Jobs(spawn=lambda f: f())
+
+    def refuses(_job: Job) -> None:
+        raise ValueError("that file has no audio in it")
+
+    job = jobs.start("r", "tape", refuses)
+    assert job.error == "that file has no audio in it"
