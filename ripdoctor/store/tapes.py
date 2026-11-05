@@ -94,6 +94,15 @@ def cuts_on_disk(layout: Layout, tape: str) -> set[str]:
     return _names_in(dir_for(layout, tape) / CUTS)
 
 
+def _unused(wanted: Path) -> Path:
+    """`wanted`, or that name with the first number after it that nothing holds yet."""
+    where, suffix = wanted, 1
+    while where.exists():
+        suffix += 1
+        where = wanted.with_name(f"{wanted.name}-{suffix}")
+    return where
+
+
 def _stamp(now: float) -> str:
     return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
 
@@ -147,10 +156,7 @@ def fresh_filing(layout: Layout, tape: str, name: str) -> Path:
     interrupted on, and nothing here would answer that.
     """
     filing_dir(layout, tape).mkdir(exist_ok=True)
-    where, suffix = filing_dir(layout, tape) / name, 1
-    while where.exists():
-        suffix += 1
-        where = filing_dir(layout, tape) / f"{name}-{suffix}"
+    where = _unused(filing_dir(layout, tape) / name)
     where.mkdir()
     return where
 
@@ -253,13 +259,9 @@ def remove(layout: Layout, tape: str, now: float) -> Path:
     It holds the only audio and any boundaries set by ear, so it moves aside.
     An upload not yet taken in still exists wherever it was sent from, and goes.
     """
-    stamp = _stamp(now)
     aside = under(layout.work, REMOVED)
     aside.mkdir(parents=True, exist_ok=True)
-    target, suffix = aside / f"{tape}-{stamp}", 1
-    while target.exists():
-        suffix += 1
-        target = aside / f"{tape}-{stamp}-{suffix}"
+    target = _unused(aside / f"{tape}-{_stamp(now)}")
     dir_for(layout, tape).rename(target)
     IN.clear(layout, key_of(tape))
     return target
