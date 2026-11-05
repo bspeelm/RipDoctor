@@ -43,11 +43,14 @@ class Scripted:
 
     found: list[dict[str, object]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    lookup: bytes | None = None
 
     def get(self, url: str, headers: dict[str, str]) -> bytes:
         self.calls.append(url)
         if "query=" in url:
             return json.dumps({"releases": self.found}).encode()
+        if self.lookup is not None:
+            return self.lookup
         track = {
             "title": "A Song",
             "length": 200000,
@@ -210,6 +213,104 @@ def test_unofficial_editions_cost_nothing_when_an_official_one_exists() -> None:
 def test_unofficial_editions_are_still_looked_at_when_nothing_else_exists() -> None:
     fetcher = Scripted([entry("boot", status="Bootleg")])
     assert [r.mbid for r in MB.editions(fetcher, ["A Band"], "A Record")] == ["boot"]
+
+
+def in_series(*names: str) -> list[dict[str, object]]:
+    return [
+        entry(
+            f"e{at}", title=name, date=f"19{at + 10}", **{"release-group": {"id": name}}
+        )
+        for at, name in enumerate(names)
+    ]
+
+
+def test_a_series_does_not_crowd_out_the_album_asked_for() -> None:
+    found = in_series(
+        "Hits Vol. 1", "Hits Vol. 2", "Hits Vol. 3", "Hits Vol. 4", "Hits"
+    )
+    got = MB.editions(Scripted(found), ["A Band"], "Hits")
+    assert got[0].title == "Hits"
+    assert len(got) == MB.PROBE
+
+
+def test_an_edition_of_the_album_is_read_before_an_earlier_unrelated_title() -> None:
+    found = in_series("Hits Live", "Hits Vol. 2", "Hits Vol. 3", "Hits Vol. 4")
+    found += in_series("Hits (Deluxe Edition)")
+    found[-1]["id"] = "deluxe"
+    fetcher = Scripted(found)
+    MB.editions(fetcher, ["A Band"], "Hits")
+    assert fetched(fetcher.calls)[0] == "deluxe"
+
+
+def test_the_nearest_title_is_read_first_when_nothing_agrees() -> None:
+    found = in_series("Unrelated", "Hits Vol. 2")
+    fetcher = Scripted(found)
+    MB.editions(fetcher, ["A Band"], "Hits")
+    assert fetched(fetcher.calls) == ["e1", "e0"]
+
+
+def same_named(count: int, artist: str = "A Band") -> list[dict[str, object]]:
+    return [
+        entry(
+            f"e{at}",
+            date=f"19{at + 10}",
+            **{"release-group": {"id": f"g{at}"}, "artist-credit": [{"name": artist}]},
+        )
+        for at in range(count)
+    ]
+
+
+def test_every_album_of_the_exact_name_is_read_and_forces_review() -> None:
+    fetcher = Scripted(same_named(6))
+    got = MB.editions(fetcher, ["A Band"], "A Record")
+    assert len(got) == 6
+    assert len(fetcher.calls) == 7
+    made = propose(
+        Wanted("A Song", "A Band", "A Record", 200.0), [MB.edition_of(r) for r in got]
+    )
+    assert made.status == "review"
+    assert "fits 6 albums" in made.reason
+
+
+def test_albums_of_that_name_by_others_cost_no_extra_requests() -> None:
+    fetcher = Scripted(same_named(30, artist="A Band of Others"))
+    MB.editions(fetcher, ["A Band"], "A Record")
+    assert len(fetcher.calls) == 1 + MB.PROBE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"{}",
+        b'{"error": "busy"}',
+        b"[]",
+        b"null",
+        b'{"releases": 7}',
+        b'{"releases": [1]}',
+    ],
+)
+def test_a_search_answer_of_the_wrong_shape_is_a_failure_and_not_no_release(
+    body: bytes,
+) -> None:
+    class Answers(Scripted):
+        def get(self, url: str, headers: dict[str, str]) -> bytes:
+            return body
+
+    with pytest.raises(MB.LookupFailed):
+        MB.editions(Answers(), ["A Band"], "A Record")
+
+
+def test_a_search_that_really_finds_nothing_is_no_release() -> None:
+    assert MB.editions(Scripted([]), ["A Band"], "A Record") == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b"[]", b"null", b'{"media": 7}', b'{"media": [{"tracks": [1]}]}'],
+)
+def test_a_tracklist_of_the_wrong_shape_is_a_failure(body: bytes) -> None:
+    with pytest.raises(MB.LookupFailed):
+        MB.editions(Scripted([entry("a")], lookup=body), ["A Band"], "A Record")
 
 
 def test_a_release_named_by_id_comes_back_with_its_group() -> None:

@@ -17,7 +17,16 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ripdoctor import __version__
-from ripdoctor.core.match import OFFICIAL, CatalogueTrack, Edition
+from ripdoctor.core.match import (
+    ELSEWHERE,
+    NAMED,
+    OFFICIAL,
+    CatalogueTrack,
+    Edition,
+    agrees,
+    album_agreement,
+    album_nearness,
+)
 
 BASE = "https://musicbrainz.org/ws/2"
 
@@ -29,11 +38,14 @@ USER_AGENT = f"ripdoctor/{__version__} (https://github.com/bspeelm/RipDoctor)"
 VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
 
 # How many candidates are asked for a tracklist. Each is its own request to a
-# service that allows one a second.
+# service that allows one a second. A tape's lookup asks for more only to read
+# every group of the exact name by the list's artist: at worst one search for
+# each form of the credit, then one fetch per such group, at most a page of WIDE.
 PROBE = 4
-# A search costs one request however many it answers, and the earliest edition
-# of a record is often not among the first few.
-WIDE = 25
+# A search costs one request however many it answers, the most the service
+# allows, because the earliest edition of a record and a second album of its name
+# are often not among the first few.
+WIDE = 100
 
 RETRY_STATUS = (429, 500, 502, 503, 504)
 RETRIES = 4
@@ -42,6 +54,10 @@ BACKOFF = 1.5
 
 class LookupFailed(Exception):
     """The catalogue could not be reached, or said nothing useful."""
+
+
+# What reading an answer of the wrong shape raises.
+_MALFORMED = (AttributeError, IndexError, KeyError, TypeError, ValueError)
 
 
 class Fetcher(Protocol):
@@ -177,11 +193,13 @@ def _request(
             last = str(e)
         else:
             try:
-                parsed: dict[str, Any] = json.loads(raw)
+                parsed = json.loads(raw)
             except (ValueError, UnicodeDecodeError) as e:
                 raise LookupFailed(
                     "catalogue returned something that is not JSON"
                 ) from e
+            if not isinstance(parsed, dict):
+                raise LookupFailed("catalogue returned a malformed answer")
             return parsed
         if attempt < retries - 1:
             sleep(BACKOFF * (2**attempt))
@@ -248,29 +266,34 @@ def search(
     data = _request(
         fetcher, f"{BASE}/release?query={query}&limit={limit}&fmt=json", **kw
     )
-    out = []
-    for r in data.get("releases", []):
-        credit = r.get("artist-credit") or [{}]
-        group = r.get("release-group") or {}
-        out.append(
-            Release(
-                mbid=str(r.get("id", "")),
-                title=str(r.get("title", "")),
-                artist=str(credit[0].get("name", artist)),
-                date=str(r.get("date", "")),
-                format=_format_of(r),
-                tracks=[],
-                disambiguation=str(r.get("disambiguation", "")),
-                country=str(r.get("country", "")),
-                status=str(r.get("status", "")),
-                group=str(group.get("id", "")),
-                live="Live" in (group.get("secondary-types") or []),
-                credit=_credit(r),
-                primary=str(group.get("primary-type") or ""),
-                secondary=tuple(str(t) for t in group.get("secondary-types") or ()),
-            )
-        )
-    return out
+    found = data.get("releases")
+    if not isinstance(found, list):
+        raise LookupFailed("catalogue answered a search with no list of releases")
+    try:
+        return [_found(r, artist) for r in found]
+    except _MALFORMED as e:
+        raise LookupFailed("catalogue returned a malformed release") from e
+
+
+def _found(r: dict[str, Any], artist: str) -> Release:
+    credit = r.get("artist-credit") or [{}]
+    group = r.get("release-group") or {}
+    return Release(
+        mbid=str(r.get("id", "")),
+        title=str(r.get("title", "")),
+        artist=str(credit[0].get("name", artist)),
+        date=str(r.get("date", "")),
+        format=_format_of(r),
+        tracks=[],
+        disambiguation=str(r.get("disambiguation", "")),
+        country=str(r.get("country", "")),
+        status=str(r.get("status", "")),
+        group=str(group.get("id", "")),
+        live="Live" in (group.get("secondary-types") or []),
+        credit=_credit(r),
+        primary=str(group.get("primary-type") or ""),
+        secondary=tuple(str(t) for t in group.get("secondary-types") or ()),
+    )
 
 
 def _format_of(release: dict[str, Any]) -> str:
@@ -309,18 +332,21 @@ def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
         f"{BASE}/release/{release.mbid}?inc=recordings+artist-credits&fmt=json",
         **kw,
     )
-    release.tracks = _tracks(data.get("media") or [])
-    if not release.format:
-        release.format = _format_of(data)
-    if not release.title:
-        release.title = str(data.get("title", ""))
-    if not release.date:
-        release.date = str(data.get("date", ""))
-    if not release.artist:
-        credit = data.get("artist-credit") or [{}]
-        release.artist = str(credit[0].get("name", ""))
-    release.status = release.status or str(data.get("status", ""))
-    release.credit = release.credit or _credit(data)
+    try:
+        release.tracks = _tracks(data.get("media") or [])
+        if not release.format:
+            release.format = _format_of(data)
+        if not release.title:
+            release.title = str(data.get("title", ""))
+        if not release.date:
+            release.date = str(data.get("date", ""))
+        if not release.artist:
+            credit = data.get("artist-credit") or [{}]
+            release.artist = str(credit[0].get("name", ""))
+        release.status = release.status or str(data.get("status", ""))
+        release.credit = release.credit or _credit(data)
+    except _MALFORMED as e:
+        raise LookupFailed("catalogue returned a malformed release") from e
     return release
 
 
@@ -331,18 +357,37 @@ def release_by_id(fetcher: Fetcher, mbid: str, **kw: Any) -> Release:
     return release
 
 
-def _worth_probing(found: list[Release]) -> list[Release]:
-    """Official editions if there are any, the earliest of each group first, so
-    that two records with one name are both seen before any second pressing."""
+def _worth_probing(found: list[Release], album: str, artist: str) -> list[Release]:
+    """Official editions if there are any, those best agreeing with the album first,
+    so a series cannot crowd out the album asked for.
+
+    The first of each group comes before any second pressing, and every group of
+    the exact name by this artist is read, because two of them are a doubt only if
+    both are seen.
+    """
+
+    def by_agreement(r: Release) -> tuple[int, bool, float, str, str]:
+        return (
+            album_agreement(album, r.title),
+            not agrees(artist, r.credit or r.artist),
+            album_nearness(album, r.title),
+            r.date or "9999",
+            r.mbid,
+        )
+
     official = [r for r in found if r.status.lower() == OFFICIAL] or found
     firsts: list[Release] = []
     rest: list[Release] = []
     groups: set[str] = set()
-    for release in sorted(official, key=lambda r: (r.date or "9999", r.mbid)):
+    for release in sorted(official, key=by_agreement):
         group = release.group or release.mbid
         (rest if group in groups else firsts).append(release)
         groups.add(group)
-    return (firsts + rest)[:PROBE]
+    ordered = sorted(
+        firsts + rest, key=lambda r: album_agreement(album, r.title) == ELSEWHERE
+    )
+    same_named = sum(by_agreement(r)[:2] == (NAMED, False) for r in firsts)
+    return ordered[: max(PROBE, same_named)]
 
 
 def editions(
@@ -355,7 +400,8 @@ def editions(
     for artist in artists:
         found = search(fetcher, artist, album, limit=WIDE, **kw)
         if found:
-            return [fetch_tracks(fetcher, r, **kw) for r in _worth_probing(found)]
+            probed = _worth_probing(found, album, artists[0])
+            return [fetch_tracks(fetcher, r, **kw) for r in probed]
     return []
 
 

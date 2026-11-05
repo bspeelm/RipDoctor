@@ -40,6 +40,7 @@ class Catalogue:
     calls: list[str] = field(default_factory=list)
     down: set[str] = field(default_factory=set)
     broken: set[str] = field(default_factory=set)
+    malformed: dict[str, bytes] = field(default_factory=dict)
     times: list[float] = field(default_factory=list)
     clock: Clock | None = None
 
@@ -52,6 +53,9 @@ class Catalogue:
             raise urllib.error.URLError("no route")
         if any(name in asked for name in self.broken):
             raise RuntimeError("the worker died")
+        for name, body in self.malformed.items():
+            if name in asked:
+                return body
         if "query=" in url:
             hits = [
                 e
@@ -215,6 +219,76 @@ def test_a_failed_lookup_is_retryable_and_never_reads_as_no_match(
     view = run(app, service, tape)
     assert statuses(view) == [M.MATCHED] * 3
     assert all('"A Record"' not in urllib.parse.unquote(c) for c in catalogue.calls)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b"{}", b"[]", b"null", b'{"releases": 7}', b'{"releases": [1]}'],
+)
+def test_a_malformed_answer_fails_one_album_and_the_rest_carry_on(
+    service, catalogue, body: bytes
+) -> None:  # type: ignore[no-untyped-def]
+    catalogue.malformed = {'release:"B Record"': body}
+    app = build(service)
+    tape = a_tape(app, service)
+    view = run(app, service, tape)
+    assert statuses(view) == [M.MATCHED, M.MATCHED, M.FAILED]
+    assert view["job"]["error"] in ("", None)
+
+    catalogue.malformed = {}
+    assert statuses(run(app, service, tape)) == [M.MATCHED] * 3
+
+
+def test_an_empty_list_of_releases_is_still_none(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+    catalogue.malformed = {'release:"B Record"': b'{"releases": []}'}
+    app = build(service)
+    view = run(app, service, a_tape(app, service))
+    assert statuses(view) == [M.MATCHED, M.MATCHED, M.NONE]
+
+
+def test_the_album_asked_for_is_fetched_past_a_series(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+    catalogue.albums["A Record"] = [
+        an_edition(
+            f"vol-{n}",
+            title=f"A Record Vol. {n}",
+            group=f"v{n}",
+            date=f"199{n}",
+            tracks=[("A Song", 200)],
+        )
+        for n in range(1, 5)
+    ] + [an_edition("the-one", group="one", date="2005", tracks=[("A Song", 200)])]
+    app = build(service)
+    view = run(app, service, a_tape(app, service, [row("A Song")]))
+    assert statuses(view) == [M.MATCHED]
+    assert view["songs"][0]["proposal"]["choice"]["release"] == "the-one"
+
+
+def test_a_second_album_of_the_name_past_the_probe_is_seen_and_forces_review(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    without = [("Other", 100)]
+    catalogue.albums["A Record"] = [
+        an_edition("first", group="a", date="1991", tracks=[("A Song", 200)]),
+        an_edition("b", group="b", date="1992", tracks=without),
+        an_edition("c", group="c", date="1993", tracks=without),
+        an_edition("d", group="d", date="1994", tracks=without),
+        an_edition("late", group="e", date="2005", tracks=[("A Song", 200)]),
+    ]
+    app = build(service)
+    view = run(app, service, a_tape(app, service, [row("A Song")]))
+    assert statuses(view) == [M.REVIEW]
+    assert "fits 2 albums" in view["songs"][0]["proposal"]["reason"]
+
+
+def test_a_name_holding_a_comma_is_not_answered_by_its_first_word(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    rows = [row("A Song"), {**row("B Song", length="3:00"), "artist": "A Band, B & C"}]
+    view = run(app, service, a_tape(app, service, rows))
+    assert catalogue.searches() == 2
+    assert statuses(view) == [M.MATCHED, M.REVIEW]
+    assert "credits" in view["songs"][1]["proposal"]["reason"]
 
 
 def test_a_retry_waits_with_the_paces_sleep_and_not_the_real_one(

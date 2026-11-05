@@ -225,6 +225,12 @@ def album_agreement(listed: str, title: str) -> int:
     return EDITION if base and base == _album_base(theirs) else ELSEWHERE
 
 
+def album_nearness(listed: str, title: str) -> float:
+    """How unlike two album titles are, from 0 for the same: an order, not a rule."""
+    alike = SequenceMatcher(None, _loose(fold(listed)), _loose(fold(title))).ratio()
+    return 1.0 - alike
+
+
 def _grade(wanted: str, found: str) -> int:
     ours, theirs = _exact(wanted), _exact(found)
     a, b = _bare(ours), _bare(theirs)
