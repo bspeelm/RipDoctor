@@ -2074,19 +2074,14 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 10,500,
-a working limit, and at 2,800 lines it is the largest move yet. It took three
-moves for this one feature: 9000 proved too low with ear checking, cutting and
-filing still to build, and 10,000 too low with the playlist still to build.
-ADR-036 said the next move should be smaller and retire something, and ADR-062
-repeated that while falling short of it. This breaks it again, by more, and
-retires nothing. The trim ADR-036 promised is still owed. Per-song filing and
-resume are also more moving parts than the album flow has. What survives that is
-that the author wants this, and that gap finding, cutting, the beets stage and the
-archive copy already exist. The number is a limit rather than an estimate, for the
-same reason each time: the feature is not finished, and an estimate would be a
-guess. It is lowered to the real size plus a small margin once this is built. The
-comment ratio does not move.
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,000, and
+at 3,300 lines it is the largest move yet, for one feature. ADR-036 said the next
+move should be smaller and retire something, and ADR-062 repeated that while
+falling short of it. This breaks it again, by more, and retires nothing. The trim
+ADR-036 promised is still owed. Per-song filing and resume are also more moving
+parts than the album flow has. What survives that is that the author wants this,
+and that gap finding, cutting, the beets stage and the archive copy already
+exist. The comment ratio does not move.
 
 **What a tape is.** One uncut lossless recording and an ordered list, whose
 songs each belong to different albums. The five verbs hold; only tagging and
