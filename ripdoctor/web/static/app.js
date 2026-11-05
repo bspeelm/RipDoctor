@@ -1435,7 +1435,7 @@ function edgeCell(song, row, edge) {
 
 function whyCell(song, row, t) {
   const td = el("td", "why");
-  const said = song.reason || (row.doubtful ? "the list and the audio disagree across this tape" : "");
+  const said = song.reason || (row.doubtful ? "the list and the audio disagreed across this tape, and this song has not been heard" : "");
   if (said) td.append(el("div", row.doubtful ? "mark" : "dim", said));
   for (const g of t.inside.filter((i) => i.song === song.number)) {
     const seek = el("button", "ghost tiny", `hear ${fmt(g.lo)} to ${fmt(g.hi)}`);

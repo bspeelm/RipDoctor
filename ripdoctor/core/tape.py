@@ -116,6 +116,7 @@ class Song:
     cut: CutRecord | None = None
     filing_note: str = ""
     import_begun: bool = False
+    owes_ear: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,6 +140,7 @@ class Song:
             "cut": asdict(self.cut) if self.cut else None,
             "filing_note": self.filing_note,
             "import_begun": self.import_begun,
+            "owes_ear": self.owes_ear,
         }
 
     @classmethod
@@ -763,16 +765,17 @@ def place(tape: Tape, music: Music) -> Tape:
         for s in out
         if s.start is not None and s.end is not None and s.start < lo and hi < s.end
     )
+    mismatch = _mismatch(out, fits, len(music.gaps) + 1, inside, groupings)
     return replace(
         tape,
-        songs=tuple(out),
+        songs=tuple(replace(s, owes_ear=True) for s in out) if mismatch else tuple(out),
         music_start=music.start,
         music_end=music.end,
         found_start=music.found_start,
         found_end=music.found_end,
         gaps=music.gaps,
         inside=inside,
-        mismatch=_mismatch(out, fits, len(music.gaps) + 1, inside, groupings),
+        mismatch=mismatch,
     )
 
 
@@ -904,10 +907,12 @@ def skip(tape: Tape, number: int, skipped: bool = True) -> Tape:
 
 def doubtful(tape: Tape, song: Song) -> bool:
     """Waiting for an ear: its own doubt, or any song on a tape whose list and audio
-    disagree, where a length that happens to fit proves nothing."""
+    disagree, where a length that happens to fit proves nothing. Setting its neighbours
+    can end the disagreement and proves nothing about this song, so one flagged by a
+    mismatch stays flagged until it is judged itself."""
     if song.skip or song.heard or song.set_by == EAR:
         return False
-    return song.verdict == DOUBT or bool(tape.mismatch)
+    return song.verdict == DOUBT or song.owes_ear or bool(tape.mismatch)
 
 
 def ear_order(tape: Tape) -> tuple[Song, ...]:

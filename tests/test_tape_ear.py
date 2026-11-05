@@ -201,6 +201,71 @@ def test_skipped_songs_come_last_in_the_ear_check() -> None:
     assert [s.number for s in TP.ear_order(tape)] == [2, 3, 1]
 
 
+def five_in_doubt() -> TP.Tape:
+    """Six stretches of 120 s, and a list that has only the last one right."""
+    gaps = tuple(gap(120.0 * n + 2.0 * (n - 1), 122.0 * n) for n in range(1, 6))
+    songs = tuple(
+        TP.Song(n, f"Song {n}", "A Band", "A Record", length, settled_by=M.CATALOGUE)
+        for n, length in enumerate((100.0, 100.0, 100.0, 100.0, 100.0, 120.0), 1)
+    )
+    unplaced = TP.Tape(id="mix", name="Mix", duration=735.0, songs=songs)
+    tape = TP.place(unplaced, TP.Music(0.0, 730.0, gaps))
+    assert tape.mismatch
+    assert [s.verdict for s in tape.songs] == [TP.DOUBT] * 5 + [TP.AGREES]
+    return tape
+
+
+def setting_the_five(tape: TP.Tape) -> TP.Tape:
+    for song in tape.songs[:5]:
+        tape = TP.set_edges(tape, song.number, song.start or 0.0, song.end or 0.0)
+    return tape
+
+
+def test_setting_the_doubts_does_not_clear_a_flagged_song_nobody_heard() -> None:
+    tape = setting_the_five(five_in_doubt())
+    assert not tape.mismatch
+    assert TP.doubtful(tape, tape.songs[5])
+    assert "song 6 (Song 6)" in TP.cut_refusal(tape)
+    assert [s for s, _ in TP.flagged(tape)] == [tape.songs[5], tape.songs[5]]
+
+
+def test_a_flag_survives_the_document() -> None:
+    tape = setting_the_five(five_in_doubt())
+    again = TP.Tape.from_dict(json.loads(json.dumps(tape.to_dict())))
+    assert TP.doubtful(again, again.songs[5])
+
+
+@pytest.mark.parametrize(
+    "judge",
+    [
+        lambda t: TP.hear(t, 6),
+        lambda t: TP.skip(t, 6),
+        lambda t: TP.set_edges(t, 6, *(t.songs[5].start, t.songs[5].end)),
+    ],
+)
+def test_a_flagged_song_is_cleared_by_its_own_judgement(judge: object) -> None:
+    tape = judge(setting_the_five(five_in_doubt()))  # type: ignore[operator]
+    assert not TP.doubtful(tape, tape.songs[5])
+    assert TP.cut_refusal(tape) == ""
+
+
+def test_taking_back_the_hearing_of_a_flagged_song_flags_it_again() -> None:
+    tape = TP.hear(TP.hear(setting_the_five(five_in_doubt()), 6), 6, False)
+    assert TP.doubtful(tape, tape.songs[5])
+
+
+def test_a_new_list_starts_with_nothing_flagged() -> None:
+    tape = five_in_doubt()
+    fresh = tuple(
+        TP.Song(s.number, s.title, s.artist, s.album, s.length) for s in tape.songs
+    )
+    assert not any(s.owes_ear for s in TP.relist(tape, fresh).songs)
+
+
+def test_a_tape_with_no_mismatch_flags_nothing_extra() -> None:
+    assert not any(s.owes_ear for s in three().songs)
+
+
 # --------------------------------------------------------------- the cut's gate
 
 
