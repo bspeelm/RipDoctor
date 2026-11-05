@@ -195,6 +195,8 @@ class _Filing:
             said = F.precheck(song, self.sited(by_id), self.sited(by_name))
             if said.action == F.FILE:
                 waiting.append((track, by_name))
+            elif said.action == F.ALREADY and song.import_begun:
+                self.complete(song, said.action, said.path, said.note)
             else:
                 self.tell(song, said.action, said.path, said.note)
         return waiting
@@ -246,6 +248,8 @@ class _Filing:
                     [f"albumartist:{run.artist}", f"album:{run.album}"],
                 ),
             )
+        self.tape = F.begun(self.tape, copies)
+        T.save(self.layout, self.tape)
         self.job.step(run.album, "importing with beets")
         took = self.beets.file_tape_run(self.runner, str(where), run.release)
 

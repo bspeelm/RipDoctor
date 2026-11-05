@@ -870,6 +870,24 @@ def test_a_restart_mid_run_keeps_what_was_recorded_and_finds_what_beets_took(
     assert Path(two.path).is_file()
 
 
+def test_a_song_recovered_after_a_restart_gets_its_modes_back(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    assert [s.import_begun for s in songs(service, tape)] == [True, False]
+
+    runner.dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.ALREADY
+    assert not songs(service, tape)[0].import_begun
+    for found in (tmp_path / "lib" / "rel-1").iterdir():
+        assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
+
+
 def test_each_attempt_at_an_album_uses_a_new_directory(service: Service) -> None:
     """beets asks about resuming a path it was interrupted on."""
     app = build(service)

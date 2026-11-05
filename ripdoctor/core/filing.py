@@ -242,9 +242,23 @@ def recorded(
             return song
         if song.filing in FINISHED:
             raise ValueError(f"{label(song)} is already {song.filing}")
-        return replace(song, filing=state, path=path, filing_note=note)
+        return replace(
+            song, filing=state, path=path, filing_note=note, import_begun=False
+        )
 
     return replace(tape, songs=tuple(told(s) for s in tape.songs))
+
+
+def begun(tape: Tape, numbers: Collection[int]) -> Tape:
+    """These songs are going to beets. One found in the library after a restart, with
+    this still set, got there by this tape, unlike a song it merely already owned."""
+    return replace(
+        tape,
+        songs=tuple(
+            replace(s, import_begun=True) if s.number in numbers else s
+            for s in tape.songs
+        ),
+    )
 
 
 def file_refusal(tape: Tape, on_disk: Collection[str]) -> str:
