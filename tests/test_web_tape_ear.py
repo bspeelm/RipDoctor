@@ -88,6 +88,13 @@ def test_any_other_boundary_can_be_asked_for(service: Service) -> None:
     assert get(app, f"/api/tapes/{tape}/songs/1/clip/start", service).status == 404
 
 
+def test_a_clip_is_only_for_a_start_or_an_end(service: Service) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    post(app, f"/api/tapes/{tape}/clips", service, {"song": 1, "edge": "end"})
+    assert get(app, f"/api/tapes/{tape}/songs/1/clip/middle", service).status == 404
+
+
 def test_a_clip_already_built_is_not_built_again(service: Service) -> None:
     app = build(service)
     tape = placed(app, service)

@@ -131,6 +131,16 @@
         <button type="button" id="tp-match" disabled>Match songs</button>
         <button type="button" id="tp-rematch" class="ghost" disabled>Look again</button>
       </div>
+      <h2>Listen and cut</h2>
+      <p class="dim">A clip has a tick at the boundary: did it fall in the silence
+        or on the music? Set the edges, mark the song heard, or skip it if it is
+        damaged. The cut waits until nothing is left in doubt.</p>
+      <div class="row btns">
+        <button type="button" id="tp-clips" disabled>Build clips for the doubts</button>
+        <button type="button" id="tp-preview" class="ghost" disabled>Build the whole preview</button>
+        <button type="button" id="tp-cut" disabled>Cut</button>
+      </div>
+      <p class="warn" id="tp-cut-why" hidden></p>
       <p class="err" id="tp-err"></p>
     </div>
 
@@ -160,6 +170,16 @@
             <th>#</th><th>On the list</th><th>Proposed</th><th>Why</th><th>Change it</th>
           </tr></thead>
           <tbody id="tp-review"></tbody>
+        </table>
+      </div>
+      <div class="tp-scroll" id="tp-ear-wrap" hidden>
+        <h2>Ear check</h2>
+        <audio id="tp-whole" controls preload="none" hidden></audio>
+        <table class="songs ear">
+          <thead><tr>
+            <th>#</th><th>Song</th><th>Why</th><th>Start</th><th>End</th><th>Judge</th><th>Cut</th>
+          </tr></thead>
+          <tbody id="tp-ear"></tbody>
         </table>
       </div>
     </div>

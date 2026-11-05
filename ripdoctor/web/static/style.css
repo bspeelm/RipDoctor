@@ -139,6 +139,10 @@ table.songs tr.doubt td{background:rgba(232,196,104,.08)}
 table.songs .moves button{padding:.1rem .35rem}
 table.review td{white-space:normal;vertical-align:top}
 table.review .pick{display:flex;gap:.3rem;margin-bottom:.2rem}
+table.ear .why{white-space:normal;min-width:14rem}
+table.ear .edge input{min-width:5.5rem;width:5.5rem;display:block;margin-bottom:.2rem}
+table.ear audio{height:1.9rem;width:11rem;display:block}
+#tp-whole{width:100%;margin-bottom:.4rem}
 table.review select{min-width:0;flex:1;max-width:22rem}
 table.review input{min-width:0;flex:1}
 table.review input[data-field=track]{flex:none;width:3.5rem}

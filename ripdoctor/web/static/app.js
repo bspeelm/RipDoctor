@@ -1241,10 +1241,11 @@ function showTape(t) {
   $("#tp-inside").replaceChildren(...(has ? t.inside.map((g) =>
     el("li", null, `song ${g.song}: the silence at ${fmt(g.lo)} to ${fmt(g.hi)} stayed inside it`)) : []));
   $("#tp-inside-title").hidden = !has || !t.inside.length;
-  const doubts = has ? t.songs.filter((s) => s.reason) : [];
+  const doubts = has ? t.songs.filter((s) => s.reason && !s.heard && !s.skip) : [];
   $("#tp-reasons").replaceChildren(...doubts.map((s) => el("li", null, `song ${s.number}: ${s.reason}`)));
   $("#tp-reasons-title").hidden = !doubts.length;
   showReview(t);
+  showEar(t);
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1345,6 +1346,126 @@ function reviewRow(song) {
   return row;
 }
 
+const clipUrl = (song, edge) => `/api/tapes/${tape.id}/songs/${song.number}/clip/${edge}`;
+
+function showEar(t) {
+  const placed = !!t && t.songs.some((s) => s.start != null);
+  $("#tp-ear-wrap").hidden = !placed;
+  for (const id of ["#tp-clips", "#tp-preview", "#tp-cut"]) $(id).disabled = !t || !t.audio;
+  if (!placed) { $("#tp-ear").replaceChildren(); $("#tp-cut-why").hidden = true; return; }
+  const whole = $("#tp-whole");
+  whole.hidden = !t.preview;
+  $("#tp-preview").disabled = !t.audio || t.preview;
+  const previewUrl = `/api/tapes/${t.id}/preview`;
+  if (t.preview && whole.getAttribute("src") !== previewUrl) whole.src = previewUrl;
+  if (!t.preview) whole.removeAttribute("src");
+  $("#tp-cut").disabled = !t.audio || !!t.cut_refusal;
+  const skipped = t.songs.filter((s) => s.skip).map((s) => `song ${s.number} (${s.title})`);
+  const said = [
+    t.cut_refusal,
+    t.all_cut ? "every song is cut" : "",
+    skipped.length ? `not cut, by your choice: ${skipped.join(", ")}` : "",
+  ].filter(Boolean).join(". ");
+  $("#tp-cut-why").textContent = said;
+  $("#tp-cut-why").hidden = !said;
+  $("#tp-ear").replaceChildren(...t.ear.map((row) => earRow(row, t)));
+}
+
+function edgeCell(song, built, edge) {
+  const td = el("td", "edge");
+  const input = el("input");
+  input.type = "number"; input.step = "0.01"; input.min = "0";
+  input.dataset.edge = edge;
+  input.value = song[edge] ?? "";
+  input.setAttribute("aria-label", `song ${song.number} ${edge}, in seconds`);
+  td.append(input);
+  if (built) {
+    const clip = el("audio");
+    clip.controls = true; clip.preload = "none";
+    clip.src = `${clipUrl(song, edge)}?at=${song[edge]}`;
+    td.append(clip);
+  } else {
+    const make = el("button", "ghost tiny", "Build clip");
+    make.type = "button";
+    make.disabled = song[edge] == null;
+    make.onclick = () => buildClips({ song: song.number, edge });
+    td.append(make);
+  }
+  return td;
+}
+
+function whyCell(song, row, t) {
+  const td = el("td", "why");
+  const said = song.reason || (row.doubtful ? "the list and the audio disagree across this tape" : "");
+  if (said) td.append(el("div", row.doubtful ? "mark" : "dim", said));
+  for (const g of t.inside.filter((i) => i.song === song.number)) {
+    const seek = el("button", "ghost tiny", `hear ${fmt(g.lo)} to ${fmt(g.hi)}`);
+    seek.type = "button";
+    seek.title = t.preview ? "play the preview from just before this silence" : "build the preview first";
+    seek.disabled = !t.preview;
+    seek.onclick = () => {
+      const whole = $("#tp-whole");
+      whole.currentTime = Math.max(0, g.lo - 4);
+      whole.play();
+    };
+    td.append(seek);
+  }
+  return td;
+}
+
+function judgeButton(text, title, act) {
+  const b = el("button", "ghost tiny", text);
+  b.type = "button"; b.title = title; b.onclick = act;
+  return b;
+}
+
+function earRow(row, t) {
+  const song = t.songs.find((s) => s.number === row.number);
+  const tr = el("tr", row.doubtful ? "doubt" : null);
+  tr.append(el("td", "num", song.number));
+  const who = el("td");
+  who.append(el("div", null, song.title),
+             el("div", "dim", `${song.artist}, ${mss(song.length)}`
+               + `${song.delta != null ? `, ${signed(song.delta)}` : ""}`));
+  tr.append(who, whyCell(song, row, t),
+            edgeCell(song, row.clips.start, "start"), edgeCell(song, row.clips.end, "end"));
+
+  const judge = el("td", "moves");
+  judge.append(judgeButton("Set", "keep these two edges as yours", () => {
+    const edge = (name) => tr.querySelector(`input[data-edge=${name}]`).value;
+    const [start, end] = [Number(edge("start")), Number(edge("end"))];
+    settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/edges`, { start, end }));
+  }));
+  if (song.set_by !== "ear") {
+    judge.append(judgeButton(song.heard ? "Not heard" : "Heard", "the found edges are right, by ear",
+      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/heard`, { heard: !song.heard }))));
+  }
+  judge.append(judgeButton(song.skip ? "Keep" : "Skip", "a damaged song is not cut, and stays named",
+    () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/skip`, { skip: !song.skip }))));
+  judge.append(el("div", "dim", song.set_by === "ear" ? "set by ear" : song.heard ? "heard" : ""));
+  tr.append(judge);
+
+  const cut = el("td", row.cut === "failed" || row.cut === "out of date" ? "mark" : "dim", row.cut);
+  if (row.cut === "failed") cut.append(el("div", "why", song.cut.why));
+  tr.append(cut);
+  return tr;
+}
+
+function startTapeJob(path, body) {
+  $("#tp-err").textContent = "";
+  return (async () => {
+    try {
+      if (tapeEdited) await saveSongs();
+      await postJSON(path, body);
+      watchTape();
+    } catch (e) { $("#tp-err").textContent = e.message; }
+  })();
+}
+
+const buildClips = (body) => startTapeJob(`/api/tapes/${tape.id}/clips`, body);
+const buildPreview = () => startTapeJob(`/api/tapes/${tape.id}/preview`, {});
+const cutTape = () => startTapeJob(`/api/tapes/${tape.id}/cut`, {});
+
 function songInput(field, value, label) {
   const input = el("input");
   input.dataset.field = field;
@@ -1361,7 +1482,7 @@ function songCell(row, child) {
 }
 
 function songRow(song = {}) {
-  const row = el("tr", song.verdict === "doubt" ? "doubt" : null);
+  const row = el("tr", song.verdict === "doubt" && !song.heard && !song.skip ? "doubt" : null);
   row.append(el("td", "num"));
   songCell(row, songInput("title", song.title ?? "", "title"));
   songCell(row, songInput("artist", song.artist ?? "", "artist"));
@@ -1372,7 +1493,8 @@ function songRow(song = {}) {
   const placed = song.start != null && song.end != null;
   row.append(el("td", "mono", placed ? `${fmt(song.start)} to ${fmt(song.end)}` : ""));
   row.append(el("td", "mono", song.delta != null ? signed(song.delta) : ""));
-  row.append(el("td", "mark", song.set_by === "ear" ? "by ear" : song.verdict ?? ""));
+  row.append(el("td", "mark", song.skip ? "skip" : song.set_by === "ear" ? "by ear"
+    : song.heard ? "heard" : song.verdict ?? ""));
   const moves = el("td", "moves");
   const button = (text, title, act) => {
     const b = el("button", "ghost tiny", text);
@@ -1479,17 +1601,19 @@ async function matchTape(again) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
+const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut"];
+
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
   if (tapeWatching) return;
   tapeWatching = true;
   const { id, key } = tape;
-  for (const b of ["#tp-process", "#tp-match", "#tp-rematch"]) $(b).disabled = true;
+  for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
   try {
     for (;;) {
       const j = await api(`/api/job/${key}`);
       if (j.total) setBar(j.finished / j.total, "#tp-bar");
-      $("#tp-state").textContent = j.detail || "starting";
+      $("#tp-state").textContent = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
       if (j.done) {
         $("#tp-state").textContent = "";
         if (j.error) $("#tp-err").textContent = j.error;
@@ -1502,7 +1626,7 @@ async function watchTape() {
   } finally {
     tapeWatching = false;
     setBar(0, "#tp-bar");
-    for (const b of ["#tp-process", "#tp-match", "#tp-rematch"]) $(b).disabled = false;
+    for (const b of TAPE_JOB_BUTTONS) $(b).disabled = false;
   }
   await loadTapes(id);
 }
@@ -2582,6 +2706,9 @@ function wire() {
   $("#tp-process").onclick = processTape;
   $("#tp-match").onclick = () => matchTape(false);
   $("#tp-rematch").onclick = () => matchTape(true);
+  $("#tp-clips").onclick = () => buildClips({});
+  $("#tp-preview").onclick = buildPreview;
+  $("#tp-cut").onclick = cutTape;
   $("#tp-remove").onclick = removeTape;
   $("#pc-pick").onclick = () => $("#pc-file").click();
   $("#pc-file").onchange = (e) => {

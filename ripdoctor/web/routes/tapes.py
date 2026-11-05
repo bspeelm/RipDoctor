@@ -462,10 +462,12 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    @app.route("GET", r"/api/tapes/([^/]+)/songs/(\d+)/clip/(start|end)")
+    @app.route("GET", r"/api/tapes/([^/]+)/songs/(\d+)/clip/([^/]+)")
     def clip(r: H.Request) -> H.Response:
-        tape = held(r)
-        at = TP.edge_at(song_of(tape, r), r.params[2])
+        tape, edge = held(r), r.params[2]
+        if edge not in (TP.START, TP.END):
+            raise H.HttpError(404, "a song has a start and an end")
+        at = TP.edge_at(song_of(tape, r), edge)
         where = None if at is None else T.clip_file(layout, tape.id, TP.clip_name(at))
         if where is None or not where.is_file():
             raise H.HttpError(404, "that clip has not been built")
