@@ -14,6 +14,16 @@ from typing import Any
 
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import DB_MIN, Envelope
+from ripdoctor.core.match import (
+    CATALOGUE,
+    FAILED,
+    MATCHED,
+    NONE,
+    PERSON,
+    Choice,
+    Proposal,
+    Wanted,
+)
 from ripdoctor.core.naming import MAX_COMPONENT, Unsafe, slug
 
 LENGTH_TOLERANCE = 3.0
@@ -36,6 +46,10 @@ class BadList(ValueError):
 
 class EarSet(ValueError):
     """The change would discard a boundary a person set."""
+
+
+class ChoiceSet(EarSet):
+    """The change would discard a release a person chose."""
 
 
 def _clean(text: object) -> str:
@@ -73,6 +87,8 @@ class Song:
     filing: str = PENDING
     path: str = ""
     reason: str = ""
+    proposal: Proposal | None = None
+    settled_by: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,11 +105,14 @@ class Song:
             "filing": self.filing,
             "path": self.path,
             "reason": self.reason,
+            "proposal": self.proposal.to_dict() if self.proposal else None,
+            "settled_by": self.settled_by,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Song:
-        return cls(**data)
+        found = data.get("proposal")
+        return cls(**{**data, "proposal": Proposal.from_dict(found) if found else None})
 
 
 def _song(where: str, number: int, fields: dict[str, Any], length: object) -> Song:
@@ -529,6 +548,32 @@ def named(tape_key: str, name: str, now: float) -> Tape:
     return Tape(id=tape_key, name=cleaned, created=now)
 
 
+def _same_song(song: Song) -> tuple[str, str, str, int]:
+    return song.title, song.artist, song.album, round(song.length)
+
+
+def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
+    """A song the new list leaves as it was keeps its match, wherever it moved."""
+    new = {_same_song(s) for s in songs}
+    lost = [
+        s.title
+        for s in tape.songs
+        if s.settled_by == PERSON and _same_song(s) not in new
+    ]
+    if lost:
+        raise ChoiceSet(
+            f"you chose the release for {', '.join(lost)}, and this list changes or "
+            "drops them - keep those songs as they were"
+        )
+    old = {_same_song(s): s for s in tape.songs}
+    return tuple(
+        replace(s, proposal=was.proposal, settled_by=was.settled_by)
+        if (was := old.get(_same_song(s)))
+        else s
+        for s in songs
+    )
+
+
 def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
     """Take a new list. What was found for the old one no longer means anything."""
     if tape.has_ear:
@@ -537,7 +582,7 @@ def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
         )
     return replace(
         tape,
-        songs=songs,
+        songs=_keeping_matches(tape, songs),
         gaps=(),
         inside=(),
         mismatch="",
@@ -670,3 +715,52 @@ def place(tape: Tape, music: Music) -> Tape:
         inside=inside,
         mismatch=_mismatch(out, fits, len(music.gaps) + 1, inside, groupings),
     )
+
+
+def wanted(song: Song) -> Wanted:
+    return Wanted(song.title, song.artist, song.album, song.length)
+
+
+def all_settled(tape: Tape) -> bool:
+    return bool(tape.songs) and all(s.settled_by for s in tape.songs)
+
+
+def to_match(tape: Tape, *, again: bool = False) -> tuple[Song, ...]:
+    """What a run has to ask about. A first run or a resume leaves a doubt already
+    stated alone; `again` asks afresh about everything not settled."""
+    return tuple(
+        s
+        for s in tape.songs
+        if not s.settled_by
+        and (again or s.proposal is None or s.proposal.status == FAILED)
+    )
+
+
+def with_proposals(tape: Tape, found: dict[int, Proposal]) -> Tape:
+    """The catalogue's answers. A person's choice is not the catalogue's to change."""
+
+    def answered(song: Song) -> Song:
+        made = found.get(song.number)
+        if made is None or song.settled_by == PERSON:
+            return song
+        by = CATALOGUE if made.status == MATCHED else ""
+        return replace(song, proposal=made, settled_by=by)
+
+    return replace(tape, songs=tuple(answered(s) for s in tape.songs))
+
+
+def settle(tape: Tape, number: int, choice: Choice | None) -> Tape:
+    """A person's answer for one song. No choice means file it from the list."""
+
+    def chosen(song: Song) -> Song:
+        if song.number != number:
+            return song
+        was = song.proposal or Proposal(NONE)
+        status = MATCHED if choice else NONE
+        return replace(
+            song,
+            proposal=replace(was, status=status, reason="", choice=choice),
+            settled_by=PERSON,
+        )
+
+    return replace(tape, songs=tuple(chosen(s) for s in tape.songs))
