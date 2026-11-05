@@ -585,6 +585,14 @@ def test_a_proposal_is_on_disk_and_reads_back(service) -> None:  # type: ignore[
     assert saved.songs[0].proposal.choice.release == "rel-a"
 
 
+def test_the_album_flows_route_still_reads_an_empty_object_as_no_releases(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    catalogue.malformed = {'release:"A Record"': b"{}"}
+    got = get(build(service), "/api/mb/search?artist=A+Band&album=A+Record", service)
+    assert (got.status, got.json()["releases"]) == (200, [])
+
+
 def test_the_album_flows_search_is_unchanged_and_unpaced(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     def refuse(_seconds: float) -> None:
         raise AssertionError("the album flow waited on the tape's pace")

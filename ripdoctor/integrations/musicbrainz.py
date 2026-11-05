@@ -12,7 +12,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -54,10 +55,6 @@ BACKOFF = 1.5
 
 class LookupFailed(Exception):
     """The catalogue could not be reached, or said nothing useful."""
-
-
-# What reading an answer of the wrong shape raises.
-_MALFORMED = (AttributeError, IndexError, KeyError, TypeError, ValueError)
 
 
 class Fetcher(Protocol):
@@ -193,13 +190,11 @@ def _request(
             last = str(e)
         else:
             try:
-                parsed = json.loads(raw)
+                parsed: dict[str, Any] = json.loads(raw)
             except (ValueError, UnicodeDecodeError) as e:
                 raise LookupFailed(
                     "catalogue returned something that is not JSON"
                 ) from e
-            if not isinstance(parsed, dict):
-                raise LookupFailed("catalogue returned a malformed answer")
             return parsed
         if attempt < retries - 1:
             sleep(BACKOFF * (2**attempt))
@@ -261,18 +256,18 @@ def search(
     fetcher: Fetcher, artist: str, album: str, limit: int = 10, **kw: Any
 ) -> list[Release]:
     """Candidate releases, most useful first."""
+    data = _search_reply(fetcher, artist, album, limit, **kw)
+    return [_found(r, artist) for r in data.get("releases", [])]
+
+
+def _search_reply(
+    fetcher: Fetcher, artist: str, album: str, limit: int, **kw: Any
+) -> dict[str, Any]:
     terms = f"artist:{_phrase(artist)} AND release:{_phrase(album)}"
     query = urllib.parse.quote(terms, safe="")
-    data = _request(
+    return _request(
         fetcher, f"{BASE}/release?query={query}&limit={limit}&fmt=json", **kw
     )
-    found = data.get("releases")
-    if not isinstance(found, list):
-        raise LookupFailed("catalogue answered a search with no list of releases")
-    try:
-        return [_found(r, artist) for r in found]
-    except _MALFORMED as e:
-        raise LookupFailed("catalogue returned a malformed release") from e
 
 
 def _found(r: dict[str, Any], artist: str) -> Release:
@@ -332,29 +327,47 @@ def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
         f"{BASE}/release/{release.mbid}?inc=recordings+artist-credits&fmt=json",
         **kw,
     )
-    try:
-        release.tracks = _tracks(data.get("media") or [])
-        if not release.format:
-            release.format = _format_of(data)
-        if not release.title:
-            release.title = str(data.get("title", ""))
-        if not release.date:
-            release.date = str(data.get("date", ""))
-        if not release.artist:
-            credit = data.get("artist-credit") or [{}]
-            release.artist = str(credit[0].get("name", ""))
-        release.status = release.status or str(data.get("status", ""))
-        release.credit = release.credit or _credit(data)
-    except _MALFORMED as e:
-        raise LookupFailed("catalogue returned a malformed release") from e
+    release.tracks = _tracks(data.get("media") or [])
+    if not release.format:
+        release.format = _format_of(data)
+    if not release.title:
+        release.title = str(data.get("title", ""))
+    if not release.date:
+        release.date = str(data.get("date", ""))
+    if not release.artist:
+        credit = data.get("artist-credit") or [{}]
+        release.artist = str(credit[0].get("name", ""))
+    release.status = release.status or str(data.get("status", ""))
+    release.credit = release.credit or _credit(data)
     return release
+
+
+@contextmanager
+def _well_formed() -> Iterator[None]:
+    """For a tape's lookups, where a song files on the answer with nobody looking:
+    an answer of the wrong shape is a failure to retry, and never "no release"."""
+    try:
+        yield
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as e:
+        raise LookupFailed("catalogue returned a malformed answer") from e
 
 
 def release_by_id(fetcher: Fetcher, mbid: str, **kw: Any) -> Release:
     """A release somebody named. A search would have answered with its group."""
-    release = fetch_tracks(fetcher, Release(mbid, "", "", "", "", []), **kw)
-    release.group = release_group(fetcher, mbid, **kw)
+    with _well_formed():
+        release = fetch_tracks(fetcher, Release(mbid, "", "", "", "", []), **kw)
+        release.group = release_group(fetcher, mbid, **kw)
     return release
+
+
+def _searched(fetcher: Fetcher, artist: str, album: str, **kw: Any) -> list[Release]:
+    """A search whose reply must hold its list of releases, empty or not."""
+    with _well_formed():
+        data = _search_reply(fetcher, artist, album, WIDE, **kw)
+        found = data["releases"]
+        if not isinstance(found, list):
+            raise TypeError("releases is not a list")
+        return [_found(r, artist) for r in found]
 
 
 def _worth_probing(found: list[Release], album: str, artist: str) -> list[Release]:
@@ -398,10 +411,11 @@ def editions(
     if not album:
         return []
     for artist in artists:
-        found = search(fetcher, artist, album, limit=WIDE, **kw)
+        found = _searched(fetcher, artist, album, **kw)
         if found:
-            probed = _worth_probing(found, album, artists[0])
-            return [fetch_tracks(fetcher, r, **kw) for r in probed]
+            with _well_formed():
+                probed = _worth_probing(found, album, artists[0])
+                return [fetch_tracks(fetcher, r, **kw) for r in probed]
     return []
 
 
