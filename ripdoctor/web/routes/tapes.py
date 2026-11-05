@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio import ffprobe, split
@@ -84,6 +85,12 @@ def add(app: App, service: Service) -> None:
         except FileNotFoundError as e:
             raise H.HttpError(404, "no such tape") from e
 
+    def listed(r: H.Request) -> TP.Tape:
+        tape = held(r)
+        if not tape.songs:
+            raise H.HttpError(409, "this tape has no song list yet - add one first")
+        return tape
+
     def settled(
         change: Callable[[H.Request, TP.Tape], H.Response],
     ) -> Callable[[H.Request], H.Response]:
@@ -126,6 +133,7 @@ def add(app: App, service: Service) -> None:
         key = T.key_of(tape.id)
         upload = IN.state(layout, key)
         job = service.jobs.status(key)
+        cuts = T.cuts_on_disk(layout, tape.id)
         return {
             **tape.to_dict(),
             "audio": T.audio_file(layout, tape.id).is_file(),
@@ -137,19 +145,21 @@ def add(app: App, service: Service) -> None:
             "preview": T.preview_file(layout, tape.id).is_file(),
             "ear": ear_rows(tape),
             "cut_refusal": TP.cut_refusal(tape),
-            "all_cut": TP.all_cut(tape, T.cuts_on_disk(layout, tape.id)),
-            "file_refusal": TF.file_refusal(tape, T.cuts_on_disk(layout, tape.id)),
+            "all_cut": TP.all_cut(tape, cuts),
+            "file_refusal": TF.file_refusal(tape, cuts),
             "all_filed": TF.all_filed(tape),
             "filing": TF.outcomes(tape),
         }
 
-    def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
-        try:
-            changed = TP.relist(tape, songs)
-        except TP.EarSet as e:
-            raise H.HttpError(409, str(e)) from e
+    def kept(changed: TP.Tape) -> H.Response:
         T.save(layout, changed)
         return H.ok(view(changed))
+
+    def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
+        try:
+            return kept(TP.relist(tape, songs))
+        except TP.EarSet as e:
+            raise H.HttpError(409, str(e)) from e
 
     @app.route("GET", "/api/tapes")
     def tapes(_r: H.Request) -> H.Response:
@@ -260,11 +270,8 @@ def add(app: App, service: Service) -> None:
 
     def ready(r: H.Request) -> tuple[TP.Tape, IN.Incoming | None]:
         """The tape and what has arrived for it, or why it cannot be processed."""
-        tape = held(r)
-        key = T.key_of(tape.id)
-        if not tape.songs:
-            raise H.HttpError(409, "this tape has no song list yet - add one first")
-        arrived = IN.state(layout, key)
+        tape = listed(r)
+        arrived = IN.state(layout, T.key_of(tape.id))
         if not T.audio_file(layout, tape.id).is_file():
             if arrived is None:
                 raise H.HttpError(409, "this tape has no audio yet - upload it first")
@@ -332,9 +339,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/tapes/([^/]+)/match")
     def match(r: H.Request) -> H.Response:
         """Ask about every song with no answer, or with `again` every one unsettled."""
-        tape = held(r)
-        if not tape.songs:
-            raise H.HttpError(409, "this tape has no song list yet - add one first")
+        tape = listed(r)
         again = bool(r.json().get("again"))
 
         def work(job: Job) -> dict[str, Any]:
@@ -357,18 +362,14 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    def song_of(tape: TP.Tape, r: H.Request) -> TP.Song:
+    def song_named(tape: TP.Tape, number: object) -> TP.Song:
         for song in tape.songs:
-            if str(song.number) == r.params[1]:
+            if str(song.number) == str(number):
                 return song
         raise H.HttpError(404, f"{tape.name} has no such song")
 
-    def settled_by_person(
-        tape: TP.Tape, song: TP.Song, choice: TM.Choice | None
-    ) -> H.Response:
-        changed = TP.settle(tape, song.number, choice)
-        T.save(layout, changed)
-        return H.ok(view(changed))
+    def song_of(tape: TP.Tape, r: H.Request) -> TP.Song:
+        return song_named(tape, r.params[1])
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/release")
     @settled
@@ -381,7 +382,7 @@ def add(app: App, service: Service) -> None:
         offered = song.proposal.candidates if song.proposal else ()
         for candidate in offered:
             if candidate.release == given and candidate.number and position is None:
-                return settled_by_person(tape, song, candidate)
+                return kept(TP.settle(tape, song.number, candidate))
         try:
             found = MB.release_by_id(
                 MB.Paced(service.fetcher, service.pace),
@@ -395,13 +396,18 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, str(e)) from e
         except MB.LookupFailed as e:
             raise H.HttpError(503, str(e)) from e
-        return settled_by_person(tape, song, choice)
+        return kept(TP.settle(tape, song.number, choice))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/from-list")
     @settled
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
-        return settled_by_person(tape, song_of(tape, r), None)
+        return kept(TP.settle(tape, song_of(tape, r).number, None))
+
+    def served(where: Path | None, what: str) -> H.Response:
+        if where is None or not where.is_file():
+            raise H.HttpError(404, f"{what} has not been built")
+        return H.file_at(str(where))
 
     def with_audio(r: H.Request) -> TP.Tape:
         tape = held(r)
@@ -411,11 +417,9 @@ def add(app: App, service: Service) -> None:
 
     def judged(change: Callable[[], TP.Tape]) -> H.Response:
         try:
-            changed = change()
+            return kept(change())
         except TP.BadEdge as e:
             raise H.HttpError(409, str(e)) from e
-        T.save(layout, changed)
-        return H.ok(view(changed))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/edges")
     @settled
@@ -445,12 +449,10 @@ def add(app: App, service: Service) -> None:
         edge = body.get("edge")
         if edge not in (TP.START, TP.END):
             raise H.HttpError(400, f"edge has to be {TP.START} or {TP.END}")
-        for song in tape.songs:
-            if str(song.number) == str(body["song"]):
-                if TP.edge_at(song, edge) is None:
-                    raise H.HttpError(409, f"song {song.number} has no boundaries yet")
-                return ((song, edge),)
-        raise H.HttpError(404, f"{tape.name} has no such song")
+        song = song_named(tape, body["song"])
+        if TP.edge_at(song, edge) is None:
+            raise H.HttpError(409, f"song {song.number} has no boundaries yet")
+        return ((song, edge),)
 
     @app.route("POST", "/api/tapes/([^/]+)/clips")
     def clips(r: H.Request) -> H.Response:
@@ -479,9 +481,7 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(404, "a song has a start and an end")
         at = TP.edge_at(song_of(tape, r), edge)
         where = None if at is None else T.clip_file(layout, tape.id, TP.clip_name(at))
-        if where is None or not where.is_file():
-            raise H.HttpError(404, "that clip has not been built")
-        return H.file_at(str(where))
+        return served(where, "that clip")
 
     @app.route("POST", "/api/tapes/([^/]+)/preview")
     def preview(r: H.Request) -> H.Response:
@@ -499,10 +499,7 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/tapes/([^/]+)/preview")
     def preview_audio(r: H.Request) -> H.Response:
-        where = T.preview_file(layout, held(r).id)
-        if not where.is_file():
-            raise H.HttpError(404, "the preview has not been built")
-        return H.file_at(str(where))
+        return served(T.preview_file(layout, held(r).id), "the preview")
 
     @app.route("POST", "/api/tapes/([^/]+)/cut")
     def cut(r: H.Request) -> H.Response:
