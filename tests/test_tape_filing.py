@@ -125,6 +125,29 @@ def test_owned_by_cleaned_title_artist_and_length() -> None:
     assert "title, artist and length" in said.note
 
 
+def a_pinned_song() -> TP.Song:
+    return a_song(1, "One", proposal=from_a_release("r1", 1, "One"))
+
+
+def test_a_row_with_another_recording_id_never_owns_a_pinned_song() -> None:
+    row = a_row("One", recording="rec-Live", album="Live Somewhere")
+    assert F.precheck(a_pinned_song(), [], [row]).action == F.FILE
+
+
+def test_a_row_with_no_recording_id_is_for_a_person_to_confirm_on_a_pinned_song() -> (
+    None
+):
+    said = F.precheck(a_pinned_song(), [], [a_row("One")])
+    assert said.action == F.FAILED
+    assert "/lib/one.flac" in said.note and "rec-One" in said.note
+    assert "listen" in said.note and "skip" in said.note
+
+
+def test_a_song_with_no_id_of_its_own_is_owned_whatever_id_the_row_has() -> None:
+    said = F.precheck(a_song(1, "One"), [], [a_row("One", recording="rec-Any")])
+    assert said.action == F.ALREADY
+
+
 def test_a_live_album_s_same_title_is_refused_by_its_length() -> None:
     said = F.precheck(a_song(1, "One"), [], [a_row("One", 260.0, album="Live")])
     assert said.action == F.FILE

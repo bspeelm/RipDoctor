@@ -158,13 +158,28 @@ def _unusable(row: Row) -> Verdict:
     )
 
 
+def same_length(song: Song, row: Row) -> bool:
+    return row.length is not None and abs(row.length - song.length) <= LENGTH_TOLERANCE
+
+
+def _unconfirmed(row: Row, recording: str) -> Verdict:
+    return Verdict(
+        FAILED,
+        note=f"{row.path} has this title, artist and length and no recording id - "
+        f"listen to it, then set its mb_trackid with beet modify, to {recording} if "
+        "it is this song, and file again, or skip this song",
+    )
+
+
 def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdict:
     """Whether the library has this song. Merging a copy of an owned one files it
     as another track, so this answers before every import.
 
-    A recording id is enough. Without one a cleaned title also hits a live album,
-    so the length must agree, and a row with no length to compare is said aloud.
-    Only a file that is there and in the library counts as owning it.
+    A recording id is enough, and a song that has one is owned by nothing else: a
+    row of another id is another recording, and a row of none is for a person to
+    confirm. With no id to go by, a cleaned title also hits a live album, so the
+    length must agree, and a row with no length to compare is said aloud. Only a
+    file that is there and in the library counts as owning it.
     """
     for row in by_id:
         if row.present and row.home:
@@ -172,14 +187,13 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
     if by_id:
         return _unusable(by_id[0])
 
-    named = [r for r in by_name if alike(song, r)]
-    agreeing = [
-        r
-        for r in named
-        if r.length is not None and abs(r.length - song.length) <= LENGTH_TOLERANCE
-    ]
+    recording = recording_of(song)
+    named = [r for r in by_name if alike(song, r) and not (recording and r.recording)]
+    agreeing = [r for r in named if same_length(song, r)]
     for row in agreeing:
         if row.present and row.home:
+            if recording:
+                return _unconfirmed(row, recording)
             return Verdict(ALREADY, row.path, "matched by title, artist and length")
     if agreeing:
         return _unusable(agreeing[0])

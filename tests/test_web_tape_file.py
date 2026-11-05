@@ -362,16 +362,43 @@ def test_a_song_owned_by_recording_id_is_not_imported_and_says_where(
     assert (one.filing, one.path) == (F.ALREADY, str(where))
 
 
-def test_a_song_owned_by_title_and_length_with_no_id_is_not_imported(
+def test_a_row_with_no_id_is_shown_for_a_person_to_confirm_and_nothing_is_imported(
     service: Service,
 ) -> None:
     app = build(service)
     tape = pinned(app, service)
     where = beet_of(service).owns("One", length="0:06")
-    file_it(app, tape, service)
+    assert file_it(app, tape, service)["error"]
     assert ["01 One.flac"] not in [n for _, n in beet_of(service).imports]
     one = songs(service, tape)[0]
+    assert (one.filing, one.path) == (F.FAILED, "")
+    assert str(where) in one.filing_note and "rec-One" in one.filing_note
+
+
+def test_a_from_list_song_owned_by_title_and_length_is_not_imported(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    where = beet_of(service).owns("One", length="0:06", mb_trackid="any")
+    assert not file_it(app, tape, service)["error"]
+    assert [n for _, n in beet_of(service).imports] == [["02 Two.flac"]]
+    one = songs(service, tape)[0]
     assert (one.filing, one.path) == (F.ALREADY, str(where))
+
+
+def test_a_live_row_of_another_recording_is_not_owned_and_the_song_is_imported(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    live = beet_of(service).owns(
+        "One", album="Live Somewhere", mb_trackid="rec-of-the-live-one"
+    )
+    assert not file_it(app, tape, service)["error"]
+    assert imports_of(service)[0][-2] == "rel-1"
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED and one.path != str(live)
 
 
 def test_the_same_title_on_a_live_album_is_refused_by_length_and_the_song_files(
