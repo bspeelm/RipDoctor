@@ -2130,6 +2130,11 @@ playlist has to resolve against the library, so that is what gets asked: by
 recording id, then by title, artist and length, because not every row has an id.
 An owned song is not filed again, and the playlist points at the existing copy.
 
+**The governing rule.** A song counts as in the library only with evidence it is
+this song. The same title, artist and album is not evidence. Nothing is cleared
+until every entry is proved, and in doubt a song is named, not guessed, and not
+cleared.
+
 **The match rule.** The list supplies album and length. `matched` files a song
 with nobody looking, so it means all of: the same title, artist and album, on an
 official edition, with a length within 3 s. The nearest length wins among those,
@@ -2160,6 +2165,10 @@ ADR-060 makes it delete the filed audio. Each result is recorded as it arrives,
 so a retry picks up only what is unfinished. Songs on disk use their own numeric
 order, since a two-digit number under a text sort puts song 100 before song 11.
 
+A configured `duplicate_action` answers the question before stdin is read, and
+`remove` deletes the filed album, on beets 2.1.0 and 2.14.0 alike, so the override
+sets it to `ask` for both flows.
+
 Filing with lookup off was rejected: when tried, it made two album rows for
 one album. The check for an owned song is required, not an optimisation: one
 experiment reported a merged copy of an owned song silently filed as another
@@ -2177,7 +2186,7 @@ playlist behind, so removing a file does not remove a playlist.
 replacing an album changes its paths. An entry that no longer resolves is named,
 never dropped.
 
-**The raw file is archived only after every entry resolves**, the same order as
+**The raw file is archived only after every entry resolves and its filing finished**, the same order as
 ADR-062: nothing is cleared until the record is proved to be somewhere else.
 
 **Long files need less measuring.** Restricting astats to the measures actually
@@ -2231,10 +2240,16 @@ A cut that worked clears the song's record before replacing the file and writes 
 new one after, so a crash at any point leaves a song that needs cutting.
 
 **The filing job.** It is refused until the tape is cut and every song not skipped
-is settled. A song owned by recording id, or by cleaned title, artist and length
-within 3 s, is not imported: a row with no length is a failure that names the row,
-not an assumption, and a row whose file is gone is a stale-row failure. A library
-that could not be asked is a failure too, never a miss. Filing works on a copy of
+is settled. A song with a recording id is owned only by a row with that id: a row of
+another id is another recording, and a row of none that agrees on title, artist and
+length waits for a person to set its id or skip the song. A song with no id is owned
+by cleaned title, artist and length within 3 s. Either way it is not imported. A row
+with no length is a failure that names the row, not an assumption, and a row whose
+file is gone is a stale-row failure. A library that could not be asked is a failure
+too, never a miss. Names go to beets as plain substrings, leaving off a leading
+`=`, `:` or `~` and a trailing comma, which beets reads as syntax and cannot escape,
+and what comes back is judged in Python. A `path:` query is exact for any other
+character; a path ending in a comma would match every row, so it is never sent. Filing works on a copy of
 the cut, not a hard link, since tags written through a link could change the cut
 that stands as proof, and a copy stays until the library has proved its song. Each
 attempt uses a new directory, because beets asks about resuming a path it was
@@ -2243,6 +2258,8 @@ interrupted on. That was not tried against real beets.
 The library decides the outcome. A song is `already` or `filed` only when beets' row
 names a path that exists, is under the library's root and is outside the tape's own
 directories, in the pre-check and the read-back alike, whatever beets exited with.
+A row answers for one song: the same title twice is told apart by track number and
+then by length, and rows nothing tells apart are named.
 beets writes its row against the path it was given before it moves the file, so a
 row on this tape's filing copies is an import that never finished. It is forgotten
 by its exact path, with `beet remove` and no `-d`, before each run and after each
@@ -2259,11 +2276,16 @@ An import can leave things out of a file it filed. A song merged into an album t
 has art gets none, since beets embeds only as it fetches, so it is embedded with
 `embedart -y -f`, whose `-f` takes one file where the plain form rewrites the album.
 A lookup-off import computes a gain for the row and never writes it, so a file with
-no gain gets `replaygain -f`, scoped to that file. Either failing is a note on a song
-that stays filed. The modes are restored after both, as ADR-056 requires. The
-document says which songs were handed to beets, so one found in the library after a
-restart is finished the same way, and a song the tape merely already owned is left
-alone.
+no gain gets `replaygain -f`, scoped to that file. Any failure there, a timeout
+included, is a note on a song that stays filed. The modes are restored after both, as
+ADR-056 requires. The document says which songs were handed to beets, so one found in
+the library after a restart is finished the same way, and a song the tape merely
+already owned has only its modes put right.
+
+A read-back that cannot answer records `unknown`. The mark that a song went to beets
+stays until the library really answers, and while it is set a retry reads back before
+anything else, accepting a row with the recording id or, with none, a length that
+agrees with the list or with the cut. Only an answer of no row lets it import again.
 
 A crash on a relative path says what to do rather than leaving a traceback, and a
 crash on any other missing path names it. A from-list song is numbered by its place
@@ -2288,15 +2310,20 @@ on what is unresolved leaves open. What is known about a playlist sits in
 the tape's own work. Its filename is a slug of the name and a digest of the name,
 id and creation time, so names that clean up alike, two tapes of one name, and a
 new tape taking a removed tape's id never share a file, and a file whose header
-names another playlist is refused. A song with no recording id resolves by title,
-artist and album, not length. Several candidates narrow to the chosen release, then
-to the path filing proved, and are otherwise named; a song owned by name is also
-found at that path whatever id its row has. A rebuild updates a filed song's
-recorded path. Anything left out makes the playlist incomplete, but only a song not
-skipped shuts the gate. With nothing resolving the file is left alone, because that
-is what a library off its mount looks like, and a failure to ask beets is `unknown`
-and leaves it too. A rebuild holds each tape in turn, so a busy tape is named in the
-import's notes and not rebuilt. The uncut file goes to `archive/_tape-<id>/`, read
+names another playlist is refused. A song resolves first at its recorded path, if
+the file is there and its row still has that id or identity; then by recording id;
+then, with no id and its filing finished, by title, artist and length, on its own
+album unless it was found already owned. A row answers for one song. Several
+candidates narrow to the chosen release, then the track number, then the path filing
+proved, and are otherwise named. A rebuild updates a filed song's recorded path.
+Anything left out makes the playlist incomplete, but only a song not skipped shuts
+the gate, which also needs every such song's filing finished. A tape with every song
+skipped loses its lines and is refused, since nothing was proved. With nothing
+resolving otherwise the file is left alone, because that is what a library off its
+mount looks like, and a failure to ask beets is `unknown` and leaves it too. A
+rebuild holds each tape in turn, so a busy tape is named in the import's notes and not
+rebuilt. Inside an import, each query has 20 s and all of them 60 s, and the first
+timeout stops them, naming the tapes not asked about. The uncut file goes to `archive/_tape-<id>/`, read
 back against the source's decoded length before it takes its name, and an earlier
 copy stays in `_superseded`. Clearing takes the uncut file and the cuts of songs not
 skipped, and any other cut moves to `superseded`. Clips, the preview and the
