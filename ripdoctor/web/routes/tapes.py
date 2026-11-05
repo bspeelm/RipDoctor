@@ -1,4 +1,4 @@
-"""A tape's audio and song list, up to boundaries found. ADR-063."""
+"""A tape's audio, song list, boundaries and the ear that checks them. ADR-063."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.routes.records import slug_of
 from ripdoctor.web.service import Service
+from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Busy, Job
 
 CHUNK = 8 * 1024 * 1024
@@ -62,6 +63,16 @@ def _position(body: dict[str, Any]) -> int | None:
         raise H.HttpError(400, f"track {value!r} is not a whole number") from e
 
 
+def _seconds(body: dict[str, Any], edge: str) -> float:
+    value = body.get(edge)
+    try:
+        if isinstance(value, bool):
+            raise TypeError
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError) as e:
+        raise H.HttpError(400, f"{edge} has to be a number of seconds") from e
+
+
 def add(app: App, service: Service) -> None:
     layout = service.layout
 
@@ -85,6 +96,23 @@ def add(app: App, service: Service) -> None:
 
         return holding
 
+    def ear_rows(tape: TP.Tape) -> list[dict[str, Any]]:
+        """The songs in the order to listen to them, with what is built for each."""
+        built = T.clips_on_disk(layout, tape.id)
+
+        def clip_ready(song: TP.Song, edge: str) -> bool:
+            at = TP.edge_at(song, edge)
+            return at is not None and TP.clip_name(at) in built
+
+        return [
+            {
+                "number": s.number,
+                "doubtful": TP.doubtful(tape, s),
+                "clips": {e: clip_ready(s, e) for e in (TP.START, TP.END)},
+            }
+            for s in TP.ear_order(tape)
+        ]
+
     def view(tape: TP.Tape) -> dict[str, Any]:
         key = T.key_of(tape.id)
         upload = IN.state(layout, key)
@@ -97,6 +125,8 @@ def add(app: App, service: Service) -> None:
             "job": None if job is None else job.as_dict(),
             "chunk": CHUNK,
             "all_settled": TP.all_settled(tape),
+            "preview": T.preview_file(layout, tape.id).is_file(),
+            "ear": ear_rows(tape),
         }
 
     def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
@@ -358,6 +388,105 @@ def add(app: App, service: Service) -> None:
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
         return settled_by_person(tape, song_of(tape, r), None)
+
+    def with_audio(r: H.Request) -> TP.Tape:
+        tape = held(r)
+        if not T.audio_file(layout, tape.id).is_file():
+            raise H.HttpError(409, "this tape has no audio yet - upload it first")
+        return tape
+
+    def judged(change: Callable[[], TP.Tape]) -> H.Response:
+        try:
+            changed = change()
+        except TP.BadEdge as e:
+            raise H.HttpError(409, str(e)) from e
+        T.save(layout, changed)
+        return H.ok(view(changed))
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/edges")
+    @settled
+    def edges(r: H.Request, tape: TP.Tape) -> H.Response:
+        song, body = song_of(tape, r), r.json()
+        start, end = _seconds(body, TP.START), _seconds(body, TP.END)
+        return judged(lambda: TP.set_edges(tape, song.number, start, end))
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
+    @settled
+    def heard(r: H.Request, tape: TP.Tape) -> H.Response:
+        song, now_heard = song_of(tape, r), bool(r.json().get("heard", True))
+        return judged(lambda: TP.hear(tape, song.number, now_heard))
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/skip")
+    @settled
+    def skip(r: H.Request, tape: TP.Tape) -> H.Response:
+        song, skipped = song_of(tape, r), bool(r.json().get("skip", True))
+        return judged(lambda: TP.skip(tape, song.number, skipped))
+
+    def boundaries_asked(
+        tape: TP.Tape, body: dict[str, Any]
+    ) -> tuple[tuple[TP.Song, str], ...]:
+        """The flagged ones, or the one boundary named by `song` and `edge`."""
+        if body.get("song") is None:
+            return TP.flagged(tape)
+        edge = body.get("edge")
+        if edge not in (TP.START, TP.END):
+            raise H.HttpError(400, f"edge has to be {TP.START} or {TP.END}")
+        for song in tape.songs:
+            if str(song.number) == str(body["song"]):
+                if TP.edge_at(song, edge) is None:
+                    raise H.HttpError(409, f"song {song.number} has no boundaries yet")
+                return ((song, edge),)
+        raise H.HttpError(404, f"{tape.name} has no such song")
+
+    @app.route("POST", "/api/tapes/([^/]+)/clips")
+    def clips(r: H.Request) -> H.Response:
+        """Clips with a tick at the instant being judged, and only those asked for."""
+        tape, body = with_audio(r), r.json()
+        if not boundaries_asked(tape, body):
+            raise H.HttpError(
+                409, "no boundary is flagged - ask for the one you want to hear"
+            )
+
+        def work(job: Job) -> dict[str, Any]:
+            current = T.read(layout, tape.id)
+            wanted = boundaries_asked(current, body)
+            return TJ.clips(service.runner, layout, current, wanted, job)
+
+        try:
+            job = service.jobs.start(T.key_of(tape.id), "clips", work)
+            return H.ok(job.as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    @app.route("GET", r"/api/tapes/([^/]+)/songs/(\d+)/clip/(start|end)")
+    def clip(r: H.Request) -> H.Response:
+        tape = held(r)
+        at = TP.edge_at(song_of(tape, r), r.params[2])
+        where = None if at is None else T.clip_file(layout, tape.id, TP.clip_name(at))
+        if where is None or not where.is_file():
+            raise H.HttpError(404, "that clip has not been built")
+        return H.file_at(str(where))
+
+    @app.route("POST", "/api/tapes/([^/]+)/preview")
+    def preview(r: H.Request) -> H.Response:
+        """Minutes of work on a long tape, so it is only ever asked for."""
+        tape = with_audio(r)
+
+        def work(job: Job) -> dict[str, Any]:
+            return TJ.preview(service.runner, layout, tape, job)
+
+        try:
+            job = service.jobs.start(T.key_of(tape.id), "preview", work)
+            return H.ok(job.as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    @app.route("GET", "/api/tapes/([^/]+)/preview")
+    def preview_audio(r: H.Request) -> H.Response:
+        where = T.preview_file(layout, held(r).id)
+        if not where.is_file():
+            raise H.HttpError(404, "the preview has not been built")
+        return H.file_at(str(where))
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled

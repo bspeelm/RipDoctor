@@ -31,6 +31,10 @@ REMOVED = "tapes-removed"
 DOCUMENT = "tape.json"
 AUDIO = "tape.flac"
 ENVELOPE = "tape.env"
+PREVIEW = "tape.opus"
+CUTS = "cuts"
+CLIPS = "clips"
+PARTIAL = "partial"
 
 # Nearly seven hours of audio has to fit, at a pace no faster than a slow disk.
 LONG_RUN = 3 * 3600.0
@@ -60,6 +64,40 @@ def _document(layout: Layout, tape: str) -> Path:
 
 def _envelope(layout: Layout, tape: str) -> Path:
     return dir_for(layout, tape) / ENVELOPE
+
+
+def preview_file(layout: Layout, tape: str) -> Path:
+    return dir_for(layout, tape) / PREVIEW
+
+
+def clip_file(layout: Layout, tape: str, name: str) -> Path:
+    return dir_for(layout, tape) / CLIPS / name
+
+
+def clips_on_disk(layout: Layout, tape: str) -> set[str]:
+    return _names_in(dir_for(layout, tape) / CLIPS)
+
+
+def _names_in(where: Path) -> set[str]:
+    return {p.name for p in where.iterdir()} if where.is_dir() else set()
+
+
+def fresh_partial(layout: Layout, tape: str) -> Path:
+    """Where a job writes before a file earns its real name.
+
+    Emptied first: a job holds its tape, so what is here is what a crash left
+    half-written, and that was never anything.
+    """
+    where = dir_for(layout, tape) / PARTIAL
+    where.mkdir(exist_ok=True)
+    for leftover in where.iterdir():
+        leftover.unlink()
+    return where
+
+
+def promote(part: Path, target: Path) -> None:
+    target.parent.mkdir(exist_ok=True)
+    os.replace(part, target)
 
 
 def save(layout: Layout, tape: Tape) -> None:
