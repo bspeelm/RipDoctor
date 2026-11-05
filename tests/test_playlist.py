@@ -249,6 +249,22 @@ def test_with_no_id_title_artist_and_album_find_it() -> None:
     assert P.resolve(listed_song(), rows).path == "/l/new.flac"
 
 
+def test_with_no_id_a_row_of_another_length_is_a_stranger_of_the_same_name() -> None:
+    row = held("/l/x.flac", album="A Record", length=599.0)
+    assert P.resolve(listed_song(), [row]).state == P.MISSING
+
+
+def test_with_no_id_a_row_with_no_length_is_not_evidence() -> None:
+    row = held("/l/x.flac", album="A Record", length=None)
+    assert P.resolve(listed_song(), [row]).state == P.MISSING
+
+
+def test_a_song_that_did_not_file_is_not_found_by_its_name() -> None:
+    song = listed_song(filing=F.FAILED, path="", filing_note="beets refused it")
+    found = P.resolve(song, [held("/l/x.flac", album="A Record")])
+    assert found.state == P.NOT_FILED and "beets refused it" in found.why
+
+
 def test_with_no_id_two_rows_of_one_album_are_ambiguous_and_never_guessed() -> None:
     rows = [held("/l/x.flac", album="A Record"), held("/l/y.flac", album="A Record")]
     assert P.resolve(listed_song(), rows).state == P.AMBIGUOUS
@@ -296,7 +312,7 @@ def test_only_a_filed_song_has_its_recorded_path_follow_the_library() -> None:
 
 def refusal(state: P.State, tape: TP.Tape | None = None, **kw: bool) -> str:
     return P.archive_refusal(
-        tape or a_tape(a_song(1, "One")),
+        tape or a_tape(a_song(1, "One", filing=F.FILED)),
         state,
         audio=kw.get("audio", True),
         playlist_there=kw.get("playlist_there", True),
@@ -322,6 +338,27 @@ def test_the_gate_names_every_reason_at_once() -> None:
     said = refusal(P.State("a.m3u8", 1, gone), audio=False, playlist_there=False)
     assert "uncut file" in said and "a.m3u8 is gone" in said
     assert "song 1 (One): not there" in said and "song 7: two rows" in said
+
+
+def test_a_song_whose_filing_did_not_finish_shuts_the_gate_though_it_has_a_line() -> (
+    None
+):
+    tape = a_tape(
+        a_song(1, "One", filing=F.FAILED, filing_note="beets refused it"),
+        a_song(2, "Two"),
+        a_song(3, "Three", filing=F.ALREADY),
+        a_song(4, "Four", skip=True),
+    )
+    said = refusal(P.State("a.m3u8", 2), tape)
+    assert "song 1 (One): did not file: beets refused it" in said
+    assert "song 2 (Two): not filed yet" in said
+    assert "Three" not in said and "Four" not in said
+
+
+def test_a_song_left_out_and_unfinished_is_named_once() -> None:
+    tape = a_tape(a_song(1, "One", filing=F.FAILED, filing_note="no"))
+    gone = (P.Entry(1, state=P.NOT_FILED, why="did not file: no"),)
+    assert refusal(P.State("a.m3u8", 0, gone), tape).count("song 1") == 1
 
 
 def test_no_playlist_written_shuts_the_gate() -> None:

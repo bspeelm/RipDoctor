@@ -686,6 +686,50 @@ def test_archive_is_refused_with_every_reason_while_a_song_is_unresolved(
     assert view(app, tape, service)["playlist"]["archive_refusal"]
 
 
+def test_strangers_of_the_same_name_do_not_stand_in_for_songs_that_failed_to_file(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    runner.fails[runner.LIST] = b"error: the disk said no\n"
+    runner.owns("One", length="9:59", album="A Record")
+    runner.owns("Two", length="9:59", album="A Record")
+    assert file_it(app, tape, service)["error"]
+    assert not rebuild(app, tape, service)["error"]
+    gone = state_of(service, tape).left_out
+    assert [(g.number, g.state) for g in gone] == [
+        (1, P.NOT_FILED),
+        (2, P.NOT_FILED),
+    ]
+
+    refused = archive(app, tape, service)
+    assert refused.status == 409
+    assert "song 1 (One)" in refused.json()["error"]
+    untouched(service, tape)
+    assert not archived_at(service, tape).exists()
+
+
+def test_a_song_whose_filing_failed_holds_the_gate_though_a_row_now_has_its_id(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.fails["rel-2"] = b"error: the disk said no\n"
+    assert file_it(app, tape, service)["error"]
+    runner.recordings["Two"] = "rec-Two"
+    runner.owns("Two", mb_trackid="rec-Two", album="Record rel-2")
+    assert not rebuild(app, tape, service)["error"]
+    assert state_of(service, tape).left_out == ()
+    refused = archive(app, tape, service)
+    assert (
+        refused.status == 409
+        and "song 2 (Two): did not file" in refused.json()["error"]
+    )
+    untouched(service, tape)
+
+
 def test_archive_is_refused_before_any_playlist_is_written(service: Service) -> None:
     app = build(service)
     tape = pinned(app, service)

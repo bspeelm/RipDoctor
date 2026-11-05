@@ -172,9 +172,15 @@ def _matching(song: TP.Song, rows: Sequence[F.Row]) -> list[F.Row]:
     if recording:
         same = [r for r in rows if r.recording == recording]
         return same or [r for r in rows if r.path == song.path]
+    if song.filing not in F.FINISHED:
+        return []
     choice = F.choice_of(song)
     albums = {fold(song.album), *([fold(choice.release_title)] if choice else [])}
-    return [r for r in rows if F.alike(song, r) and fold(r.album) in albums]
+    return [
+        r
+        for r in rows
+        if F.alike(song, r) and fold(r.album) in albums and F.same_length(song, r)
+    ]
 
 
 def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
@@ -223,7 +229,9 @@ def archive_refusal(
     tape: TP.Tape, state: State, *, audio: bool, playlist_there: bool
 ) -> str:
     """Why this tape's uncut file may not be cleared yet, naming every song, or
-    nothing. A skipped song was the person's decision, and holds nothing up."""
+    nothing. A skipped song was the person's decision, and holds nothing up. Every
+    other song needs its filing finished as well as a line: a name can match a row
+    in the library when this tape's song never reached it."""
     if archived(state, audio):
         return f"{tape.name} is already archived"
     why = [] if audio else ["its uncut file is not here"]
@@ -232,11 +240,16 @@ def archive_refusal(
     elif not playlist_there:
         why.append(f"its playlist {state.file} is gone - write it again")
     titles = {s.number: TP.label(s) for s in tape.songs}
+    answered = {g.number for g in state.left_out if g.state != TP.SKIPPED}
     why += [
         f"{titles.get(g.number, f'song {g.number}')}: {g.why}"
         for g in state.left_out
         if g.state != TP.SKIPPED
     ]
+    for song in tape.songs:
+        unfiled = _not_filed(song)
+        if unfiled and not song.skip and song.number not in answered:
+            why.append(f"{titles[song.number]}: {unfiled.why}")
     return f"{tape.name} cannot be archived yet. {'; '.join(why)}" if why else ""
 
 
