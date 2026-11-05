@@ -711,10 +711,8 @@ class Beets:
         for line in _plain(result.text).splitlines():
             fields = line.split(_SEP)
             if len(fields) == 7:
-                recording, release, title, artist, album, length, path = fields
-                where = _rooted(root, path)
-                found = row_length(length), str(where), where.is_file()
-                held.append(Held(Row(title, artist, album, *found), recording, release))
+                recording, release, *row = fields
+                held.append(Held(_row(root, *row), recording, release))
         return tuple(held)
 
 

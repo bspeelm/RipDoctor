@@ -596,9 +596,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/tapes/([^/]+)/playlist")
     def playlist(r: H.Request) -> H.Response:
         """Ask the library about every song and write what resolves."""
-        tape = held(r)
-        if not tape.songs:
-            raise H.HttpError(409, "this tape has no song list yet - add one first")
+        tape = listed(r)
         importer = beets_for("a playlist is asked of beets")
 
         def work(job: Job) -> dict[str, Any]:

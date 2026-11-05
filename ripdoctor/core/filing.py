@@ -133,6 +133,13 @@ def _same_artist(listed: str, row: str) -> bool:
     return bool(names(fold(listed), loosely=True) & names(fold(row), loosely=True))
 
 
+def alike(song: Song, row: Row) -> bool:
+    """The same title and artist, by the reading the pre-check uses."""
+    return _cleaned(row.title) in _titles(song) and _same_artist(
+        song.artist, row.artist
+    )
+
+
 def _unusable(row: Row) -> Verdict:
     if not row.present:
         return Verdict(
@@ -161,15 +168,10 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
     if by_id:
         return _unusable(by_id[0])
 
-    titles = _titles(song)
-    alike = [
-        r
-        for r in by_name
-        if _cleaned(r.title) in titles and _same_artist(song.artist, r.artist)
-    ]
+    named = [r for r in by_name if alike(song, r)]
     agreeing = [
         r
-        for r in alike
+        for r in named
         if r.length is not None and abs(r.length - song.length) <= LENGTH_TOLERANCE
     ]
     for row in agreeing:
@@ -177,7 +179,7 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
             return Verdict(ALREADY, row.path, "matched by title, artist and length")
     if agreeing:
         return _unusable(agreeing[0])
-    for row in alike:
+    for row in named:
         if row.length is None:
             return Verdict(
                 FAILED,
@@ -299,10 +301,3 @@ def outcomes(tape: Tape) -> list[dict[str, Any]]:
         }
         for s in ordered
     ]
-
-
-def alike(song: Song, row: Row) -> bool:
-    """The same title and artist, by the reading the pre-check uses."""
-    return _cleaned(row.title) in _titles(song) and _same_artist(
-        song.artist, row.artist
-    )
