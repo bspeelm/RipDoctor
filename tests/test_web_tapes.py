@@ -361,6 +361,20 @@ def test_a_list_that_does_not_fit_is_saved_as_a_mismatch(service: Service) -> No
     assert result["songs"][0]["verdict"] == TP.DOUBT
 
 
+def test_a_song_spanning_a_silence_carries_its_reason_in_the_document(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = a_new_tape(app, service)
+    songs = [{"title": "Whole", "artist": "A", "album": "R", "length": "0:10"}]
+    post(app, f"/api/tapes/{tape}/songs", service, {"songs": songs})
+    upload(app, tape, service)
+    result = process(app, tape, service)
+    assert result["songs"][0]["verdict"] == TP.DOUBT
+    assert "0:05 to 0:07" in result["songs"][0]["reason"]
+    assert get(app, f"/api/tapes/{tape}", service).json()["songs"] == result["songs"]
+
+
 def test_a_second_job_is_refused_while_one_runs(tmp_path: Path) -> None:
     service = a_service(tmp_path, runner=a_tape_runner())
     service.jobs = Jobs(spawn=lambda work: None, now=service.now)

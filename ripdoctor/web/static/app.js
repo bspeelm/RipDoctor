@@ -1241,6 +1241,9 @@ function showTape(t) {
   $("#tp-inside").replaceChildren(...(has ? t.inside.map((g) =>
     el("li", null, `song ${g.song}: the silence at ${fmt(g.lo)} to ${fmt(g.hi)} stayed inside it`)) : []));
   $("#tp-inside-title").hidden = !has || !t.inside.length;
+  const doubts = has ? t.songs.filter((s) => s.reason) : [];
+  $("#tp-reasons").replaceChildren(...doubts.map((s) => el("li", null, `song ${s.number}: ${s.reason}`)));
+  $("#tp-reasons-title").hidden = !doubts.length;
 }
 
 function songInput(field, value, label) {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -190,16 +191,112 @@ def test_a_silent_passage_inside_a_song_stays_inside_it() -> None:
     placed = TP.place(a_tape(230, 224, 100), music)
     second = placed.songs[1]
     assert (second.start, second.end) == (232.0, 458.0)
-    assert second.delta == 0.0
-    assert second.verdict == TP.AGREES
+    assert second.delta == 2.0
+    assert second.verdict == TP.DOUBT
+    assert "4:01 to 4:03" in second.reason
+    assert "226.0 s with the silence and 224.0 s without" in second.reason
     assert placed.inside == ((2, 241.4, 243.4),)
     assert not placed.mismatch
 
 
-def test_a_merged_song_fits_on_its_music_when_the_silence_is_not_counted() -> None:
+def test_a_merged_song_is_doubt_even_when_its_music_matches_the_list() -> None:
     placed = TP.place(a_tape(224), TP.Music(0.0, 229.0, (gap(9.4, 14.4),)))
-    assert placed.songs[0].delta == 0.0
+    assert placed.songs[0].delta == 5.0
+    assert placed.songs[0].verdict == TP.DOUBT
+    assert "0:09 to 0:14" in placed.songs[0].reason
+
+
+def test_two_real_songs_listed_as_one_were_agreed_and_are_now_doubt() -> None:
+    """Really 100 s then 200 s, on a list that says 300 s."""
+    music = TP.Music(0.0, 404.0, (gap(100.0, 102.0), gap(302.0, 304.0)))
+    placed = TP.place(a_tape(300, 100), music)
+    assert [s.verdict for s in placed.songs] == [TP.DOUBT, TP.AGREES]
+    assert (placed.songs[0].start, placed.songs[0].end) == (0.0, 302.0)
+    assert "1:40 to 1:42" in placed.songs[0].reason
+    assert not placed.songs[1].reason
+
+
+def test_a_song_missing_from_the_list_merged_silently_and_is_now_doubt() -> None:
+    music = TP.Music(0.0, 404.0, (gap(120.0, 122.0), gap(202.0, 204.0)))
+    placed = TP.place(a_tape(200, 200), music)
+    assert [s.verdict for s in placed.songs] == [TP.DOUBT, TP.AGREES]
+    assert "2:00 to 2:02" in placed.songs[0].reason
+    assert "missing from the list" in placed.songs[0].reason
+
+
+def test_two_groupings_that_both_fit_were_agreed_and_now_doubt_both_songs() -> None:
+    """199|3|198 against 200, 200: the middle piece could belong to either."""
+    music = TP.Music(0.0, 404.0, (gap(199.0, 201.0), gap(204.0, 206.0)))
+    placed = TP.place(a_tape(200, 200), music)
+    assert [s.verdict for s in placed.songs] == [TP.DOUBT, TP.DOUBT]
+    assert "could end at 3:24" in placed.songs[0].reason
+    assert "could start at 3:26" in placed.songs[1].reason
+    assert "2 groupings" in placed.mismatch
+
+
+def test_a_cut_between_two_whole_pieces_is_doubt_if_a_grouping_moves_it() -> None:
+    """100|3|4|50|48 against 100, 5, 100: the 3 s piece may end the first song."""
+    music = TP.Music(
+        0.0,
+        209.0,
+        (gap(100.0, 101.0), gap(104.0, 105.0), gap(109.0, 110.0), gap(160.0, 161.0)),
+    )
+    placed = TP.place(a_tape(100, 5, 100), music)
+    assert placed.songs[0].end == 100.0
+    assert placed.songs[0].verdict == TP.DOUBT
+    assert "could end at 1:44" in placed.songs[0].reason
+    assert "3 groupings" in placed.mismatch
+
+
+def test_a_song_that_lands_on_a_gap_past_another_is_doubt_when_walking() -> None:
+    """Too few gaps for the list, and the first song steps over one of them."""
+    music = TP.Music(0.0, 500.0, (gap(50.0, 52.0), gap(100.0, 102.0)))
+    placed = TP.place(a_tape(100, 100, 100, 100), music)
+    assert placed.songs[0].end == 100.0
+    assert placed.songs[0].verdict == TP.DOUBT
+    assert "0:50 to 0:52" in placed.songs[0].reason
+
+
+def test_fewest_doubts_outranks_smallest_error_when_grouping() -> None:
+    """99|5|104|100 against 100, 100, 100.
+
+    Merging the first two is 8 s off in all across two doubts. Merging the middle
+    two is 10 s off, in one. The one doubt wins.
+    """
+    music = TP.Music(
+        0.0, 311.0, (gap(99.0, 100.0), gap(105.0, 106.0), gap(210.0, 211.0))
+    )
+    placed = TP.place(a_tape(100, 100, 100), music)
+    assert placed.songs[0].end == 99.0
+    assert (placed.songs[1].start, placed.songs[1].end) == (100.0, 210.0)
+
+
+def test_a_song_set_by_ear_across_a_silence_is_the_person_s_call() -> None:
+    tape = a_tape(224)
+    ear = replace(tape.songs[0], start=0.0, end=229.0, set_by=TP.EAR)
+    placed = TP.place(
+        replace(tape, songs=(ear,)), TP.Music(0.0, 229.0, (gap(9.4, 14.4),))
+    )
     assert placed.songs[0].verdict == TP.AGREES
+    assert not placed.songs[0].reason
+    assert placed.inside == ((1, 9.4, 14.4),)
+
+
+def test_a_reason_says_how_far_a_song_is_from_the_list() -> None:
+    placed = TP.place(a_tape(100), TP.Music(0.0, 90.0, ()))
+    assert "10.0 s shorter" in placed.songs[0].reason
+    long_tape = TP.place(a_tape(100), TP.Music(0.0, 3 * 3600.0 + 5.0, ()))
+    assert "longer" in long_tape.songs[0].reason
+
+
+def test_a_silence_past_an_hour_is_named_with_its_hours() -> None:
+    music = TP.Music(0.0, 7300.0, (gap(3700.0, 3702.0),))
+    assert "1:01:40 to 1:01:42" in TP.place(a_tape(7298), music).songs[0].reason
+
+
+def test_a_placement_that_fits_gives_no_reason() -> None:
+    placed = TP.place(a_tape(100), TP.Music(0.0, 100.0, ()))
+    assert placed.songs[0].reason == ""
 
 
 def test_a_song_outside_the_tolerance_is_doubt_and_its_neighbours_are_not() -> None:
@@ -386,8 +483,9 @@ SIX_MEASURED = [180.2, 159.4, 159.1, 226.7, 184.6, 198.8]
 SIX_LISTED = [180.0, 160.0, 159.0, 226.0, 184.0, 198.0]
 
 
-def a_faded_tape(measured: list[float], noisy: int = -1) -> Envelope:
-    """Every song fades under the finding level; gap `noisy` never reaches zero."""
+def a_faded_tape(measured: list[float], noisy: int = -1, wide: int = -1) -> Envelope:
+    """Every song fades under the finding level; gap `noisy` never reaches zero,
+    and gap `wide` is too long for the list to have counted it by accident."""
     segments: list[tuple] = list(DIGITAL_ZERO)
     for at, seconds in enumerate(measured):
         fade = LONG_FADE if at == 0 else FADE
@@ -395,6 +493,8 @@ def a_faded_tape(measured: list[float], noisy: int = -1) -> Envelope:
             segments += [*a_song(seconds, LAST_FADE), *DIGITAL_ZERO]
         elif at == noisy:
             segments += [*a_song(seconds, fade, -70.0), *LOW_NOISE]
+        elif at == wide:
+            segments += [*a_song(seconds, fade), *DIGITAL_ZERO * 3]
         else:
             segments += [*a_song(seconds, fade), *DIGITAL_ZERO]
     return lane(segments)
@@ -407,6 +507,24 @@ def test_a_fade_under_the_finding_level_stays_with_its_song() -> None:
         [m - n for m, n in zip(SIX_MEASURED, SIX_LISTED, strict=True)], abs=0.11
     )
     assert {s.verdict for s in placed.songs} == {TP.AGREES}
+
+
+def test_a_song_with_a_silence_inside_is_placed_whole_and_flagged() -> None:
+    measured = [435.9, 9.5, 214.7, 248.1, 378.8, 250.1, 437.8, 418.4, 411.1, 325.2]
+    measured += [331.6, 398.1]
+    listed = [436.0, 224.0, 247.0, 379.0, 250.0, 437.0, 418.0, 411.0, 325.0, 331.0]
+    listed += [398.0]
+    placed = TP.place(a_tape(*listed), TP.gaps_of(a_faded_tape(measured, wide=1)))
+    assert [s.verdict for s in placed.songs] == [TP.AGREES, TP.DOUBT, *[TP.AGREES] * 9]
+    merged = placed.songs[1]
+    assert merged.delta == pytest.approx(9.5 + 6.0 + 214.7 - 224.0, abs=0.11)
+    assert re.search(r"224\.[1-3] s without", merged.reason)
+    others = [s for s in placed.songs if s is not merged]
+    wanted = [
+        m - n for m, n in zip([435.9, *measured[3:]], [436.0, *listed[2:]], strict=True)
+    ]
+    assert [s.delta for s in others] == pytest.approx(wanted, abs=0.11)
+    assert not placed.mismatch
 
 
 def test_a_gap_reports_where_it_was_found_and_where_it_is_quiet() -> None:

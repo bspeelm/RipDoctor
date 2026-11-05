@@ -68,6 +68,7 @@ class Song:
     verdict: str = ""
     filing: str = PENDING
     path: str = ""
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +84,7 @@ class Song:
             "verdict": self.verdict,
             "filing": self.filing,
             "path": self.path,
+            "reason": self.reason,
         }
 
     @classmethod
@@ -308,33 +310,67 @@ class Placed:
     end: float
     delta: float
     verdict: str
+    reason: str = ""
+    also: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class Alignment:
-    """`fits` is false when there were fewer stretches of music than songs."""
+    """`fits` is false when there were fewer stretches of music than songs.
+
+    `groupings` counts the ways of laying the songs out with as few doubts as
+    the one in `spans`.
+    """
 
     spans: tuple[Placed, ...]
     fits: bool
+    groupings: int = 1
+
+
+def _clock(seconds: float) -> str:
+    minutes, secs = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 def _judged(start: float, end: float, delta: float, *, grounded: bool = True) -> Placed:
-    agrees = grounded and abs(delta) <= LENGTH_TOLERANCE
-    return Placed(start, end, delta, AGREES if agrees else DOUBT)
+    if not grounded:
+        reason = "no silence where this boundary belongs - placed from the list length"
+        return Placed(start, end, delta, DOUBT, reason)
+    if abs(delta) <= LENGTH_TOLERANCE:
+        return Placed(start, end, delta, AGREES)
+    side = "longer" if delta > 0 else "shorter"
+    reason = f"{abs(delta):.1f} s {side} than the list says - check the list or listen"
+    return Placed(start, end, delta, DOUBT, reason)
 
 
-def _partition(pieces: Sequence[Span], lengths: Sequence[float]) -> tuple[Placed, ...]:
+def _also(starts: Sequence[float], ends: Sequence[float]) -> str:
+    """Where the other groupings that fit as well would put this song's edges."""
+    could = [
+        *(f"start at {_clock(t)}" for t in starts),
+        *(f"end at {_clock(t)}" for t in ends),
+    ]
+    if not could:
+        return ""
+    return f"Another grouping fits as well: it could {' or '.join(could)} - listen."
+
+
+def _partition(
+    pieces: Sequence[Span], lengths: Sequence[float]
+) -> tuple[tuple[Placed, ...], int]:
     """Group pieces into songs in list order: fewest doubts, then smallest error.
 
-    A group's measure is its extent or its sum of music, whichever is nearer the
-    list: whether a list counts a silent passage inside a song varies by source.
+    A group is measured by its extent or its sum of music, whichever is nearer
+    the list: whether a list counts a silent passage inside a song varies by
+    source. That only chooses a grouping. No verdict rests on it, and the delta
+    reported is against the extent.
     """
     played = [0.0, *accumulate(hi - lo for lo, hi in pieces)]
 
-    def off_by(first: int, last: int, length: float) -> float:
-        extent = pieces[last][1] - pieces[first][0]
-        music = played[last + 1] - played[first]
-        return min(extent - length, music - length, key=abs)
+    def off_by(before: int, used: int, length: float) -> float:
+        extent = pieces[used - 1][1] - pieces[before][0]
+        music = played[used] - played[before]
+        return abs(min(extent - length, music - length, key=abs))
 
     count, songs = len(pieces), len(lengths)
     best: list[dict[int, tuple[int, float]]] = [{0: (0, 0.0)}]
@@ -346,22 +382,37 @@ def _partition(pieces: Sequence[Span], lengths: Sequence[float]) -> tuple[Placed
             for before, (doubts, total) in best[done - 1].items():
                 if before >= used:
                     continue
-                delta = abs(off_by(before, used - 1, length))
+                delta = off_by(before, used, length)
                 cost = (doubts + (delta > LENGTH_TOLERANCE), total + delta)
                 if used not in row or cost < row[used]:
                     row[used], back[used] = cost, before
         best.append(row)
         came_from.append(back)
 
+    # Back from the end through every step that keeps the fewest doubts: what is
+    # left after each song is everywhere an equally good grouping could cut.
+    tied: list[dict[int, int]] = [{} for _ in range(songs + 1)]
+    tied[songs][count] = 1
+    for done in range(songs, 0, -1):
+        for used, ways in tied[done].items():
+            for before, (doubts, _) in best[done - 1].items():
+                missed = off_by(before, used, lengths[done - 1]) > LENGTH_TOLERANCE
+                if before < used and doubts + missed == best[done][used][0]:
+                    tied[done - 1][before] = tied[done - 1].get(before, 0) + ways
+
     spans: list[Placed] = []
     used = count
     for done in range(songs, 0, -1):
         before = came_from[done][used]
         first, last = pieces[before], pieces[used - 1]
-        delta = off_by(before, used - 1, lengths[done - 1])
-        spans.append(_judged(first[0], last[1], delta))
+        span = _judged(first[0], last[1], last[1] - first[0] - lengths[done - 1])
+        also = _also(
+            [pieces[b][0] for b in sorted(tied[done - 1]) if b != before],
+            [pieces[u - 1][1] for u in sorted(tied[done]) if u != used],
+        )
+        spans.append(replace(span, verdict=DOUBT, also=also) if also else span)
         used = before
-    return tuple(reversed(spans))
+    return tuple(reversed(spans)), tied[0][0]
 
 
 def _walk(
@@ -400,7 +451,8 @@ def align(
     if not lengths:
         return Alignment((), True)
     if len(pieces) >= len(lengths):
-        return Alignment(_partition(pieces, lengths), True)
+        spans, groupings = _partition(pieces, lengths)
+        return Alignment(spans, True, groupings)
     return Alignment(_walk(ordered, start, end, lengths), False)
 
 
@@ -502,34 +554,72 @@ def _margin(start: float, stop: float, gaps: Iterable[Span]) -> Span:
     return start, stop
 
 
-def _placed_song(song: Song, span: Placed) -> Song:
+def _spanning(length: float, span: Placed, silences: Sequence[Span]) -> str:
+    extent = span.end - span.start
+    music = extent - sum(hi - lo for lo, hi in silences)
+    where = ", ".join(f"{_clock(lo)} to {_clock(hi)}" for lo, hi in silences)
+    return (
+        f"Silence inside this song at {where}: a passage in it, damage, or a song "
+        f"missing from the list - listen there. It measures {extent:.1f} s with the "
+        f"silence and {music:.1f} s without; the list says {length:.1f} s."
+    )
+
+
+def _placed_song(song: Song, span: Placed, quiet: Sequence[Span]) -> Song:
+    """A song that spans a silence is doubt whatever its length: only an ear can
+    tell a passage from damage or from a song the list left out."""
+    silences = [g for g in quiet if span.start < g[0] and g[1] < span.end]
+    said = _spanning(song.length, span, silences) if silences else span.reason
     return replace(
         song,
         start=round(span.start, 3),
         end=round(span.end, 3),
         delta=round(span.delta, 3),
-        verdict=span.verdict,
+        verdict=DOUBT if silences else span.verdict,
+        reason=" ".join(part for part in (said, span.also) if part),
     )
 
 
 def _ear_song(song: Song) -> Song:
     measured = (song.end or 0.0) - (song.start or 0.0)
-    return replace(song, delta=round(measured - song.length, 3), verdict=AGREES)
+    return replace(
+        song, delta=round(measured - song.length, 3), verdict=AGREES, reason=""
+    )
 
 
-def _mismatch(songs: Sequence[Song], fits: bool, stretches: int) -> str:
+def _mismatch(
+    songs: Sequence[Song],
+    fits: bool,
+    stretches: int,
+    inside: Sequence[tuple[int, float, float]],
+    groupings: int,
+) -> str:
+    said: list[str] = []
+    silent = {s.number: 0.0 for s in songs}
+    for number, lo, hi in inside:
+        silent[number] += hi - lo
+    misfits = sum(
+        s.verdict == DOUBT
+        and min(abs(off := s.delta or 0.0), abs(off - silent[s.number]))
+        > LENGTH_TOLERANCE
+        for s in songs
+    )
     if not fits:
-        return (
+        said.append(
             f"{len(songs)} songs on the list and only {stretches} stretches of music "
             "- boundaries with no gap are placed from list lengths and need your ear"
         )
-    doubts = sum(s.verdict == DOUBT for s in songs)
-    if doubts * 2 > len(songs):
-        return (
-            f"{doubts} of {len(songs)} songs disagree with their list lengths - "
+    elif misfits * 2 > len(songs):
+        said.append(
+            f"{misfits} of {len(songs)} songs disagree with their list lengths - "
             "check the list and its order; nothing has been reordered"
         )
-    return ""
+    if groupings > 1:
+        said.append(
+            f"{groupings} groupings of the silences fit the list equally well - the "
+            "nearest is shown, and every song they disagree over is marked doubt"
+        )
+    return "; ".join(said)
 
 
 def place(tape: Tape, music: Music) -> Tape:
@@ -537,6 +627,7 @@ def place(tape: Tape, music: Music) -> Tape:
     out = list(tape.songs)
     quiet = [g.quiet for g in music.gaps]
     fits = True
+    groupings = 1
     cursor = music.start
     index = 0
     while index < len(out):
@@ -553,8 +644,9 @@ def place(tape: Tape, music: Music) -> Tape:
         within = [g for g in quiet if lo < g[0] and g[1] < hi]
         found = align(within, lo, hi, [s.length for s in out[index:stop]])
         fits = fits and found.fits
+        groupings *= found.groupings
         for at, span in enumerate(found.spans, index):
-            out[at] = _placed_song(out[at], span)
+            out[at] = _placed_song(out[at], span, quiet)
         index = stop
 
     inside = tuple(
@@ -572,5 +664,5 @@ def place(tape: Tape, music: Music) -> Tape:
         found_end=music.found_end,
         gaps=music.gaps,
         inside=inside,
-        mismatch=_mismatch(out, fits, len(music.gaps) + 1),
+        mismatch=_mismatch(out, fits, len(music.gaps) + 1, inside, groupings),
     )
