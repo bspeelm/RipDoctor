@@ -153,6 +153,21 @@ def test_a_re_run_that_moves_a_heard_song_takes_the_hearing_away() -> None:
     assert TP.doubtful(moved, moved.songs[1])
 
 
+def test_a_new_list_takes_the_hearing_with_the_boundaries_it_clears() -> None:
+    tape = TP.hear(one_doubt(), 2)
+    fresh = tuple(replace(s, heard=False, start=None, end=None) for s in tape.songs)
+    assert not any(s.heard for s in TP.relist(tape, fresh).songs)
+
+
+def test_a_document_from_before_these_judgements_still_reads() -> None:
+    saved = three().to_dict()
+    for song in saved["songs"]:
+        del song["heard"], song["skip"], song["cut"]
+    back = TP.Tape.from_dict(saved)
+    assert not back.songs[0].heard and not back.songs[0].skip
+    assert back.songs[0].cut is None
+
+
 def test_a_song_with_no_boundaries_or_set_by_ear_cannot_be_heard() -> None:
     bare = TP.Tape(id="m", name="M", songs=(TP.Song(1, "A", "B", "", 1.0),))
     with pytest.raises(TP.BadEdge, match="no boundaries"):

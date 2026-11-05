@@ -1451,15 +1451,15 @@ function earRow(row, t) {
   return tr;
 }
 
-function startTapeJob(path, body) {
+// Saving a list clears boundaries and what was heard, which is never a side effect
+// of asking to hear or cut them.
+async function startTapeJob(path, body) {
   $("#tp-err").textContent = "";
-  return (async () => {
-    try {
-      if (tapeEdited) await saveSongs();
-      await postJSON(path, body);
-      watchTape();
-    } catch (e) { $("#tp-err").textContent = e.message; }
-  })();
+  if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
+  try {
+    await postJSON(path, body);
+    watchTape();
+  } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
 const buildClips = (body) => startTapeJob(`/api/tapes/${tape.id}/clips`, body);
@@ -1522,7 +1522,7 @@ async function saveSongs() {
 async function saveSongsPressed() {
   $("#tp-err").textContent = "";
   if (tape.songs.some((s) => s.start != null)
-      && !confirm("A new list clears the boundaries found for this one. Save it?")) return;
+      && !confirm("A new list clears the boundaries found for this one, and what you marked heard. Save it?")) return;
   try {
     await saveSongs();
     await loadTapes(tape.id);
