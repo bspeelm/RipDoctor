@@ -209,6 +209,8 @@ def tape_id(name: str) -> str:
     try:
         cut = slug("", name)[: MAX_COMPONENT // 2]
     except Unsafe:
+        # A name with nothing a path can hold is still a good name: the document
+        # keeps it, and only the directory falls back.
         return "tape"
     return re.sub(r"\.{2,}", ".", cut).strip("-._") or "tape"
 
