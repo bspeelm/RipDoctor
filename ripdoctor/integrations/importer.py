@@ -257,11 +257,12 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
 # user's own configuration rather than replacing it - two do not layer, the last
-# simply wins - so this changes as little as it can. Two settings: the prompt,
-# without which a preview has already moved the files, and the move, without
-# which every track is written twice and a finished import cannot be told from
-# a refused one. ADR-042.
-OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
+# simply wins - so this changes as little as it can. Three settings: the prompt,
+# without which a preview has already moved the files; the move, without which
+# every track is written twice and a finished import cannot be told from a refused
+# one; and the duplicate question, which a configured `remove` answers by deleting
+# the filed audio, before any answer sent here is read. ADR-042, ADR-063.
+OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n  duplicate_action: ask\n"
 
 # Only for the weak matches beets does ask about: it lists the candidates and
 # this declines them, which is the right outcome, because a look that had to

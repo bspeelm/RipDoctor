@@ -272,6 +272,15 @@ def test_the_prompt_is_turned_back_on(tmp_path: Path) -> None:
     assert beets.config.endswith(I.OVERRIDE_FILE)
 
 
+def test_the_duplicate_question_is_always_asked_whatever_beets_is_configured_with(
+    tmp_path: Path,
+) -> None:
+    """`duplicate_action: remove` in a person's config answers it without reading
+    stdin, and deletes the album that was filed."""
+    I.Beets.with_override(tmp_path)
+    assert "duplicate_action: ask" in (tmp_path / I.OVERRIDE_FILE).read_text()
+
+
 def test_the_cut_tracks_are_moved_rather_than_copied(tmp_path: Path) -> None:
     """beets copies by default, which wrote every track twice and left the
     originals in review. Since what is still in review is how a refused import
