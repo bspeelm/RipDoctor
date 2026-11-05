@@ -299,3 +299,10 @@ def outcomes(tape: Tape) -> list[dict[str, Any]]:
         }
         for s in ordered
     ]
+
+
+def alike(song: Song, row: Row) -> bool:
+    """The same title and artist, by the reading the pre-check uses."""
+    return _cleaned(row.title) in _titles(song) and _same_artist(
+        song.artist, row.artist
+    )
