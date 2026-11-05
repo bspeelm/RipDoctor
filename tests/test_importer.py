@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.core import filing as F
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack
 from ripdoctor.integrations import importer as I
 
@@ -744,3 +745,118 @@ def test_a_track_left_behind_is_a_failure_rather_than_a_silence(
         I.Beets().take(
             fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",)
         )
+
+
+# ---------------------------------------------------------------- a tape's album
+
+
+def _beets() -> I.Beets:
+    return I.Beets(config="/state/override.yaml")
+
+
+def test_a_tape_s_pinned_run_sends_this_argv_and_these_answers() -> None:
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album", "rel-1")
+    assert runner.calls == [
+        (
+            "beet",
+            "--config",
+            "/state/override.yaml",
+            "import",
+            "--search-id",
+            "rel-1",
+            "/work/album",
+        )
+    ]
+    assert runner.fed == [b"A\nM\nA\n"]
+
+
+def test_a_tape_s_from_list_run_turns_lookup_off_and_sends_the_same_answers() -> None:
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album")
+    assert runner.calls[0][3:] == ("import", "-A", "/work/album")
+    assert runner.fed == [b"A\nM\nA\n"]
+
+
+def test_the_answers_for_a_tape_can_never_say_replace() -> None:
+    assert b"R" not in I.TAPE_ANSWERS
+    assert I.TAPE_ANSWERS.split() == [b"A", b"M", b"A"]
+
+
+def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) -> None:
+    assert I.answers("merge", matching=True) == b"A\nM\n"
+    assert I.answers("replace", matching=True) == b"A\nR\n"
+    assert I.answers("replace", matching=False) == b"R\n"
+    runner = FakeRunner()
+    _beets().apply(runner, a_plan(), str(tmp_path), str(tmp_path), mbid="rel-1")
+    assert runner.calls[0] == (
+        "beet",
+        "--config",
+        "/state/override.yaml",
+        "import",
+        "--search-id",
+        "rel-1",
+        str(tmp_path),
+    )
+    assert runner.fed[0] == b"A\nR\n"
+
+
+def test_a_relative_path_crash_is_reported_with_its_fix_not_as_a_traceback() -> None:
+    took = I.TapeRun(
+        1,
+        "Traceback (most recent call last):\n"
+        '  File "beets/library.py", line 1, in move\n'
+        "FileNotFoundError: [Errno 2] No such file: 'Music/a.flac'\n",
+    )
+    said = took.why()
+    assert "relative path" in said
+    assert "Back up the library database" in said
+    assert "Traceback" not in said
+
+
+def test_a_starved_prompt_says_a_question_went_unanswered() -> None:
+    said = I.TapeRun(1, "error: stdin stream ended while input required\n").why()
+    assert said.startswith("beets asked a question this did not answer")
+
+
+def test_a_run_s_reason_is_its_last_line_with_something_on_it() -> None:
+    assert I.TapeRun(0, "Tagging:\n  Skipping.\n\n").why() == "Skipping."
+    assert I.TapeRun(3, "").why() == "beets exited 3, saying nothing"
+
+
+def test_library_rows_read_every_field_and_ask_whether_the_file_is_there(
+    tmp_path: Path,
+) -> None:
+    here = tmp_path / "here.flac"
+    here.write_bytes(b"x")
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", str(here)))
+    gone = "\x1f".join(("Two", "A Band", "A Record", "", str(tmp_path / "gone.flac")))
+    runner = FakeRunner().expect("ls", stdout=f"{line}\n{gone}\n".encode())
+    rows = _beets().library_rows(runner, str(tmp_path), ["artist:A Band"])
+    assert rows[0] == F.Row("One", "A Band", "A Record", 200.0, str(here), True)
+    assert (rows[1].length, rows[1].present) == (None, False)
+    assert runner.calls[0][-1] == "artist:A Band"
+    assert runner.calls[0][3:5] == ("ls", "-f")
+
+
+def test_a_relative_row_is_rooted_in_the_library(tmp_path: Path) -> None:
+    (tmp_path / "a.flac").write_bytes(b"x")
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac"))
+    runner = FakeRunner().expect("ls", stdout=line.encode())
+    rows = _beets().library_rows(runner, str(tmp_path), [])
+    assert (rows[0].path, rows[0].present) == (str(tmp_path / "a.flac"), True)
+
+
+def test_a_library_that_could_not_be_asked_is_never_read_as_a_miss() -> None:
+    runner = FakeRunner().expect("ls", returncode=1, stderr=b"database is locked\n")
+    with pytest.raises(I.ImportFailed, match="database is locked"):
+        _beets().library_rows(runner, "/lib", ["mb_trackid:rec-1"])
+
+
+def test_owned_asks_by_recording_and_by_artist_or_only_by_artist_with_no_id() -> None:
+    runner = FakeRunner()
+    _beets().owned(runner, "/lib", "rec-1", "A Band")
+    assert [c[-1] for c in runner.calls] == ["mb_trackid:rec-1", "artist:A Band"]
+    runner = FakeRunner()
+    _beets().owned(runner, "/lib", "", "A Band")
+    assert [c[-1] for c in runner.calls] == ["artist:A Band"]

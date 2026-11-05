@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ripdoctor.audio.runner import Runner, ToolMissing
+from ripdoctor.core.filing import Row, row_length
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
@@ -67,6 +68,30 @@ class Stale:
             "It will treat this import as a duplicate and stop part-way. Clear the "
             "stale rows first; that removes database rows only, never files."
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TapeRun:
+    """What one album run of a tape's songs said. Never proof of anything: only
+    the library's rows and the files left behind say what happened."""
+
+    returncode: int
+    output: str
+
+    def why(self) -> str:
+        """The one thing to tell a person, in place of a traceback in a log."""
+        lines = [line.strip() for line in self.output.splitlines() if line.strip()]
+        said = lines[-1] if lines else f"beets exited {self.returncode}, saying nothing"
+        if _RELATIVE_ROW in self.output:
+            return (
+                "beets crashed with FileNotFoundError, which merging into an album "
+                "does when a library row holds a relative path. Nothing was lost. "
+                "Back up the library database, rewrite those rows' paths as absolute "
+                f"ones, then file again. beets said: {said}"
+            )
+        if _STARVED in self.output:
+            return f"beets asked a question this did not answer: {said}"
+        return said
 
 
 class Importer(Protocol):
@@ -168,6 +193,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # string: beets passes "\t" through as a literal backslash-t, every line then
 # fails to split, and the album reads as having no tracks at all.
 _SEP = "\x1f"
+_ROW = _SEP.join(("$title", "$artist", "$album", "$length", "$path"))
 
 # What is typed at beets' matcher to accept the candidate it printed, and then
 # at the question it asks when the album is already in the library. One answer
@@ -180,6 +206,12 @@ DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
 # failure it causes looks like "the tracks are still in review", which is true
 # and is not the cause.
 _STARVED = "stdin stream ended"
+_RELATIVE_ROW = "FileNotFoundError"
+
+# Apply the release; merge when the album is already filed; apply again, because
+# merging matches afresh. Whatever goes unasked stays unread, which does no harm.
+# Replace is not among them and never may be: it deletes the filed audio. ADR-060.
+TAPE_ANSWERS = b"A\nM\nA\n"
 
 
 def answers(duplicates: str, *, matching: bool) -> bytes:
@@ -454,6 +486,59 @@ class Beets:
             notes.append(f"set {fixed} files' modes")
         notes.extend(too_many(count, len(tracks)))
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
+
+    def file_tape_run(
+        self, runner: Runner, directory: str, release: str = ""
+    ) -> TapeRun:
+        """One directory, one album of a tape: pinned, or with no release its tags
+        are taken as they stand. Reports and judges nothing, because a tape's album
+        is usually partial and every count `apply` trusts would misread it."""
+        result = runner.run(
+            self._argv(self._import(directory, release)),
+            stdin=TAPE_ANSWERS,
+            timeout=3600,
+        )
+        return TapeRun(result.returncode, _plain(result.text + result.err))
+
+    def library_rows(
+        self, runner: Runner, root: str, query: list[str]
+    ) -> tuple[Row, ...]:
+        """The rows a query finds. A question beets could not answer is raised, not
+        read as a miss, or a song it cannot see is filed a second time."""
+        result = runner.run(self._argv(["ls", "-f", _ROW, *query]), timeout=300)
+        if not result.ok:
+            raise ImportFailed(
+                f"beets could not look in the library: {TapeRun(1, result.err).why()}"
+            )
+        rows = []
+        for line in _plain(result.text).splitlines():
+            fields = line.split(_SEP)
+            if len(fields) == 5:
+                title, artist, album, length, said = fields
+                where = _rooted(root, said)
+                rows.append(
+                    Row(
+                        title,
+                        artist,
+                        album,
+                        row_length(length),
+                        str(where),
+                        where.is_file(),
+                    )
+                )
+        return tuple(rows)
+
+    def owned(
+        self, runner: Runner, root: str, recording: str, artist: str
+    ) -> tuple[tuple[Row, ...], tuple[Row, ...]]:
+        """The rows holding this recording, and everything by this artist: not every
+        row has an id, and a title is compared once folded, which beets cannot do."""
+        by_id = (
+            self.library_rows(runner, root, [f"mb_trackid:{recording}"])
+            if recording
+            else ()
+        )
+        return by_id, self.library_rows(runner, root, [f"artist:{artist}"])
 
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
