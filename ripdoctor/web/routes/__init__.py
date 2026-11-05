@@ -13,6 +13,7 @@ from ripdoctor.web.routes import (
     punching,
     records,
     session,
+    tapes,
 )
 from ripdoctor.web.service import Service
 
@@ -28,4 +29,5 @@ def build(service: Service, *, static: object = None) -> App:
     punching.add(app, service)
     ingest.add(app, service)
     precut.add(app, service)
+    tapes.add(app, service)
     return app
