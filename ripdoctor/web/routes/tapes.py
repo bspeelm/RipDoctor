@@ -11,6 +11,7 @@ from ripdoctor.audio import ffprobe, split
 from ripdoctor.audio import ingest as G
 from ripdoctor.core import filing as TF
 from ripdoctor.core import match as TM
+from ripdoctor.core import playlist as PL
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
@@ -183,12 +184,22 @@ def add(app: App, service: Service) -> None:
             "playlist": playlist_view(tape),
         }
 
+    def archived(tape: TP.Tape) -> bool:
+        audio = T.audio_file(layout, tape.id).is_file()
+        return PL.archived(PS.read(layout, tape.id), audio)
+
+    def not_archived(tape: TP.Tape) -> None:
+        if archived(tape):
+            raise H.HttpError(409, f"{tape.name} is archived, and stays as it is")
+
     def playlist_view(tape: TP.Tape) -> dict[str, Any]:
         state = PS.read(layout, tape.id)
         library = service.settings.library
         return {
             **state.to_dict(),
             "path": str(PS.path_of(library, state.file)) if state.file else "",
+            "done": archived(tape),
+            "archive_refusal": TX.refusal(_place(service), tape, state),
         }
 
     def beets_for(what: str) -> IMP.Beets:
@@ -205,6 +216,7 @@ def add(app: App, service: Service) -> None:
         return H.ok(view(changed))
 
     def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
+        not_archived(tape)
         try:
             return kept(TP.relist(tape, songs))
         except TP.EarSet as e:
@@ -221,6 +233,7 @@ def add(app: App, service: Service) -> None:
                         "name": t.name,
                         "songs": len(t.songs),
                         "mismatch": bool(t.mismatch),
+                        **({"done": True} if archived(t) else {}),
                     }
                     for t in found.tapes
                 ],
@@ -265,6 +278,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/tapes/([^/]+)/upload/begin")
     @settled
     def begin(r: H.Request, tape: TP.Tape) -> H.Response:
+        not_archived(tape)
         if T.audio_file(layout, tape.id).is_file():
             raise H.HttpError(
                 409,
@@ -593,6 +607,20 @@ def add(app: App, service: Service) -> None:
             return state.to_dict()
 
         return started(tape.id, "playlist", work)
+
+    @app.route("POST", "/api/tapes/([^/]+)/archive")
+    def archive(r: H.Request) -> H.Response:
+        """Refused with every reason, and asked again of the library once running."""
+        tape = held(r)
+        refusal = TX.refusal(_place(service), tape, PS.read(layout, tape.id))
+        if refusal:
+            raise H.HttpError(409, refusal)
+        importer = beets_for("archiving a tape asks beets where its songs are")
+
+        def work(job: Job) -> dict[str, Any]:
+            return TX.archive(_place(service), importer, tape.id, job, service.now())
+
+        return started(tape.id, "archive", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled

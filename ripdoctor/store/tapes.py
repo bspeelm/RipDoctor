@@ -267,6 +267,22 @@ def remove(layout: Layout, tape: str, now: float) -> Path:
     return target
 
 
+def clear_proved(
+    layout: Layout, tape: str, proved: Collection[str], now: float
+) -> list[str]:
+    """Clear what has been proved to be elsewhere. A cut nothing answers for moves
+    aside, and the uncut file goes last so an interrupted clear can be run again."""
+    cleared = []
+    for name in sorted(cuts_on_disk(layout, tape)):
+        if name in proved:
+            cut_file(layout, tape, name).unlink()
+            cleared.append(name)
+        else:
+            supersede(layout, tape, name, now)
+    audio_file(layout, tape).unlink()
+    return [*cleared, AUDIO]
+
+
 def sweep(layout: Layout) -> list[str]:
     """A tape's upload lasts as long as its tape, however old: drop only orphans."""
     swept: list[str] = []

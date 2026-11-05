@@ -25,7 +25,9 @@ from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
+from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
+from ripdoctor.store.safety import under
 
 # What is cleared once the record is safe: the cut tracks, the tick clips and
 # the measurements. All of them are derived, and all of them are large.
@@ -137,6 +139,12 @@ def repair_argv(source: str, dest: str) -> list[str]:
 # putting this one back. What happens to it afterwards is ADR-055.
 SUPERSEDED = "_superseded"
 
+# A leading underscore is what no record's slug can have, and nothing in here is
+# named as a side, so a tape never appears among the archive's records.
+TAPE_DIR = "_tape-{tape}"
+# A byte-for-byte copy decodes to the same length. This allows only for rounding.
+SAME_LENGTH = 0.1
+
 
 def step_aside(target: Path) -> Path | None:
     """Move an archived side aside, returning where, so it can be put back."""
@@ -239,4 +247,34 @@ def put_away(
         "archived": archived,
         "notes": notes,
         "removed": removed,
+    }
+
+
+def keep_tape(runner: Runner, layout: Layout, tape: str) -> dict[str, Any]:
+    """Copy a tape's uncut file in and read it back against the source's own length.
+
+    Clears nothing. An earlier copy is stepped aside only once this one has read
+    back, and stays aside: a tape has no other record of what it superseded.
+    """
+    source = T.audio_file(layout, tape)
+    dest = under(layout.archive, TAPE_DIR.format(tape=tape))
+    dest.mkdir(parents=True, exist_ok=True)
+    final, part = dest / T.AUDIO, dest / f"part-{T.AUDIO}"
+    seconds = true_duration(runner, str(source), timeout=T.LONG_RUN)
+    try:
+        shutil.copy2(source, part)
+        back = read_back(runner, part, T.LONG_RUN)
+        if seconds <= 0 or not back or abs(back - seconds) > SAME_LENGTH:
+            raise NotReady(
+                f"the copy of {tape} did not read back as {seconds:.2f} s "
+                f"(read {back:.2f} s) - nothing was cleared"
+            )
+        step_aside(final)
+        part.replace(final)
+    finally:
+        part.unlink(missing_ok=True)
+    return {
+        "file": str(final),
+        "bytes": final.stat().st_size,
+        "seconds": round(back, 2),
     }

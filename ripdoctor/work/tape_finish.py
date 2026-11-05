@@ -1,19 +1,22 @@
-"""A tape's playlist, after filing and after any import. ADR-063."""
+"""A tape's playlist, after filing and after any import, and putting it away.
+ADR-063."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from ripdoctor.audio.runner import Runner
 from ripdoctor.core import playlist as P
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations.importer import Beets
+from ripdoctor.store import archive as AR
 from ripdoctor.store import playlists as S
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains
-from ripdoctor.work.jobs import Busy, Jobs
+from ripdoctor.work.jobs import Busy, Job, Jobs
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,3 +124,36 @@ def after_filing(
         return rebuild_all(place, beets, jobs, now, besides=tape_id)
     except Exception as e:
         return [f"playlists were not brought up to date: {e}"]
+
+
+def refusal(place: Place, tape: TP.Tape, state: P.State) -> str:
+    audio = T.audio_file(place.layout, tape.id).is_file()
+    there = bool(state.file) and S.path_of(place.library, state.file).is_file()
+    return P.archive_refusal(tape, state, audio=audio, playlist_there=there)
+
+
+def archive(
+    place: Place, beets: Beets, tape_id: str, job: Job, now: float
+) -> dict[str, Any]:
+    """The library is asked again here, whatever the page last showed. Then the copy
+    is read back, and only then is anything cleared; the tape's document stays."""
+    job.total = 3
+    job.step(tape_id, "asking the library about every song")
+    state = rebuild(place, beets, tape_id, now)
+    if state.outcome in (P.UNKNOWN, P.FAILED):
+        raise ValueError(state.note)
+    tape = T.read(place.layout, tape_id)
+    refused = refusal(place, tape, state)
+    if refused:
+        raise ValueError(refused)
+    job.finished = 1
+    job.step(tape.name, "copying to the archive and reading it back")
+    kept = AR.keep_tape(place.runner, place.layout, tape_id)
+    S.save(place.layout, tape_id, replace(state, archived={**kept, "at": now}))
+    job.finished = 2
+    job.step(tape.name, "clearing what is proved to be elsewhere")
+    count = len(tape.songs)
+    proved = {TP.cut_name(s, count) for s in tape.songs if not s.skip}
+    cleared = T.clear_proved(place.layout, tape_id, proved, now)
+    job.finished = 3
+    return {**kept, "cleared": cleared}

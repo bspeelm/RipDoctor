@@ -15,6 +15,7 @@ from ripdoctor.config.settings import Settings
 from ripdoctor.core import filing as F
 from ripdoctor.core import playlist as P
 from ripdoctor.core import tape as TP
+from ripdoctor.store import archive as AR
 from ripdoctor.store import playlists as S
 from ripdoctor.store import tapes as T
 from ripdoctor.web.routes import build
@@ -576,6 +577,206 @@ def test_with_the_fallback_tagger_a_written_playlist_is_said_not_to_be_rebuilt(
     assert RT.after_import(service) == ["playlists were not rebuilt: that takes beets"]
 
 
+# ----------------------------------------------------------------- the archive gate
+
+
+def archive(app, tape: str, service: Service):  # type: ignore[no-untyped-def]
+    return post(app, f"/api/tapes/{tape}/archive", service)
+
+
+def ready_to_archive(app, service: Service) -> str:  # type: ignore[no-untyped-def]
+    tape = filed(app, service)
+    runner = beet_of(service)
+    runner.audio = T.audio_file(service.layout, tape)
+    runner.cuts = T.dir_for(service.layout, tape) / T.CUTS
+    return tape
+
+
+def archived_at(service: Service, tape: str) -> Path:
+    return service.layout.archive / f"_tape-{tape}"
+
+
+def untouched(service: Service, tape: str) -> None:
+    assert T.audio_file(service.layout, tape).is_file()
+    assert len(T.cuts_on_disk(service.layout, tape)) == 2
+
+
+def test_archive_is_refused_with_every_reason_while_a_song_is_unresolved(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    beet_of(service).fails["rel-2"] = b"error: the disk said no\n"
+    file_it(app, tape, service)
+    refused = archive(app, tape, service)
+    assert refused.status == 409
+    assert "song 2 (Two)" in refused.json()["error"]
+    assert "the disk said no" in refused.json()["error"]
+    untouched(service, tape)
+    assert not archived_at(service, tape).exists()
+    assert view(app, tape, service)["playlist"]["archive_refusal"]
+
+
+def test_archive_is_refused_before_any_playlist_is_written(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    refused = archive(app, tape, service)
+    assert refused.status == 409 and "no playlist" in refused.json()["error"]
+
+
+def test_archive_asks_the_library_again_whatever_the_page_last_showed(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    beet_of(service).forgets(path_of_song(service, tape, 1))
+    assert archive(app, tape, service).status == 202
+    said = job_of(app, tape, service)["error"]
+    assert "song 1 (One)" in said
+    assert T.audio_file(service.layout, tape).is_file()
+    assert not list(archived_at(service, tape).glob("*"))
+
+
+def test_archive_is_refused_when_beets_cannot_answer_and_clears_nothing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    beet_of(service).ls_fails = True
+    assert archive(app, tape, service).status == 202
+    assert "beets could not answer" in job_of(app, tape, service)["error"]
+    untouched(service, tape)
+
+
+def test_archive_is_refused_when_the_playlist_file_is_gone(service: Service) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    file_of(service, tape).unlink()
+    refused = archive(app, tape, service)
+    assert refused.status == 409 and "is gone" in refused.json()["error"]
+
+
+def test_a_failed_read_back_clears_nothing_and_leaves_no_copy(service: Service) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    beet_of(service).inner.bad.add("part-")
+    assert archive(app, tape, service).status == 202
+    assert "did not read back" in job_of(app, tape, service)["error"]
+    untouched(service, tape)
+    assert list(archived_at(service, tape).iterdir()) == []
+    assert state_of(service, tape).archived is None
+
+
+def test_a_copy_of_another_length_clears_nothing(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    monkeypatch.setattr(AR, "read_back", lambda *_a: 1.0)
+    assert archive(app, tape, service).status == 202
+    assert "did not read back" in job_of(app, tape, service)["error"]
+    untouched(service, tape)
+
+
+def test_the_copy_is_read_back_with_flac_and_a_decode_before_anything_is_cleared(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    runner = beet_of(service)
+    assert archive(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+
+    part = str(archived_at(service, tape) / f"part-{T.AUDIO}")
+    assert ("flac", "-t", "-s", part) in runner.calls
+    assert any(c[0] == "ffmpeg" and part in c for c in runner.calls)
+    assert runner.at_read_back == [(True, {"01 One.flac", "02 Two.flac"})]
+
+    assert (archived_at(service, tape) / T.AUDIO).is_file()
+    assert not T.audio_file(service.layout, tape).exists()
+    assert T.cuts_on_disk(service.layout, tape) == set()
+
+
+def test_a_cut_of_a_skipped_song_is_moved_aside_and_not_deleted(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    post(app, f"/api/tapes/{tape}/songs/2/skip", service)
+    file_it(app, tape, service)
+    T.cut_file(service.layout, tape, "02 Two.flac").write_bytes(b"only copy")
+    assert archive(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    aside = list((T.dir_for(service.layout, tape) / T.SUPERSEDED).iterdir())
+    assert [p.read_bytes() for p in aside] == [b"only copy"]
+
+
+def test_an_earlier_archived_copy_is_moved_aside_and_kept(service: Service) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    where = archived_at(service, tape)
+    where.mkdir(parents=True)
+    (where / T.AUDIO).write_bytes(b"an earlier take")
+    assert archive(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    aside = list((where / AR.SUPERSEDED).iterdir())
+    assert [p.read_bytes() for p in aside] == [b"an earlier take"]
+
+
+def test_an_archived_tape_stays_listed_done_and_its_playlist_keeps_rebuilding(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    archive(app, tape, service)
+    assert not job_of(app, tape, service)["error"]
+
+    listed = get(app, "/api/tapes", service).json()["tapes"]
+    assert [(t["id"], t.get("done")) for t in listed] == [(tape, True)]
+    shown = view(app, tape, service)["playlist"]
+    assert shown["done"] and shown["archived"]["seconds"] > 0
+    assert "already archived" in shown["archive_refusal"]
+
+    new = Path(service.settings.library) / "Reissue" / "1.flac"
+    beet_of(service).moves(path_of_song(service, tape, 1), new)
+    rebuild(app, tape, service)
+    assert lines_of(service, tape)[2] == "../Reissue/1.flac"
+
+
+def test_an_archived_tape_takes_no_new_audio_or_list(service: Service) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    archive(app, tape, service)
+    begun = post(
+        app, f"/api/tapes/{tape}/upload/begin", service, {"name": "a", "size": 1}
+    )
+    assert begun.status == 409 and "archived" in begun.json()["error"]
+    listed = post(app, f"/api/tapes/{tape}/songs", service, {"songs": []})
+    assert listed.status == 409 and "archived" in listed.json()["error"]
+
+
+def test_a_tape_in_the_archive_never_reaches_the_record_picker(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    before = service.layout.albums(include_archive=True)
+    archive(app, tape, service)
+    assert archived_at(service, tape).is_dir()
+    assert service.layout.albums(include_archive=True) == before
+    assert not (service.layout.archive / tape).exists()
+
+
+def test_a_tape_named_like_a_side_still_stays_out_of_the_record_picker(
+    service: Service,
+) -> None:
+    before = service.layout.albums(include_archive=True)
+    where = service.layout.archive / "_tape-side-a"
+    where.mkdir(parents=True)
+    (where / T.AUDIO).write_bytes(b"x")
+    assert service.layout.albums(include_archive=True) == before
+
+
 def test_the_page_shows_the_path_the_count_and_the_last_outcome(
     service: Service,
 ) -> None:
@@ -584,4 +785,4 @@ def test_the_page_shows_the_path_the_count_and_the_last_outcome(
     shown = view(app, tape, service)["playlist"]
     assert shown["path"] == str(file_of(service, tape))
     assert shown["songs"] == 2 and shown["outcome"] == P.WRITTEN
-    assert shown["at"] == service.now()
+    assert shown["at"] == service.now() and shown["archive_refusal"] == ""
