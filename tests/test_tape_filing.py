@@ -267,6 +267,16 @@ def test_the_same_title_twice_on_an_album_is_told_apart_by_track_number() -> Non
     assert F.arrivals(song, [first, second], track=1) == ["/lib/1.flac"]
 
 
+def test_a_release_with_no_recording_id_tells_a_title_apart_by_track_number() -> None:
+    proposal = from_a_release("r1", 2, "One")
+    empty = replace(proposal.choice, recording="")  # type: ignore[arg-type]
+    song = a_song(2, "One", proposal=replace(proposal, choice=empty))
+    _, first, second = twins()
+    first = replace(first, length=200.0)
+    assert F.arrivals(song, [first, second], track=2) == [second.path]
+    assert F.arrivals(song, [first], track=2) == [first.path]
+
+
 def test_a_from_list_song_is_never_given_a_row_of_another_track_number() -> None:
     song, first, _ = twins()
     assert F.arrivals(song, [first], track=2) == []
