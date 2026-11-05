@@ -156,8 +156,18 @@ class _Filing:
     def rows(self, query: list[str]) -> tuple[F.Row, ...]:
         return self.beets.library_rows(self.runner, self.library, query)
 
-    def tell(self, song: TP.Song, state: str, path: str = "", note: str = "") -> None:
-        self.tape = F.recorded(self.tape, song.number, state, path, note)
+    def tell(
+        self,
+        song: TP.Song,
+        state: str,
+        path: str = "",
+        note: str = "",
+        *,
+        keep_begun: bool = False,
+    ) -> None:
+        self.tape = F.recorded(
+            self.tape, song.number, state, path, note, keep_begun=keep_begun
+        )
         T.save(self.layout, self.tape)
         self.unanswered.discard(song.number)
         self.job.finished += 1
@@ -184,20 +194,44 @@ class _Filing:
                 cleared.add(row.path)
         return cleared
 
+    def found_again(self, run: F.Run, song: TP.Song) -> bool:
+        """Whether an attempt that got as far as beets answers for this song. Importing
+        again could file it twice, so this comes before the pre-check, whose length
+        rule goes by the list and may not recognise what the person accepted."""
+        rows = self.read_back(run, song)
+        path = F.recovered(song, rows)
+        if path:
+            self.complete(song, F.ALREADY, path)
+            return True
+        stray = F.astray(song, rows)
+        if stray:
+            self.tell(
+                song, F.FAILED, note=_outside(stray, self.library), keep_begun=True
+            )
+        return bool(stray)
+
     def checked(self, run: F.Run) -> list[tuple[F.Track, tuple[F.Row, ...]]]:
         """The songs still to import, with the rows beside them before the import."""
         waiting = []
         for track in run.tracks:
             song = track.song
             self.job.step(TP.label(song), "asking the library")
+            if song.import_begun and self.found_again(run, song):
+                continue
             by_id, by_name = self.beets.owned(
                 self.runner, self.library, F.recording_of(song), F.lead(song.artist)
             )
             said = F.precheck(song, self.sited(by_id), self.sited(by_name))
             if said.action == F.FILE:
                 waiting.append((track, by_name))
-            elif said.action == F.ALREADY and song.import_begun:
-                self.complete(song, said.action, said.path, said.note)
+            elif said.action == F.ALREADY:
+                self.complete(
+                    song,
+                    said.action,
+                    said.path,
+                    said.note,
+                    repair=song.import_begun,
+                )
             else:
                 self.tell(song, said.action, said.path, said.note)
         return waiting
@@ -212,24 +246,30 @@ class _Filing:
             query = [f"artist:{F.lead(song.artist)}", f"album:{song.album}"]
         return self.sited(self.rows(query))
 
-    def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
-        """A song the library holds. Beets rewrites what it files at the writer's
-        umask, so the modes come back last, before the outcome is recorded. ADR-056."""
-        said = (*notes, *self.repaired(song, path))
-        TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
+    def complete(
+        self, song: TP.Song, state: str, path: str, *notes: str, repair: bool = True
+    ) -> None:
+        """A song the library holds, and nothing here changes that. Beets rewrites what
+        it files at the writer's umask, so the modes come back last, before the outcome
+        is recorded, and a song merely found owned has only them seen to. ADR-056."""
+        said = [*notes, *(self.repaired(song, path) if repair else ())]
+        try:
+            TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
+        except OSError as e:  # said on the song, whose outcome stands
+            said.append(f"its modes could not be set: {e}")
         self.tell(song, state, path, "; ".join(n for n in said if n))
 
     def repaired(self, song: TP.Song, path: str) -> list[str]:
-        """What an import can leave out of a file it filed. The song is in the library
-        whatever happens here, so a failure is a note on it and not its outcome."""
-        if self.plugins is None:
-            self.plugins = self.beets.plugins(self.runner)
+        """What an import can leave out of a file it filed. Any failure, a timed-out
+        ReplayGain as much as a refusal, is a note on the song and not its outcome."""
         said = []
         try:
+            if self.plugins is None:
+                self.plugins = self.beets.plugins(self.runner)
             if "embedart" in self.plugins:
                 said.append(self.with_art(path))
             said.append(self.with_gain(song, path))
-        except ImportFailed as e:
+        except Exception as e:  # a retry would file it twice to get this back
             said.append(str(e))
         return said
 
@@ -298,7 +338,11 @@ class _Filing:
             unclear = str(e)
         for track, before in waiting:
             song = track.song
-            rows = self.read_back(run, song)
+            try:
+                rows = self.read_back(run, song)
+            except Exception as e:  # not knowing is kept as that, against this song
+                self.tell(song, F.UNKNOWN, note=_unconfirmed(e))
+                continue
             had = {r.path for r in before}
             path, stray = F.arrived(song, rows, had), F.astray(song, rows, had)
             copy = copies[song.number]
@@ -315,11 +359,9 @@ class _Filing:
                     song, F.FAILED, note=" - ".join(filter(None, (note, unclear)))
                 )
             elif stray:
-                note = (
-                    f"beets filed this at {stray}, outside the library at "
-                    f"{self.library} - move it in with beet move, then file again"
+                self.tell(
+                    song, F.FAILED, note=_outside(stray, self.library), keep_begun=True
                 )
-                self.tell(song, F.FAILED, note=note)
             else:
                 self.tell(
                     song,
@@ -337,9 +379,27 @@ class _Filing:
             if waiting:
                 self.imported(run, waiting, directory)
         except Exception as e:  # kept in the document against each song it stopped
+            begun = {s.number for s in self.tape.songs if s.import_begun}
             for track in run.tracks:
-                if track.song.number in self.unanswered:
+                number = track.song.number
+                if number in self.unanswered and number in begun:
+                    self.tell(track.song, F.UNKNOWN, note=_unconfirmed(e))
+                elif number in self.unanswered:
                     self.tell(track.song, F.FAILED, note=str(e))
+
+
+def _unconfirmed(why: Exception) -> str:
+    return (
+        f"beets may have this and could not be asked: {why} - file again to ask "
+        "again, which looks for it before anything is imported"
+    )
+
+
+def _outside(stray: str, library: str) -> str:
+    return (
+        f"beets filed this at {stray}, outside the library at {library} - "
+        "move it in with beet move, then file again"
+    )
 
 
 def _complaint(took: TapeRun) -> str:
@@ -404,7 +464,7 @@ def file_songs(
         {TP.cut_name(s, count) for s in done.songs if s.filing in F.FINISHED},
     )
 
-    failed = [TP.label(s) for s in done.songs if F.status(s) == F.FAILED]
+    failed = [TP.label(s) for s in done.songs if F.status(s) in (F.FAILED, F.UNKNOWN)]
     if failed:
         raise ValueError(
             f"{len(failed)} of {len(active)} songs did not file, and the rest did - "

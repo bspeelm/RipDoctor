@@ -387,6 +387,11 @@ def test_a_song_whose_filing_did_not_finish_shuts_the_gate_though_it_has_a_line(
     assert "Three" not in said and "Four" not in said
 
 
+def test_a_song_not_confirmed_shuts_the_gate_and_says_so() -> None:
+    tape = a_tape(a_song(1, "One", filing=F.UNKNOWN, filing_note="locked"))
+    assert "not confirmed in the library: locked" in refusal(P.State("a", 1), tape)
+
+
 def test_a_song_left_out_and_unfinished_is_named_once() -> None:
     tape = a_tape(a_song(1, "One", filing=F.FAILED, filing_note="no"))
     gone = (P.Entry(1, state=P.NOT_FILED, why="did not file: no"),)

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import shutil
 import stat
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -990,6 +992,167 @@ def test_a_song_recovered_after_a_restart_gets_its_modes_back(
         assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
 
 
+def list_is_out(service: Service, tape: str) -> None:
+    """The list says 30 s and the cut is 5: a person heard it and accepted that."""
+    current = T.read(service.layout, tape)
+    long = tuple(replace(s, length=30.0) for s in current.songs)
+    T.save(service.layout, replace(current, songs=long))
+
+
+def timing_out(service: Service, word: str) -> None:
+    runner = beet_of(service)
+    original = runner.run
+
+    def hangs(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if word in argv:
+            raise subprocess.TimeoutExpired(argv, timeout or 0.0)
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    runner.run = hangs  # type: ignore[method-assign]
+
+
+def locked_after_the_import(service: Service) -> None:
+    runner = beet_of(service)
+    original = runner._import
+
+    def imported_then_locked(args: tuple[str, ...]) -> Result:
+        answer = original(args)
+        runner.ls_fails = True
+        return answer
+
+    runner._import = imported_then_locked  # type: ignore[method-assign]
+
+
+def test_a_gain_that_times_out_is_a_note_and_the_song_stays_filed_with_its_modes(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    timing_out(service, "replaygain")
+    assert not file_it(app, tape, service)["error"]
+    for song in songs(service, tape):
+        assert song.filing == F.FILED and "timed out" in song.filing_note
+        assert not song.import_begun
+        assert (
+            stat.S_IMODE(Path(song.path).stat().st_mode) == service.settings.file_mode
+        )
+    assert len(imports_of(service)) == 1
+
+
+def test_a_read_back_that_cannot_answer_is_unknown_and_the_retry_only_reads_back(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    list_is_out(service, tape)
+    runner = beet_of(service)
+    locked_after_the_import(service)
+    job = file_it(app, tape, service)
+    assert "did not file" in job["error"]
+    for song in songs(service, tape):
+        assert (song.filing, song.import_begun) == (F.UNKNOWN, True)
+        assert "database is locked" in song.filing_note
+    rows = list(runner.rows)
+    assert len(rows) == 2
+
+    runner.ls_fails = False
+    assert not file_it(app, tape, service)["error"]
+    assert len(imports_of(service)) == 1
+    assert runner.rows == rows
+    for song in songs(service, tape):
+        assert (song.filing, song.import_begun) == (F.ALREADY, False)
+        assert (
+            stat.S_IMODE(Path(song.path).stat().st_mode) == service.settings.file_mode
+        )
+
+
+def test_a_retry_the_library_still_cannot_answer_imports_nothing_and_stays_unknown(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    locked_after_the_import(service)
+    file_it(app, tape, service)
+    assert file_it(app, tape, service)["error"]
+    assert len(runner.imports) == 1
+    for song in songs(service, tape):
+        assert (song.filing, song.import_begun) == (F.UNKNOWN, True)
+
+
+def test_an_import_that_times_out_is_unknown_and_never_imported_over(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    original = runner._import
+
+    def filed_then_hung(args: tuple[str, ...]) -> Result:
+        original(args)
+        raise subprocess.TimeoutExpired(args, 3600.0)
+
+    runner._import = filed_then_hung  # type: ignore[method-assign]
+    assert file_it(app, tape, service)["error"]
+    assert [s.filing for s in songs(service, tape)] == [F.UNKNOWN, F.UNKNOWN]
+
+    runner._import = original  # type: ignore[method-assign]
+    runner.imports.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert runner.imports == []
+    assert [s.filing for s in songs(service, tape)] == [F.ALREADY, F.ALREADY]
+
+
+def test_a_retry_told_there_is_no_row_files_the_song_as_usual(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service, "rel-1", "rel-1")
+    runner = beet_of(service)
+    original = runner._import
+
+    def locked_with_nothing_filed(args: tuple[str, ...]) -> Result:
+        runner.ls_fails = True
+        return Result(args, 1, b"", b"database is locked\n")
+
+    runner._import = locked_with_nothing_filed  # type: ignore[method-assign]
+    file_it(app, tape, service)
+    assert [s.filing for s in songs(service, tape)] == [F.UNKNOWN, F.UNKNOWN]
+
+    runner._import = original  # type: ignore[method-assign]
+    runner.ls_fails = False
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+
+
+def test_a_stranger_of_the_same_name_is_not_taken_for_an_interrupted_import(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    current = T.read(service.layout, tape)
+    begun = tuple(replace(s, import_begun=True) for s in current.songs)
+    T.save(service.layout, replace(current, songs=begun))
+    stranger = runner.owns("One", length="9:59", album="A Record", track="01")
+    assert not file_it(app, tape, service)["error"]
+    assert len(runner.imports) == 1
+    assert songs(service, tape)[0].path != str(stranger)
+
+
+def test_a_song_that_landed_outside_the_library_is_read_back_and_not_imported_again(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.elsewhere.add("rel-1")
+    assert file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].import_begun
+    runner.imports.clear()
+    assert file_it(app, tape, service)["error"]
+    assert "outside the library" in songs(service, tape)[0].filing_note
+    assert runner.imports == []
+
+
 def test_each_attempt_at_an_album_uses_a_new_directory(service: Service) -> None:
     """beets asks about resuming a path it was interrupted on."""
     app = build(service)
@@ -1040,13 +1203,27 @@ def test_modes_are_set_on_each_album_directory_after_its_import(
             assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
 
 
-def test_an_owned_album_s_modes_are_left_alone(service: Service) -> None:
+def test_a_song_found_already_owned_has_its_modes_put_right(service: Service) -> None:
     app = build(service)
     tape = pinned(app, service)
     where = beet_of(service).owns("One", mb_trackid="rec-One")
     where.chmod(0o600)
     file_it(app, tape, service)
-    assert stat.S_IMODE(where.stat().st_mode) == 0o600
+    assert stat.S_IMODE(where.stat().st_mode) == service.settings.file_mode
+
+
+def test_modes_that_cannot_be_set_are_a_note_on_a_song_that_stays_filed(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refused(*_a: object) -> int:
+        raise PermissionError("not yours to change")
+
+    monkeypatch.setattr(TJ.TG, "set_modes", refused)
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED and "not yours to change" in one.filing_note
 
 
 # ---------------------------------------------------------------- what beets left out

@@ -130,6 +130,9 @@ def _not_filed(song: TP.Song) -> Entry | None:
     if song.filing == F.FAILED:
         why = f"did not file: {song.filing_note}"
         return Entry(song.number, state=NOT_FILED, why=why)
+    if song.filing == F.UNKNOWN:
+        why = f"not confirmed in the library: {song.filing_note}"
+        return Entry(song.number, state=NOT_FILED, why=why)
     if song.filing not in F.FINISHED:
         return Entry(song.number, state=NOT_FILED, why="not filed yet")
     return None

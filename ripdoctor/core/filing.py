@@ -20,10 +20,10 @@ from ripdoctor.core.tape import (
     label,
 )
 
-ALREADY, FILED, FAILED = "already", "filed", "failed"
+ALREADY, FILED, FAILED, UNKNOWN = "already", "filed", "failed", "unknown"
 FILE = "file"
 FINISHED = frozenset((ALREADY, FILED))
-_SHOWN = {FAILED: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
+_SHOWN = {FAILED: 0, UNKNOWN: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +244,26 @@ def astray(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str
     return _row_of(song, rows, before, home=False)
 
 
+def _as_cut(song: Song, row: Row) -> bool:
+    if row.length is None or song.cut is None:
+        return False
+    return abs(row.length - (song.cut.end - song.cut.start)) <= LENGTH_TOLERANCE
+
+
+def recovered(song: Song, rows: Sequence[Row]) -> str:
+    """Where an earlier attempt's import put the song, if it did. Nothing says what
+    was there before that attempt, so with no id the row's length must agree, with
+    the list or with the cut handed over: a person may have heard a list be wrong."""
+    return arrived(
+        song,
+        [
+            r
+            for r in rows
+            if recording_of(song) or same_length(song, r) or _as_cut(song, r)
+        ],
+    )
+
+
 def second_row(run: Run, rows: Sequence[Row]) -> str:
     """A lookup-off run never joins an album, so anything already under this one
     means two album rows."""
@@ -253,9 +273,19 @@ def second_row(run: Run, rows: Sequence[Row]) -> str:
 
 
 def recorded(
-    tape: Tape, number: int, state: str, path: str = "", note: str = ""
+    tape: Tape,
+    number: int,
+    state: str,
+    path: str = "",
+    note: str = "",
+    *,
+    keep_begun: bool = False,
 ) -> Tape:
-    """One song's outcome. Pending or failed may become anything; finished stays."""
+    """One song's outcome. Pending or failed may become anything; finished stays.
+
+    `import_begun` lasts until the library has really answered, because it is what
+    keeps a retry from importing over a row the first run may have left.
+    """
 
     def told(song: Song) -> Song:
         if song.number != number:
@@ -263,7 +293,11 @@ def recorded(
         if song.filing in FINISHED:
             raise ValueError(f"{label(song)} is already {song.filing}")
         return replace(
-            song, filing=state, path=path, filing_note=note, import_begun=False
+            song,
+            filing=state,
+            path=path,
+            filing_note=note,
+            import_begun=song.import_begun and (keep_begun or state == UNKNOWN),
         )
 
     return replace(tape, songs=tuple(told(s) for s in tape.songs))

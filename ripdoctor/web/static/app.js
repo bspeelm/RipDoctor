@@ -1376,14 +1376,16 @@ function showEar(t) {
 
 const FILING_WORDS = {
   failed: "failed", pending: "not filed yet", filed: "filed",
-  already: "already there", skipped: "skipped",
+  already: "already there", skipped: "skipped", unknown: "not confirmed",
 };
 
+const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
+
 function filingRow(o) {
-  const tr = el("tr", o.state === "failed" ? "doubt" : null);
+  const tr = el("tr", FILING_NEEDS_A_LOOK.includes(o.state) ? "doubt" : null);
   const who = el("td");
   who.append(el("div", null, o.title), el("div", "dim", o.artist));
-  const where = el("td", o.state === "failed" ? "mark" : "dim");
+  const where = el("td", FILING_NEEDS_A_LOOK.includes(o.state) ? "mark" : "dim");
   where.append(el("div", null, o.path));
   if (o.note) where.append(el("div", "why", o.note));
   tr.append(el("td", "num", o.number), who,
@@ -1394,7 +1396,7 @@ function filingRow(o) {
 function showFiling(t) {
   const button = $("#tp-file-songs");
   const started = !!t && t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
-  const failed = started ? t.filing.filter((o) => o.state === "failed").length : 0;
+  const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).length : 0;
   button.disabled = !t || !!t.file_refusal || t.all_filed;
   button.textContent = failed ? "File again" : "File";
   const why = !t || t.playlist.done ? ""
@@ -1404,7 +1406,7 @@ function showFiling(t) {
   $("#tp-filing-wrap").hidden = !started;
   $("#tp-filing").replaceChildren(...(started ? t.filing.map(filingRow) : []));
   $("#tp-filing-sum").textContent = failed
-    ? `${failed} of ${t.filing.length} failed - the reasons are below; File again retries only those`
+    ? `${failed} of ${t.filing.length} need a look - the reasons are below; File again retries only those`
     : "";
 }
 

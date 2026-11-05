@@ -103,6 +103,10 @@ def test_a_retry_plans_only_what_is_unfinished_and_keeps_its_from_list_number() 
     assert [(t.song.number, t.number) for t in planned[0].tracks] == [(2, 2)]
 
 
+def test_a_song_not_confirmed_is_still_to_do() -> None:
+    assert F.runs(a_tape(a_song(1, "One", filing=F.UNKNOWN)))
+
+
 def test_a_skipped_song_is_in_no_run() -> None:
     assert F.runs(a_tape(a_song(1, "One", skip=True))) == ()
 
@@ -289,6 +293,35 @@ def test_failed_may_be_retried_and_finished_stays_finished() -> None:
         F.recorded(tape, 1, F.FAILED)
 
 
+def test_not_knowing_keeps_the_mark_against_a_re_import_and_an_answer_clears_it() -> (
+    None
+):
+    tape = a_tape(a_song(1, "One", import_begun=True))
+    tape = F.recorded(tape, 1, F.UNKNOWN, note="locked")
+    assert tape.songs[0].import_begun
+    assert (
+        F.recorded(tape, 1, F.FAILED, note="x", keep_begun=True).songs[0].import_begun
+    )
+    tape = F.recorded(tape, 1, F.FAILED, note="beets did not take it")
+    assert not tape.songs[0].import_begun
+
+
+def test_with_no_id_an_interrupted_import_is_found_by_the_list_or_cut_length() -> None:
+    cut = TP.CutRecord(TP.CUT, "01 One.flac", 10.0, 15.0)
+    song = a_song(1, "One", length=30.0, cut=cut)
+    here = a_row("One", 5.0, album="A Record")
+    listed = a_row("One", 31.0, album="A Record", path="/lib/listed.flac")
+    stranger = a_row("One", 599.0, album="A Record", path="/lib/stranger.flac")
+    assert F.recovered(song, [stranger]) == ""
+    assert F.recovered(song, [stranger, here]) == "/lib/one.flac"
+    assert F.recovered(song, [stranger, listed]) == "/lib/listed.flac"
+    assert F.recovered(song, [a_row("One", None, album="A Record")]) == ""
+
+
+def test_an_interrupted_import_with_an_id_is_found_by_it_alone() -> None:
+    assert F.recovered(a_pinned_song(), [a_row("Whatever", None)]) == "/lib/one.flac"
+
+
 def test_an_outcome_survives_the_document() -> None:
     tape = F.recorded(a_tape(a_song(1, "One")), 1, F.ALREADY, "/lib/one.flac", "by id")
     song = TP.Song.from_dict(tape.songs[0].to_dict())
@@ -306,9 +339,11 @@ def test_outcomes_put_failures_first_and_name_a_skip() -> None:
         a_song(3, "Three", filing=F.FAILED),
         a_song(4, "Four", filing=F.ALREADY),
         a_song(5, "Five"),
+        a_song(6, "Six", filing=F.UNKNOWN),
     )
     assert [(o["number"], o["state"]) for o in F.outcomes(tape)] == [
         (3, F.FAILED),
+        (6, F.UNKNOWN),
         (5, TP.PENDING),
         (1, F.FILED),
         (4, F.ALREADY),
