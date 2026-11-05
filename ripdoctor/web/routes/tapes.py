@@ -23,7 +23,7 @@ MAX_UPLOAD = 16 * 1024 * 1024 * 1024
 def _size(body: dict[str, Any]) -> int:
     try:
         size = int(body["size"])
-    except (KeyError, TypeError, ValueError) as e:
+    except (KeyError, TypeError, ValueError, OverflowError) as e:
         raise H.HttpError(400, "the file's size is needed") from e
     if size <= 0:
         raise H.HttpError(400, "that file is empty")

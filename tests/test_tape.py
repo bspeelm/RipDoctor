@@ -85,6 +85,17 @@ def test_a_bad_duration_names_the_row_and_the_fix(bad: str) -> None:
         one(f"Mix,,1,One,A Band,R,{bad}")
 
 
+@pytest.mark.parametrize(
+    "huge",
+    [10**400, float("inf"), "9" * 400 + ":00:00", "9" * 5000 + ":00:00"],
+)
+def test_a_length_too_large_to_hold_was_a_crash_and_is_now_refused(
+    huge: object,
+) -> None:
+    with pytest.raises(TP.BadList, match="song 1: length"):
+        TP.songs_from([{"title": "O", "artist": "A", "length": huge}])
+
+
 def test_rows_are_sorted_by_position() -> None:
     songs = TP.parse_list(a_list("M,,2,Two,A,R,1:00", "M,,1,One,A,R,1:00"))
     assert [(s.number, s.title) for s in songs] == [(1, "One"), (2, "Two")]

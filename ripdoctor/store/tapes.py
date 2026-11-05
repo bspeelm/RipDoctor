@@ -73,7 +73,7 @@ def read(layout: Layout, tape: str) -> Tape:
 
 def create(layout: Layout, name: str, now: float) -> Tape:
     """Two names can sanitise alike, so the directory is claimed, not assumed."""
-    base = tape_id(name)
+    base = named(tape_id(name), name, now).id
     where = under(layout.work, WHERE)
     where.mkdir(parents=True, exist_ok=True)
     wanted, suffix = base, 1

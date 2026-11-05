@@ -44,11 +44,15 @@ def _clean(text: object) -> str:
 
 def _length(value: object, where: str) -> float:
     seconds = 0.0
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        seconds = float(value)
-    elif isinstance(value, str) and (found := _DURATION.fullmatch(value.strip())):
-        hours, minutes, secs = found.groups()
-        seconds = int(hours or 0) * 3600.0 + int(minutes) * 60.0 + int(secs)
+    try:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            seconds = float(value)
+        elif isinstance(value, str) and (found := _DURATION.fullmatch(value.strip())):
+            hours, minutes, secs = found.groups()
+            seconds = int(hours or 0) * 3600.0 + int(minutes) * 60.0 + int(secs)
+    except (OverflowError, ValueError):
+        # Digits past what a float or an int will take are no length either.
+        seconds = 0.0
     if not math.isfinite(seconds) or seconds <= 0:
         raise BadList(f"{where}: length {value!r} is not m:ss - write it like 3:45")
     return seconds

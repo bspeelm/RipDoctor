@@ -254,6 +254,31 @@ def test_an_upload_over_the_limit_is_refused(service: Service) -> None:
     assert "16 GB" in refused.json()["error"]
 
 
+def test_an_infinite_size_was_an_uncaught_overflow_and_is_now_a_400(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = a_new_tape(app, service)
+    refused = app.dispatch(
+        H.Request.of(
+            "POST",
+            f"/api/tapes/{tape}/upload/begin",
+            headers=signed_in(service),
+            body=b'{"name": "mix.wav", "size": 1e999}',
+        )
+    )
+    assert refused.status == 400
+
+
+def test_a_length_too_large_to_hold_is_a_400(service: Service) -> None:
+    app = build(service)
+    tape = a_new_tape(app, service)
+    song = {"title": "O", "artist": "A", "album": "R", "length": 10**400}
+    refused = post(app, f"/api/tapes/{tape}/songs", service, {"songs": [song]})
+    assert refused.status == 400
+    assert "length" in refused.json()["error"]
+
+
 def test_an_upload_the_pool_has_no_room_for_is_refused(
     service: Service, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -524,6 +549,9 @@ def test_the_list_of_tapes_names_each_one(service: Service) -> None:
 
 def test_a_tape_needs_a_name(service: Service) -> None:
     assert post(build(service), "/api/tapes", service, {"name": "  "}).status == 400
+    found = T.listed(service.layout)
+    assert (found.tapes, found.unreadable) == ((), ())
+    assert not (service.layout.work / T.WHERE).exists()
 
 
 def test_a_tape_that_is_not_there_is_a_404(service: Service) -> None:

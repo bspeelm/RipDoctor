@@ -82,6 +82,15 @@ def test_a_write_failing_at_the_last_instant_leaves_the_document_whole(
     assert doc.read_text() == before
 
 
+def test_a_blank_name_left_a_stuck_directory_and_now_leaves_nothing(
+    tmp_path: Path,
+) -> None:
+    layout = a_layout(tmp_path)
+    with pytest.raises(TP.BadList):
+        T.create(layout, "  ", 1.0)
+    assert not (layout.work / T.WHERE).exists()
+
+
 def test_a_document_that_cannot_be_read_is_named_rather_than_dropped(
     tmp_path: Path,
 ) -> None:
