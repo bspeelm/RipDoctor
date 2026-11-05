@@ -873,6 +873,29 @@ def test_a_title_holding_a_line_separator_is_one_row_and_not_a_fragment(
     assert [(r.title, r.release) for r in rows] == [(title, "rel")]
 
 
+def test_a_path_ending_in_a_comma_is_never_sent_since_beets_would_read_everything() -> (
+    None
+):
+    runner = FakeRunner()
+    beets = _beets()
+    for ask in (
+        lambda: beets.forget_row(runner, "/lib", "/lib/odd,"),
+        lambda: beets.art_of(runner, "/lib", "/lib/odd,"),
+        lambda: beets.embed_art(runner, "/lib/odd,", "/lib/a.jpg"),
+        lambda: beets.replaygain(runner, "/lib/odd,"),
+    ):
+        with pytest.raises(I.ImportFailed, match="ends in ,"):
+            ask()
+    assert runner.calls == []
+
+
+def test_a_path_holding_a_comma_or_anything_else_is_sent_whole() -> None:
+    runner = FakeRunner()
+    path = "/lib/a, b $c 'd\" é.flac"
+    _beets().forget_row(runner, "/lib", path)
+    assert runner.calls[0][-1] == f"path:{path}"
+
+
 def test_a_relative_row_is_rooted_in_the_library(tmp_path: Path) -> None:
     (tmp_path / "a.flac").write_bytes(b"x")
     line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac", "", ""))

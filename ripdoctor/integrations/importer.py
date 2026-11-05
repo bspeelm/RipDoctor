@@ -559,7 +559,7 @@ class Beets:
 
     def forget_row(self, runner: Runner, root: str, path: str) -> None:
         """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
-        query = [f"path:{path}"]
+        query = [_one_file(path)]
         result = runner.run(self._argv(["remove", "-f", *query]), timeout=600)
         if not result.ok or self.library_rows(runner, root, query):
             why = TapeRun(result.returncode, result.err).why()
@@ -573,7 +573,7 @@ class Beets:
     def art_of(self, runner: Runner, root: str, path: str) -> str:
         """The art beets holds for the album of this file, or nothing."""
         result = runner.run(
-            self._argv(["ls", "-f", "$artpath", f"path:{path}"]), timeout=300
+            self._argv(["ls", "-f", "$artpath", _one_file(path)]), timeout=300
         )
         if not result.ok:
             why = TapeRun(result.returncode, result.err).why()
@@ -585,13 +585,13 @@ class Beets:
         """Into this one file: `-f` takes items, where the form without it rewrites
         every track of a whole album."""
         return self._complaint(
-            runner, ["embedart", "-y", "-f", art, f"path:{path}"], 600
+            runner, ["embedart", "-y", "-f", art, _one_file(path)], 600
         )
 
     def replaygain(self, runner: Runner, path: str) -> str:
         """This one file's gain. `-f` because a lookup-off import leaves a gain in the
         row and not in the file, and without it beets sees that row and skips."""
-        return self._complaint(runner, ["replaygain", "-f", f"path:{path}"], 3600)
+        return self._complaint(runner, ["replaygain", "-f", _one_file(path)], 3600)
 
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -717,6 +717,15 @@ class Beets:
             for fields in _fields(result.text)
             if len(fields) == _HELD.count(_SEP) + 1
         )
+
+
+def _one_file(path: str) -> str:
+    """Beets takes this as that exact path, whatever the path holds, except for a
+    trailing comma: that is an OR with everything, and a `remove` would forget the
+    whole library. There is no escape for it, so it is never sent."""
+    if path.endswith(","):
+        raise ImportFailed(f"beets cannot be asked about {path} alone: it ends in ,")
+    return f"path:{path}"
 
 
 def _fields(said: str) -> list[list[str]]:
