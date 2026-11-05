@@ -82,13 +82,23 @@ class TapeRun:
         """The one thing to tell a person, in place of a traceback in a log."""
         lines = [line.strip() for line in self.output.splitlines() if line.strip()]
         said = lines[-1] if lines else f"beets exited {self.returncode}, saying nothing"
-        if _RELATIVE_ROW in self.output:
+        missing = _MISSING.search(self.output)
+        if missing and not Path(missing[1]).is_absolute():
             return (
                 "beets crashed with FileNotFoundError, which merging into an album "
                 "does when a library row holds a relative path. Nothing was lost. "
                 "Back up the library database, rewrite those rows' paths as absolute "
                 f"ones, then file again. beets said: {said}"
             )
+        if missing:
+            return (
+                f"beets crashed looking for {missing[1]}, which is not there - put "
+                "it back, or clear the row that names it with beet remove, which "
+                "leaves files alone, then file again"
+            )
+        no_release = _NO_RELEASE.search(self.output)
+        if no_release:
+            return f"{no_release[0]} - check the release chosen, then file again"
         if _STARVED in self.output:
             return f"beets asked a question this did not answer: {said}"
         return said
@@ -206,7 +216,8 @@ DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
 # failure it causes looks like "the tracks are still in review", which is true
 # and is not the cause.
 _STARVED = "stdin stream ended"
-_RELATIVE_ROW = "FileNotFoundError"
+_MISSING = re.compile(r"FileNotFoundError:[^\n]*?: b?['\"]([^'\"\n]+)['\"]")
+_NO_RELEASE = re.compile(r"^No matching release found.*$", re.M)
 
 # Apply the release; merge when the album is already filed; apply again, because
 # merging matches afresh. Whatever goes unasked stays unread, which does no harm.

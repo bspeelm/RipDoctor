@@ -499,6 +499,35 @@ def test_a_relative_row_crash_tells_the_person_the_fix(service: Service) -> None
     assert "Back up the library database" in note
 
 
+def test_a_missing_absolute_path_is_named_and_not_called_a_relative_row() -> None:
+    why = IMP.TapeRun(
+        1, "FileNotFoundError: [Errno 2] No such file or directory: b'/lib/a.flac'\n"
+    ).why()
+    assert "/lib/a.flac" in why
+    assert "relative" not in why
+    assert "beet remove" in why
+
+
+def test_a_relative_row_crash_in_bytes_is_still_called_a_relative_row() -> None:
+    why = IMP.TapeRun(
+        1, "FileNotFoundError: [Errno 2] No such file or directory: b'Music/a.flac'\n"
+    ).why()
+    assert "relative path" in why
+
+
+def test_a_bogus_release_says_what_beets_said_about_it_and_not_only_the_prompt() -> (
+    None
+):
+    why = IMP.TapeRun(
+        1,
+        "/filing/1 (2 items)\nNo matching release found for 2 tracks.\n"
+        "For help, see: https://example.invalid\n[S]kip, Use as-is? \n"
+        "error: stdin stream ended while input required\n",
+    ).why()
+    assert "No matching release found for 2 tracks." in why
+    assert "check the release" in why
+
+
 # ---------------------------------------------------------------- retry and restart
 
 
