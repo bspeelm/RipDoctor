@@ -158,8 +158,7 @@ def from_recorded(tape: TP.Tape, on_disk: Collection[str]) -> tuple[Entry, ...]:
 
 def to_ask(tape: TP.Tape) -> tuple[str, ...]:
     """One beets query for a whole tape. An artist is asked for wherever an id will
-    not find the row: no id, or a song owned by name under whatever id its row has.
-    A trailing comma would read as beets' own separator."""
+    not find the row: no id, or a song owned by name under whatever id its row has."""
     terms: dict[str, None] = {}
     for song in tape.songs:
         if song.skip:
@@ -168,7 +167,7 @@ def to_ask(tape: TP.Tape) -> tuple[str, ...]:
         if recording:
             terms[f"mb_trackid:{recording}"] = None
         if not recording or song.filing == F.ALREADY:
-            terms[f"artist:{F.lead(song.artist).rstrip(',')}"] = None
+            terms[F.term("artist", F.lead(song.artist))] = None
     return tuple(terms)
 
 

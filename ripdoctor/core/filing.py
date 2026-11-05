@@ -72,6 +72,14 @@ def lead(artist: str) -> str:
     return search_artists(artist)[-1]
 
 
+def term(field: str, value: str) -> str:
+    """A beets query for any row whose field contains `value`, and what comes back is
+    judged here. Beets reads a leading `=`, `:` or `~` as another kind of query and a
+    trailing comma as an OR with the whole library, and has no escape for either, so
+    they are left off: it can only find more."""
+    return f"{field}:{value.lstrip('=:~# ').rstrip(', ')}"
+
+
 def choice_of(song: Song) -> Choice | None:
     choice = song.proposal.choice if song.proposal else None
     return choice if choice and choice.release else None

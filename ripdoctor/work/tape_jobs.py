@@ -257,7 +257,7 @@ class _Filing:
         elif run.release:
             query = [f"mb_albumid:{run.release}"]
         else:
-            query = [f"artist:{F.lead(song.artist)}", f"album:{song.album}"]
+            query = [F.term("artist", F.lead(song.artist)), F.term("album", song.album)]
         return self.sited(self.rows(query))
 
     def complete(
@@ -336,7 +336,7 @@ class _Filing:
 
         doubled = ""
         if not run.release:
-            query = [f"albumartist:{run.artist}", f"album:{run.album}"]
+            query = [F.term("albumartist", run.artist), F.term("album", run.album)]
             doubled = F.second_row(run, self.rows(query))
         self.tape = F.begun(self.tape, copies)
         T.save(self.layout, self.tape)

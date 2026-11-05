@@ -23,7 +23,15 @@ from ripdoctor.web.service import Service
 from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Job
 from tests.test_web_routes import a_service, get, post
-from tests.test_web_tape_cut import Cutting, cut, directory, job_of, placed, settle_all
+from tests.test_web_tape_cut import (
+    TWO,
+    Cutting,
+    cut,
+    directory,
+    job_of,
+    placed,
+    settle_all,
+)
 from tests.test_web_tapes import a_tape_runner
 
 TG_TITLE = "TITLE"
@@ -446,6 +454,21 @@ def test_a_library_that_cannot_be_asked_imports_nothing(service: Service) -> Non
     assert file_it(app, tape, service)["error"]
     assert imports_of(service) == []
     assert all("database is locked" in s.filing_note for s in songs(service, tape))
+
+
+def test_a_name_beets_would_read_as_query_syntax_is_asked_for_plainly(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service, TWO.replace("A Band,A Record", '=A Band,"A Record,"'))
+    settle_all(app, tape, service)
+    assert cut(app, tape, service).status == 202
+    assert not file_it(app, tape, service)["error"]
+    asked = [c for c in beet_of(service).calls if c[0] == "beet" and "ls" in c]
+    terms = {t for c in asked for t in c[c.index("-f") + 2 :]}
+    assert {"artist:A Band", "album:A Record"} <= terms
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+    assert not [t for t in terms if t.endswith(",") or t.split(":", 1)[1][:1] == "="]
 
 
 # ---------------------------------------------------------------------- from a list

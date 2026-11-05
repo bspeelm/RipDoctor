@@ -56,6 +56,24 @@ def a_row(title: str = "One", length: float | None = 200.0, **kw: object) -> F.R
     return F.Row(title, length=length, **fields)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("value", "asked"),
+    [
+        ("A Band", "artist:A Band"),
+        ("=Foo", "artist:Foo"),
+        (":Foo(", "artist:Foo("),
+        ("=~foo", "artist:foo"),
+        ("Odd,", "artist:Odd"),
+        ("Odd, ,", "artist:Odd"),
+        ("Earth, Wind & Fire", "artist:Earth, Wind & Fire"),
+    ],
+)
+def test_a_query_term_is_only_ever_a_substring_and_never_beets_own_syntax(
+    value: str, asked: str
+) -> None:
+    assert F.term("artist", value) == asked
+
+
 # ------------------------------------------------------------------- the plan
 
 

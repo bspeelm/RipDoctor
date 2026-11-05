@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ripdoctor.audio.runner import Runner, ToolMissing
-from ripdoctor.core.filing import Row, row_length
+from ripdoctor.core.filing import Row, row_length, term
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
@@ -555,7 +555,7 @@ class Beets:
             if recording
             else ()
         )
-        return by_id, self.library_rows(runner, root, [f"artist:{artist}"])
+        return by_id, self.library_rows(runner, root, [term("artist", artist)])
 
     def forget_row(self, runner: Runner, root: str, path: str) -> None:
         """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
