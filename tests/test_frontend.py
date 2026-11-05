@@ -257,6 +257,16 @@ def test_an_archived_tape_offers_nothing_that_would_change_it() -> None:
     assert "#tp-process" in body and '$("#tapepane").querySelectorAll' in body
 
 
+def test_a_song_in_the_library_offers_no_other_release() -> None:
+    """Change it stayed live on a filed song, only for the route to refuse it."""
+    js = (STATIC / "app.js").read_text()
+    assert 'FILED_STATES = ["filed", "already"]' in js
+    body = re.search(r"function reviewRow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    held = body.split("FILED_STATES.includes(song.filing)", 1)[1]
+    assert 'change.querySelectorAll("input, select, button")' in held
+    assert "c.disabled = true" in held
+
+
 def test_a_job_s_error_is_still_there_after_a_reload() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"async function openTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]

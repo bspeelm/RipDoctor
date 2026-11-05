@@ -1650,3 +1650,80 @@ def test_the_view_gates_the_button_and_lists_failures_first(service: Service) ->
     ]
     assert "not today" in view["filing"][0]["note"]
     assert view["filing"][1]["path"]
+
+
+# ----------------------------------------------- a filed song and what can change it
+
+
+@pytest.mark.parametrize("state", [F.FILED, F.ALREADY])
+def test_a_song_in_the_library_keeps_the_release_it_was_filed_as(
+    service: Service, state: str
+) -> None:
+    """The choice stayed live on a filed song, and the next rebuild looked for a
+    recording the library's copy did not have."""
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    T.save(service.layout, TP._changed(current, 1, filing=state))
+    before = T.read(service.layout, tape)
+    for action, body in (("release", {"release": "rel-other"}), ("from-list", {})):
+        answer = post(app, f"/api/tapes/{tape}/songs/1/{action}", service, body)
+        assert answer.status == 409, action
+        assert "already in the library" in answer.json()["error"]
+    assert T.read(service.layout, tape) == before
+
+
+def test_a_song_whose_filing_failed_can_still_be_changed(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    beet_of(service).fails["rel-1"] = b"no such release"
+    file_it(app, tape, service)
+    assert songs(service, tape)[0].filing == F.FAILED
+    answer = post(app, f"/api/tapes/{tape}/songs/1/from-list", service)
+    assert answer.status == 200, answer.json()
+    assert F.choice_of(songs(service, tape)[0]) is None
+
+
+def test_a_boundary_moved_on_a_filed_song_is_recut_and_never_filed_twice(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = len(beet_of(service).imports)
+    filed_at = songs(service, tape)[1].path
+    current = songs(service, tape)[1]
+    body = {"start": current.start, "end": (current.end or 0.0) - 0.5}
+    assert post(app, f"/api/tapes/{tape}/songs/2/edges", service, body).status == 200
+    assert post(app, f"/api/tapes/{tape}/file", service).status == 409
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert not file_it(app, tape, service)["error"]
+    two = songs(service, tape)[1]
+    assert (two.filing, two.path) == (F.FILED, filed_at)
+    assert len(beet_of(service).imports) == before
+
+
+def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = len(beet_of(service).imports)
+    filed_at = songs(service, tape)[0].path
+    rows = [
+        {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
+        for s in songs(service, tape)
+    ]
+    assert post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows}).status == 200
+    assert {s.filing for s in songs(service, tape)} == {TP.PENDING}
+    assert post(app, f"/api/tapes/{tape}/process", service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert (one.filing, one.path) == (F.ALREADY, filed_at)
+    assert len(beet_of(service).imports) == before

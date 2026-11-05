@@ -1067,6 +1067,27 @@ def test_an_archived_tape_takes_no_new_audio_or_list(service: Service) -> None:
     assert listed.status == 409 and "archived" in listed.json()["error"]
 
 
+def test_an_archived_tape_takes_no_new_judgement_or_choice(service: Service) -> None:
+    """The page offered none of these, and every route still took them."""
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    archive(app, tape, service)
+    before = T.read(service.layout, tape)
+    one = before.songs[0]
+    for action, body in (
+        ("release", {"release": "rel-other"}),
+        ("from-list", {}),
+        ("edges", {"start": one.start, "end": (one.end or 0.0) - 0.5}),
+        ("heard", {}),
+        ("skip", {}),
+    ):
+        answer = post(app, f"/api/tapes/{tape}/songs/1/{action}", service, body)
+        assert answer.status == 409 and "archived" in answer.json()["error"], action
+    matched = post(app, f"/api/tapes/{tape}/match", service, {"again": True})
+    assert matched.status == 409 and "archived" in matched.json()["error"]
+    assert T.read(service.layout, tape) == before
+
+
 def test_a_tape_in_the_archive_never_reaches_the_record_picker(
     service: Service,
 ) -> None:

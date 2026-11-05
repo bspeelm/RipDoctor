@@ -1325,6 +1325,8 @@ async function settleSong(send) {
   try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
+const FILED_STATES = ["filed", "already"];
+
 function reviewRow(song) {
   const row = el("tr", song.settled_by ? null : "doubt");
   const release = `/api/tapes/${tape.id}/songs/${song.number}/release`;
@@ -1374,6 +1376,11 @@ function reviewRow(song) {
   listButton.type = "button";
   listButton.onclick = () => settleSong(() => postJSON(fromList, {}));
   change.append(paste, listButton);
+  // What the library holds was filed as this choice, and the route refuses another.
+  if (FILED_STATES.includes(song.filing)) {
+    for (const c of change.querySelectorAll("input, select, button")) c.disabled = true;
+    change.append(el("div", "dim", "in the library, so this stays as it was filed"));
+  }
   row.append(change);
   return row;
 }

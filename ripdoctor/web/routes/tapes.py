@@ -401,6 +401,7 @@ def add(app: App, service: Service) -> None:
     def match(r: H.Request) -> H.Response:
         """Ask about every song with no answer, or with `again` every one unsettled."""
         tape = listed(r)
+        not_archived(tape)
         again = bool(r.json().get("again"))
 
         def work(job: Job) -> dict[str, Any]:
@@ -428,11 +429,19 @@ def add(app: App, service: Service) -> None:
     def song_of(tape: TP.Tape, r: H.Request) -> TP.Song:
         return song_named(tape, r.params[1])
 
+    def choosable(tape: TP.Tape, r: H.Request) -> TP.Song:
+        not_archived(tape)
+        song = song_of(tape, r)
+        refused = TF.choice_refusal(song)
+        if refused:
+            raise H.HttpError(409, refused)
+        return song
+
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/release")
     @settled
     def release(r: H.Request, tape: TP.Tape) -> H.Response:
         """One of the candidates needs no request; anything else is looked up."""
-        song = song_of(tape, r)
+        song = choosable(tape, r)
         body = r.json()
         given = str(body.get("release", "")).strip()
         position = _position(body)
@@ -459,7 +468,7 @@ def add(app: App, service: Service) -> None:
     @settled
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
-        return kept(TP.settle(tape, song_of(tape, r).number, None))
+        return kept(TP.settle(tape, choosable(tape, r).number, None))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/use-copy")
     @settled
@@ -490,7 +499,8 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, "this tape has no audio yet - upload it first")
         return tape
 
-    def judged(change: Callable[[], TP.Tape]) -> H.Response:
+    def judged(tape: TP.Tape, change: Callable[[], TP.Tape]) -> H.Response:
+        not_archived(tape)
         try:
             return kept(change())
         except TP.BadEdge as e:
@@ -501,19 +511,19 @@ def add(app: App, service: Service) -> None:
     def edges(r: H.Request, tape: TP.Tape) -> H.Response:
         song, body = song_of(tape, r), r.json()
         start, end = _seconds(body, TP.START), _seconds(body, TP.END)
-        return judged(lambda: TP.set_edges(tape, song.number, start, end))
+        return judged(tape, lambda: TP.set_edges(tape, song.number, start, end))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
     @settled
     def heard(r: H.Request, tape: TP.Tape) -> H.Response:
         song, now_heard = song_of(tape, r), bool(r.json().get("heard", True))
-        return judged(lambda: TP.hear(tape, song.number, now_heard))
+        return judged(tape, lambda: TP.hear(tape, song.number, now_heard))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/skip")
     @settled
     def skip(r: H.Request, tape: TP.Tape) -> H.Response:
         song, skipped = song_of(tape, r), bool(r.json().get("skip", True))
-        return judged(lambda: TP.skip(tape, song.number, skipped))
+        return judged(tape, lambda: TP.skip(tape, song.number, skipped))
 
     def boundaries_asked(
         tape: TP.Tape, body: dict[str, Any]

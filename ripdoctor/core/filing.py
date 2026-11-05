@@ -444,6 +444,17 @@ def file_refusal(tape: Tape, on_disk: Collection[str]) -> str:
     return ""
 
 
+def choice_refusal(song: Song) -> str:
+    """Why this song's release may not change, or nothing. A finished song's choice
+    is what the library's copy was filed as, and later jobs find that copy by it."""
+    if song.filing not in FINISHED:
+        return ""
+    return (
+        f"{label(song)} is already in the library, so its release stays as it is - to "
+        "file another edition, remove that copy with beets and load the list again"
+    )
+
+
 def status(song: Song) -> str:
     return SKIPPED if song.skip and song.filing not in FINISHED else song.filing
 
