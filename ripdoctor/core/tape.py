@@ -8,7 +8,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 from itertools import accumulate, pairwise
 from typing import Any
 
@@ -118,29 +118,7 @@ class Song:
     owes_ear: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "number": self.number,
-            "title": self.title,
-            "artist": self.artist,
-            "album": self.album,
-            "length": self.length,
-            "start": self.start,
-            "end": self.end,
-            "set_by": self.set_by,
-            "delta": self.delta,
-            "verdict": self.verdict,
-            "filing": self.filing,
-            "path": self.path,
-            "reason": self.reason,
-            "proposal": self.proposal.to_dict() if self.proposal else None,
-            "settled_by": self.settled_by,
-            "heard": self.heard,
-            "skip": self.skip,
-            "cut": asdict(self.cut) if self.cut else None,
-            "filing_note": self.filing_note,
-            "import_begun": self.import_begun,
-            "owes_ear": self.owes_ear,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Song:
@@ -539,21 +517,13 @@ class Tape:
         return any(s.set_by == EAR for s in self.songs)
 
     def to_dict(self) -> dict[str, Any]:
+        """Every field by name, and in plain values those that are not plain."""
         return {
-            "id": self.id,
-            "name": self.name,
-            "created": self.created,
-            "source": self.source,
-            "duration": self.duration,
-            "music_start": self.music_start,
-            "music_end": self.music_end,
-            "found_start": self.found_start,
-            "found_end": self.found_end,
+            **{f.name: getattr(self, f.name) for f in fields(self)},
             "songs": [s.to_dict() for s in self.songs],
             "gaps": [[g.lo, g.hi] for g in self.gaps],
             "quiet": [list(g.quiet) for g in self.gaps],
             "inside": [{"song": n, "lo": lo, "hi": hi} for n, lo, hi in self.inside],
-            "mismatch": self.mismatch,
         }
 
     @classmethod
