@@ -2286,3 +2286,23 @@ tapes get a check of their own, which is not designed yet.
 **Not included.** Recording a physical cassette through capture. The document
 does not assume a tape's audio came from an upload, so this stays possible, but
 no capture work is part of this.
+
+**The playlist and the archive step, in detail.** This is the check the paragraph
+on what is unresolved leaves open. What is known about a playlist sits in
+`playlist.json` beside the tape's document, since a rebuild touches it long after
+the tape's own work. Its filename is a slug of the name and a digest of the name,
+id and creation time, so names that clean up alike, two tapes of one name, and a
+new tape taking a removed tape's id never share a file, and a file whose header
+names another playlist is refused. A song with no recording id resolves by title,
+artist and album, not length. Several candidates narrow to the chosen release, then
+to the path filing proved, and are otherwise named; a song owned by name is also
+found at that path whatever id its row has. A rebuild updates a filed song's
+recorded path. Anything left out makes the playlist incomplete, but only a song not
+skipped shuts the gate. With nothing resolving the file is left alone, because that
+is what a library off its mount looks like, and a failure to ask beets is `unknown`
+and leaves it too. A rebuild holds each tape in turn, so a busy tape is named in the
+import's notes and not rebuilt. The uncut file goes to `archive/_tape-<id>/`, read
+back against the source's decoded length before it takes its name, and an earlier
+copy stays in `_superseded`. Clearing takes the uncut file and the cuts of songs not
+skipped, and any other cut moves to `superseded`. Clips, the preview and the
+measurements stay. An archived tape takes no new audio or list.
