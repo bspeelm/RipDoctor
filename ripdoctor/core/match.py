@@ -189,7 +189,7 @@ def _lead(listed: str) -> str:
     """The credit before any guests and, in a comma list, its first name.
 
     An ampersand makes the commas part of one name, as in a band called
-    "Earth, Wind & Fire", whose first word is not who is credited.
+    "Sun, Moon & Stars", whose first word is not who is credited.
     """
     credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", listed)).strip()
     return credit if _PROSE_LIST.search(credit) else credit.split(",")[0].strip()

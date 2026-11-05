@@ -338,7 +338,7 @@ def test_a_feat_credit_in_the_artist_still_agrees_with_the_album_artist() -> Non
     [
         ("A Band, Another Band", "A Band"),
         ("Another Band, A Band", "A Band & Another Band"),
-        ("Earth, Water & Fire", "Earth, Water & Fire"),
+        ("Sun, Sea & Stars", "Sun, Sea & Stars"),
     ],
 )
 def test_comma_separated_artists_agree_with_any_of_the_credit(
@@ -364,9 +364,9 @@ def test_various_artists_never_agrees_with_anyone(listed: str) -> None:
 @pytest.mark.parametrize(
     ("listed", "credited"),
     [
-        ("Earth, Wind & Fire", "Earth"),
+        ("Sun, Moon & Stars", "Sun"),
         ("Mr. X", "Planet X"),
-        ("X", "Malcolm X"),
+        ("X", "Another X"),
         ("Bob and the Hats", "The Hats"),
         ("A Band", "A Band & Another Band"),
         ("Another Band, A Band", "A Band"),
@@ -375,7 +375,7 @@ def test_various_artists_never_agrees_with_anyone(listed: str) -> None:
         ("", ""),
         (",", ";"),
         ("AC/DC", "AC"),
-        ("Foo", "Foo Fighters"),
+        ("Foo", "Foo Travellers"),
         ("Ma\u00df", "Mass"),
     ],
 )
@@ -391,7 +391,7 @@ def test_a_shared_word_or_an_empty_name_is_no_agreement(
     ("listed", "credited"),
     [
         ("A BAND", "a band"),
-        ("Hall and Oates", "Hall & Oates"),
+        ("Hill and Dale", "Hill & Dale"),
         ("A Band (feat. A Guest)", "A Band"),
         ("A Band feat. A Guest", "A Band feat. A Guest"),
         ("A Band, A Guest", "A Band feat. A Guest"),
@@ -410,8 +410,8 @@ def test_a_band_with_ft_in_its_name_is_not_cut_at_it() -> None:
 
 
 def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> None:
-    whole = M.lookup_key(wanted(artist="Earth, Wind & Fire"))
-    assert whole != M.lookup_key(wanted(artist="Earth"))
+    whole = M.lookup_key(wanted(artist="Sun, Moon & Stars"))
+    assert whole != M.lookup_key(wanted(artist="Sun"))
 
 
 @pytest.mark.parametrize(

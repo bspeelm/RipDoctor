@@ -65,7 +65,7 @@ def a_row(title: str = "One", length: float | None = 200.0, **kw: object) -> F.R
         ("=~foo", "artist:foo"),
         ("Odd,", "artist:Odd"),
         ("Odd, ,", "artist:Odd"),
-        ("Earth, Wind & Fire", "artist:Earth, Wind & Fire"),
+        ("Sun, Moon & Stars", "artist:Sun, Moon & Stars"),
     ],
 )
 def test_a_query_term_is_only_ever_a_substring_and_never_beets_own_syntax(
