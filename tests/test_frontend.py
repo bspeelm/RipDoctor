@@ -184,3 +184,15 @@ def test_the_capture_controls_invent_no_rate_or_depth() -> None:
         assert not re.search(r':\s*\[\s*["\']?[A-Z0-9]', fallback.group(1)), (
             f"a capture setting is invented here rather than read:\n{fallback.group(1)}"
         )
+
+
+def test_a_tape_job_s_error_outlives_the_reload_that_follows_the_job() -> None:
+    """`watchTape` sets the error and then calls `loadTapes`: blanking it there leaves
+    a failed job showing nothing anywhere. Only an action clears it."""
+    source = (STATIC / "app.js").read_text()
+    start = source.index("async function loadTapes(")
+    body = source[start : source.index("async function openTape(", start)]
+    assert '"#tp-err").textContent =' in body
+    assert not re.search(r'#tp-err"\)\.textContent = [^;]*: ""', body)
+    assert '$("#tp-err").textContent = "";' not in body
+    assert '$("#tp-pick").onchange = (e) => { $("#tp-err").textContent = "";' in source

@@ -1195,8 +1195,9 @@ async function loadTapes(keep) {
       o.value = t.id;
       return o;
     }));
-    $("#tp-err").textContent = found.unreadable.length
-      ? `could not read: ${found.unreadable.join(", ")}` : "";
+    // Only an action clears this: it runs after a job, whose error is still being read.
+    if (found.unreadable.length && !$("#tp-err").textContent)
+      $("#tp-err").textContent = `could not read: ${found.unreadable.join(", ")}`;
     const wanted = keep || tape?.id;
     if (found.tapes.some((t) => t.id === wanted)) pick.value = wanted;
     if (pick.value) await openTape(pick.value);
@@ -2761,7 +2762,7 @@ function wire() {
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
   $("#imp-stale-clear").onclick = clearStale;
   $("#tp-create").onclick = createTape;
-  $("#tp-pick").onchange = (e) => openTape(e.target.value);
+  $("#tp-pick").onchange = (e) => { $("#tp-err").textContent = ""; openTape(e.target.value); };
   $("#tp-file-pick").onclick = () => $("#tp-file").click();
   $("#tp-file").onchange = (e) => {
     tapePicked = e.target.files[0] || null;
