@@ -277,6 +277,22 @@ def test_another_tape_s_corrupt_playlist_memory_is_noted_when_filing_moves_on(
     assert told == [f"Mix: Vol. 1: its playlist was not rebuilt: {S.UNREADABLE}"]
 
 
+def test_a_failed_filing_job_still_returns_its_notes_about_other_tapes(
+    service: Service,
+) -> None:
+    app = build(service)
+    first = filed(app, service)
+    old = path_of_song(service, first, 1)
+    beet_of(service).moves(old, Path(service.settings.library) / "moved" / "1.flac")
+    gone = path_of_song(service, first, 2)
+    beet_of(service).loses_file(gone)
+    second = pinned(app, service)
+    done = file_it(app, second, service)
+    assert "did not file" in done["error"]
+    assert "Mix: Vol. 1: playlist rewritten, 1 songs" in done["result"]["notes"]
+    assert view(app, second, service)["job"]["result"] == done["result"]
+
+
 # ----------------------------------------------------------------------- rebuild
 
 

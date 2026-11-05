@@ -589,6 +589,8 @@ def add(app: App, service: Service) -> None:
                 notes = TX.after_filing(
                     _place(service), importer, service.jobs, tape.id, service.now()
                 )
+                # Set here because a raise leaves no return value for the job to keep.
+                job.result = {"notes": notes}
             return {**done, "notes": notes}
 
         return started(tape.id, "file", work)

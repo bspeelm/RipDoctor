@@ -1424,7 +1424,8 @@ function showPlaylist(t) {
     `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`,
     p.note,
   ].join(" ");
-  $("#tp-pl-state").textContent = said;
+  const told = t?.job?.result?.notes ?? [];
+  $("#tp-pl-state").textContent = [said, ...told].filter(Boolean).join(" ");
   const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
   $("#tp-pl-left").replaceChildren(...(p ? p.left_out.map((g) =>
     el("li", null, `song ${g.number} (${named(g.number)}): ${g.why}`)) : []));
