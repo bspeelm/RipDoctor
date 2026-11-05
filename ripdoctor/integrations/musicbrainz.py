@@ -355,24 +355,22 @@ def editions(
     return []
 
 
-def edition_of(release: Release) -> Edition:
+def edition_of(r: Release) -> Edition:
     return Edition(
-        release=release.mbid,
-        group=release.group,
-        title=release.title,
-        artist=release.credit or release.artist,
-        date=release.date,
-        status=release.status,
+        release=r.mbid,
+        group=r.group,
+        title=r.title,
+        artist=r.credit or r.artist,
+        date=r.date,
+        status=r.status,
         tracks=tuple(
             CatalogueTrack(
                 t.title, t.position or t.number, t.disc, t.length, t.recording
             )
-            for t in release.tracks
+            for t in r.tracks
         ),
-        live=release.live,
-        note=" ".join(
-            filter(None, (release.format, release.country, release.disambiguation))
-        ),
+        live=r.live,
+        note=" ".join(filter(None, (r.format, r.country, r.disambiguation))),
     )
 
 

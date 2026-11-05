@@ -442,3 +442,19 @@ def test_placing_boundaries_keeps_what_was_settled() -> None:
     tape = TP.settle(a_tape(), 1, None)
     placed = TP.place(tape, TP.Music(0.0, 380.0, ()))
     assert placed.songs[0].settled_by == M.PERSON
+
+
+def test_a_boundary_doubt_and_a_release_doubt_are_kept_apart() -> None:
+    doubt = M.Proposal(M.REVIEW, "which album")
+    tape = TP.with_proposals(a_tape(), {1: doubt})
+    tape = replace(
+        tape, songs=(replace(tape.songs[0], reason="which edge"), tape.songs[1])
+    )
+    read = TP.Tape.from_dict(json.loads(json.dumps(tape.to_dict())))
+    assert read.songs[0].reason == "which edge"
+    assert read.songs[0].proposal is not None
+    assert read.songs[0].proposal.reason == "which album"
+
+    settled = TP.settle(read, 1, None).songs[0]
+    assert settled.reason == "which edge"
+    assert settled.proposal is not None and settled.proposal.reason == ""

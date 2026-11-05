@@ -8,7 +8,9 @@ from typing import Any
 
 from ripdoctor.audio import ffprobe, split
 from ripdoctor.audio import ingest as G
+from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
 from ripdoctor.web import http as H
@@ -31,6 +33,33 @@ def _size(body: dict[str, Any]) -> int:
     if size > MAX_UPLOAD:
         raise H.HttpError(413, f"that file is larger than {MAX_UPLOAD // 2**30} GB")
     return size
+
+
+def _answers(service: Service, songs: list[TP.Song]) -> dict[int, TM.Proposal]:
+    """One album's songs from one set of requests. Failing to ask is not "none"."""
+    first = TP.wanted(songs[0])
+    try:
+        found = MB.editions(
+            MB.Paced(service.fetcher, service.pace),
+            TM.search_artists(first.artist),
+            TM.search_album(first.album),
+            sleep=service.pace.sleep,
+        )
+    except MB.LookupFailed as e:
+        failed = TM.Proposal(TM.FAILED, f"{e} - look again to retry")
+        return {s.number: failed for s in songs}
+    editions = [MB.edition_of(r) for r in found]
+    return {s.number: TM.propose(TP.wanted(s), editions) for s in songs}
+
+
+def _position(body: dict[str, Any]) -> int | None:
+    value = body.get("track")
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError) as e:
+        raise H.HttpError(400, f"track {value!r} is not a whole number") from e
 
 
 def add(app: App, service: Service) -> None:
@@ -67,6 +96,7 @@ def add(app: App, service: Service) -> None:
             "key": key,
             "job": None if job is None else job.as_dict(),
             "chunk": CHUNK,
+            "all_settled": TP.all_settled(tape),
         }
 
     def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
@@ -254,6 +284,77 @@ def add(app: App, service: Service) -> None:
             return H.ok(service.jobs.start(key, "tape", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
+
+    @app.route("POST", "/api/tapes/([^/]+)/match")
+    def match(r: H.Request) -> H.Response:
+        """Ask about every song with no answer, or with `again` every one unsettled."""
+        tape = held(r)
+        if not tape.songs:
+            raise H.HttpError(409, "this tape has no song list yet - add one first")
+        again = bool(r.json().get("again"))
+
+        def work(job: Job) -> dict[str, Any]:
+            current = T.read(layout, tape.id)
+            waiting = TP.to_match(current, again=again)
+            albums: dict[tuple[str, str], list[TP.Song]] = {}
+            for song in waiting:
+                albums.setdefault(TM.lookup_key(TP.wanted(song)), []).append(song)
+            job.total = len(waiting)
+            for songs in albums.values():
+                job.step(tape.name, f"asking about {songs[0].album or songs[0].title}")
+                current = TP.with_proposals(current, _answers(service, songs))
+                T.save(layout, current)
+                job.finished += len(songs)
+            return current.to_dict()
+
+        try:
+            job = service.jobs.start(T.key_of(tape.id), "match", work)
+            return H.ok(job.as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    def song_of(tape: TP.Tape, r: H.Request) -> TP.Song:
+        for song in tape.songs:
+            if str(song.number) == r.params[1]:
+                return song
+        raise H.HttpError(404, f"{tape.name} has no such song")
+
+    def by_person(tape: TP.Tape, song: TP.Song, choice: TM.Choice | None) -> H.Response:
+        changed = TP.settle(tape, song.number, choice)
+        T.save(layout, changed)
+        return H.ok(view(changed))
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/release")
+    @settled
+    def release(r: H.Request, tape: TP.Tape) -> H.Response:
+        """One of the candidates needs no request; anything else is looked up."""
+        song = song_of(tape, r)
+        body = r.json()
+        given = str(body.get("release", "")).strip()
+        position = _position(body)
+        for candidate in song.proposal.candidates if song.proposal else ():
+            if candidate.release == given and candidate.number and position is None:
+                return by_person(tape, song, candidate)
+        try:
+            found = MB.release_by_id(
+                MB.Paced(service.fetcher, service.pace),
+                TM.release_id(given),
+                sleep=service.pace.sleep,
+            )
+            choice = TM.track_on(TP.wanted(song), MB.edition_of(found), position)
+        except TM.NoTrack as e:
+            raise H.HttpError(409, str(e)) from e
+        except ValueError as e:
+            raise H.HttpError(400, str(e)) from e
+        except MB.LookupFailed as e:
+            raise H.HttpError(503, str(e)) from e
+        return by_person(tape, song, choice)
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/from-list")
+    @settled
+    def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
+        """No release: filed from the list's own values, the ADR-049 route."""
+        return by_person(tape, song_of(tape, r), None)
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled

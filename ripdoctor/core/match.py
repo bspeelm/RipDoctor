@@ -147,10 +147,7 @@ def search_album(album: str) -> str:
 
 def lookup_key(wanted: Wanted) -> tuple[str, str]:
     """Songs with the same key are answered by the same requests."""
-    return (
-        fold(search_artists(wanted.artist)[-1]),
-        fold(search_album(wanted.album)),
-    )
+    return fold(search_artists(wanted.artist)[-1]), fold(search_album(wanted.album))
 
 
 def release_id(text: str) -> str:
