@@ -29,6 +29,10 @@ def a_tape(*lengths: float) -> TP.Tape:
     return TP.Tape(id="t", name="Mix", songs=songs)
 
 
+def gap(lo: float, hi: float) -> TP.Gap:
+    return TP.Gap(lo, hi, lo, hi)
+
+
 def lane(segments: list[tuple[float, float]], window: float = 0.05) -> Envelope:
     levels: list[float] = []
     for seconds, db in segments:
@@ -164,7 +168,8 @@ def test_a_list_by_hand_is_cleaned_and_checked_the_same_way() -> None:
 
 def test_exact_gaps_set_every_boundary_and_agree() -> None:
     placed = TP.place(
-        a_tape(100, 200, 50), TP.Music(0.0, 354.0, ((100.0, 102.0), (302.0, 304.0)))
+        a_tape(100, 200, 50),
+        TP.Music(0.0, 354.0, (gap(100.0, 102.0), gap(302.0, 304.0))),
     )
     assert [(s.start, s.end, s.verdict) for s in placed.songs] == [
         (0.0, 100.0, TP.AGREES),
@@ -180,7 +185,7 @@ def test_a_silent_passage_inside_a_song_stays_inside_it() -> None:
     music = TP.Music(
         0.0,
         230.0 + 224.0 + 2.0 + 2.0 + 100.0 + 2.0,
-        ((230.0, 232.0), (241.4, 243.4), (458.0, 460.0)),
+        (gap(230.0, 232.0), gap(241.4, 243.4), gap(458.0, 460.0)),
     )
     placed = TP.place(a_tape(230, 224, 100), music)
     second = placed.songs[1]
@@ -192,7 +197,7 @@ def test_a_silent_passage_inside_a_song_stays_inside_it() -> None:
 
 
 def test_a_merged_song_fits_on_its_music_when_the_silence_is_not_counted() -> None:
-    placed = TP.place(a_tape(224), TP.Music(0.0, 229.0, ((9.4, 14.4),)))
+    placed = TP.place(a_tape(224), TP.Music(0.0, 229.0, (gap(9.4, 14.4),)))
     assert placed.songs[0].delta == 0.0
     assert placed.songs[0].verdict == TP.AGREES
 
@@ -201,7 +206,7 @@ def test_a_song_outside_the_tolerance_is_doubt_and_its_neighbours_are_not() -> N
     off = TP.LENGTH_TOLERANCE + 0.5
     placed = TP.place(
         a_tape(100, 200, 50),
-        TP.Music(0.0, 354.0 + off, ((100.0, 102.0), (302.0 + off, 304.0 + off))),
+        TP.Music(0.0, 354.0 + off, (gap(100.0, 102.0), gap(302.0 + off, 304.0 + off))),
     )
     assert [s.verdict for s in placed.songs] == [TP.AGREES, TP.DOUBT, TP.AGREES]
     assert placed.songs[1].delta == off
@@ -214,13 +219,13 @@ def test_a_song_exactly_at_the_tolerance_still_agrees() -> None:
 
 
 def test_a_length_is_never_scaled_to_fit_the_recording() -> None:
-    placed = TP.place(a_tape(100, 100), TP.Music(0.0, 404.0, ((200.0, 204.0),)))
+    placed = TP.place(a_tape(100, 100), TP.Music(0.0, 404.0, (gap(200.0, 204.0),)))
     assert [s.delta for s in placed.songs] == [100.0, 100.0]
     assert {s.length for s in placed.songs} == {100.0}
 
 
 def test_a_list_out_of_order_is_a_mismatch_and_is_never_reordered() -> None:
-    music = TP.Music(0.0, 604.0, ((300.0, 302.0), (502.0, 504.0)))
+    music = TP.Music(0.0, 604.0, (gap(300.0, 302.0), gap(502.0, 504.0)))
     placed = TP.place(a_tape(100, 200, 300), music)
     assert [s.title for s in placed.songs] == ["Song 1", "Song 2", "Song 3"]
     assert [s.start for s in placed.songs] == [0.0, 302.0, 504.0]
@@ -241,7 +246,8 @@ def test_no_gaps_at_all_still_returns_a_flagged_placement() -> None:
 
 def test_one_missing_gap_leaves_the_songs_it_cannot_ground_in_doubt() -> None:
     placed = TP.place(
-        a_tape(100, 200, 50, 80), TP.Music(0.0, 434.0, ((300.0, 302.0), (352.0, 354.0)))
+        a_tape(100, 200, 50, 80),
+        TP.Music(0.0, 434.0, (gap(300.0, 302.0), gap(352.0, 354.0))),
     )
     assert [s.verdict for s in placed.songs] == [
         TP.DOUBT,
@@ -270,7 +276,7 @@ def test_a_boundary_set_by_ear_is_never_moved_by_placing() -> None:
     tape = a_tape(100, 200, 50)
     ear = replace(tape.songs[1], start=101.0, end=299.0, set_by=TP.EAR)
     tape = replace(tape, songs=(tape.songs[0], ear, tape.songs[2]))
-    placed = TP.place(tape, TP.Music(0.0, 354.0, ((90.0, 103.0), (298.0, 304.0))))
+    placed = TP.place(tape, TP.Music(0.0, 354.0, (gap(90.0, 103.0), gap(298.0, 304.0))))
     held = placed.songs[1]
     assert (held.start, held.end, held.set_by) == (101.0, 299.0, TP.EAR)
     assert (placed.songs[0].start, placed.songs[0].end) == (0.0, 90.0)
@@ -281,7 +287,7 @@ def test_placing_twice_leaves_an_ear_set_boundary_where_it_was() -> None:
     tape = a_tape(100, 200)
     ear = replace(tape.songs[0], start=1.5, end=99.5, set_by=TP.EAR)
     tape = replace(tape, songs=(ear, tape.songs[1]))
-    music = TP.Music(0.0, 302.0, ((100.0, 102.0),))
+    music = TP.Music(0.0, 302.0, (gap(100.0, 102.0),))
     again = TP.place(TP.place(tape, music), music)
     assert (again.songs[0].start, again.songs[0].end) == (1.5, 99.5)
 
@@ -303,7 +309,7 @@ def test_a_new_list_drops_what_was_found_for_the_old_one() -> None:
 
 
 def test_a_hundred_songs_place_in_order_and_sort_in_order() -> None:
-    gaps = tuple((n * 202.0 - 2.0, n * 202.0) for n in range(1, 100))
+    gaps = tuple(gap(n * 202.0 - 2.0, n * 202.0) for n in range(1, 100))
     placed = TP.place(a_tape(*[200.0] * 100), TP.Music(0.0, 100 * 202.0 - 2.0, gaps))
     assert {s.verdict for s in placed.songs} == {TP.AGREES}
     assert [s.number for s in placed.songs] == list(range(1, 101))
@@ -327,7 +333,7 @@ def test_gaps_are_taken_at_a_fixed_level_whatever_the_music_is() -> None:
     assert found.start == 0.0
     assert found.end == 22.0
     assert len(found.gaps) == 1
-    assert found.gaps[0][0] == pytest.approx(10.0)
+    assert found.gaps[0].lo == pytest.approx(10.0)
 
     quiet = TP.gaps_of(lane([(10, -50.0), (2, -70.0), (10, -50.0)]))
     assert quiet.gaps == found.gaps
@@ -366,11 +372,82 @@ def test_the_threshold_the_album_flow_gets_from_a_call_is_unchanged() -> None:
     assert G.find(env, above=G.ABOVE).threshold == -48.0
 
 
+def a_song(seconds: float, fade: float, floor: float = DB_MIN) -> list[tuple]:
+    """Music, then `fade` seconds under the finding level, stepping toward `floor`."""
+    return [(seconds - fade, -20.0), (fade / 2, -62.0), (fade / 2, floor + 4.0)]
+
+
+FADE = 4.1
+LONG_FADE = 8.55
+LAST_FADE = 3.5
+DIGITAL_ZERO = [(2.0, DB_MIN)]
+LOW_NOISE = [(1.0, -70.0), (1.0, -69.0)]
+SIX_MEASURED = [180.2, 159.4, 159.1, 226.7, 184.6, 198.8]
+SIX_LISTED = [180.0, 160.0, 159.0, 226.0, 184.0, 198.0]
+
+
+def a_faded_tape(measured: list[float], noisy: int = -1) -> Envelope:
+    """Every song fades under the finding level; gap `noisy` never reaches zero."""
+    segments: list[tuple] = list(DIGITAL_ZERO)
+    for at, seconds in enumerate(measured):
+        fade = LONG_FADE if at == 0 else FADE
+        if at == len(measured) - 1:
+            segments += [*a_song(seconds, LAST_FADE), *DIGITAL_ZERO]
+        elif at == noisy:
+            segments += [*a_song(seconds, fade, -70.0), *LOW_NOISE]
+        else:
+            segments += [*a_song(seconds, fade), *DIGITAL_ZERO]
+    return lane(segments)
+
+
+def test_a_fade_under_the_finding_level_stays_with_its_song() -> None:
+    music = TP.gaps_of(a_faded_tape(SIX_MEASURED, noisy=2))
+    placed = TP.place(a_tape(*SIX_LISTED), music)
+    assert [s.delta for s in placed.songs] == pytest.approx(
+        [m - n for m, n in zip(SIX_MEASURED, SIX_LISTED, strict=True)], abs=0.11
+    )
+    assert {s.verdict for s in placed.songs} == {TP.AGREES}
+
+
+def test_a_gap_reports_where_it_was_found_and_where_it_is_quiet() -> None:
+    first = TP.gaps_of(a_faded_tape(SIX_MEASURED)).gaps[0]
+    assert first.lo == pytest.approx(2.0 + SIX_MEASURED[0] - LONG_FADE, abs=0.06)
+    assert first.quiet_lo == pytest.approx(2.0 + SIX_MEASURED[0], abs=0.06)
+    assert first.quiet_lo - first.lo == pytest.approx(LONG_FADE, abs=0.11)
+
+
+def test_a_gap_of_low_noise_is_judged_against_its_own_floor() -> None:
+    music = TP.gaps_of(lane([(10, -20.0), (2, -65.0), *LOW_NOISE, (10, -20.0)]))
+    assert music.gaps[0].lo == pytest.approx(10.0)
+    assert music.gaps[0].quiet == pytest.approx((12.0, 14.0))
+
+
+def test_the_first_and_last_songs_keep_their_fades_too() -> None:
+    env = lane([(3, DB_MIN), (1, -80.0), (10, -20.0), (LAST_FADE, -70.0), (4, DB_MIN)])
+    music = TP.gaps_of(env)
+    assert (music.found_start, music.found_end) == (4.0, 14.0)
+    assert music.start == 3.0
+    assert music.end == 14.0 + LAST_FADE
+
+
+def test_a_tape_that_runs_to_both_ends_has_no_outer_silence_to_walk() -> None:
+    music = TP.gaps_of(lane([(10, -20.0)]))
+    assert (music.start, music.end) == (music.found_start, music.found_end) == (0, 10)
+
+
 # --------------------------------------------------------------- the dictionary
 
 
+def test_a_document_from_before_quiet_interiors_still_reads() -> None:
+    placed = TP.place(a_tape(100, 200), TP.Music(0.0, 302.0, (gap(100.0, 102.0),)))
+    written = placed.to_dict()
+    for added in ("quiet", "found_start", "found_end"):
+        del written[added]
+    assert TP.Tape.from_dict(written) == placed
+
+
 def test_a_tape_survives_being_written_down() -> None:
-    placed = TP.place(a_tape(100, 200), TP.Music(0.0, 302.0, ((100.0, 102.0),)))
+    placed = TP.place(a_tape(100, 200), TP.Music(0.0, 302.0, (gap(100.0, 102.0),)))
     assert TP.Tape.from_dict(placed.to_dict()) == placed
 
 

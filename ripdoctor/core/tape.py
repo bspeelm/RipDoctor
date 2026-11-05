@@ -18,6 +18,7 @@ from ripdoctor.core.naming import MAX_COMPONENT, Unsafe, slug
 
 LENGTH_TOLERANCE = 3.0
 SILENCE_DBFS = -60.0
+QUIET_WITHIN = 3.0
 
 FOUND, EAR = "found", "ear"
 AGREES, DOUBT = "agrees", "doubt"
@@ -216,12 +217,60 @@ def tape_id(name: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class Gap:
+    """A silence as found at `SILENCE_DBFS`, and the quiet interior within it.
+
+    Finding at that level leaves a fade's tail outside the music, so song edges
+    come from the interior. It covers whole windows, which takes `quiet_hi` one
+    window past `hi`: `core.gaps` gives `hi` as the start of the last window.
+    """
+
+    lo: float
+    hi: float
+    quiet_lo: float
+    quiet_hi: float
+
+    @property
+    def quiet(self) -> Span:
+        return self.quiet_lo, self.quiet_hi
+
+
+@dataclass(frozen=True, slots=True)
 class Music:
-    """Where the sound starts and stops, and the silences between."""
+    """Where the sound starts and stops, and the silences between.
+
+    `start` and `end` are the edges of the tape's outer silences' quiet
+    interiors; `found_start` and `found_end` are where `SILENCE_DBFS` put them.
+    """
 
     start: float
     end: float
-    gaps: tuple[Span, ...]
+    gaps: tuple[Gap, ...]
+    found_start: float | None = None
+    found_end: float | None = None
+
+
+def _quiet(levels: Sequence[float], first: int, last: int) -> tuple[int, int]:
+    """Walk in from both ends to within `QUIET_WITHIN` of this stretch's minimum.
+
+    The stretch's own floor, because some silences are low noise and not zero.
+    """
+    floor = min(levels[first : last + 1]) + QUIET_WITHIN
+    while levels[first] > floor:
+        first += 1
+    while levels[last] > floor:
+        last -= 1
+    return first, last
+
+
+def _gap(levels: Sequence[float], window: float, found: G.Gap) -> Gap:
+    first, last = _quiet(levels, round(found.lo / window), round(found.hi / window))
+    return Gap(
+        round(found.lo, 3),
+        round(found.hi, 3),
+        round(first * window, 3),
+        round((last + 1) * window, 3),
+    )
 
 
 def gaps_of(env: Envelope) -> Music:
@@ -236,15 +285,20 @@ def gaps_of(env: Envelope) -> Music:
         return Music(0.0, 0.0, ())
     clean = Envelope(levels, env.window)
     found = G.find(clean, below=clean.percentile(G.MUSIC_PCT) - SILENCE_DBFS)
-    start, end = audible[0] * env.window, (audible[-1] + 1) * env.window
+    first, last = audible[0], audible[-1] + 1
+    start, end = first * env.window, last * env.window
+    after_lead = _quiet(levels, 0, first - 1)[1] + 1 if first else 0
+    before_tail = (
+        _quiet(levels, last, len(levels) - 1)[0] if last < len(levels) else last
+    )
     return Music(
+        round(after_lead * env.window, 3),
+        round(before_tail * env.window, 3),
+        tuple(
+            _gap(levels, env.window, g) for g in found if start < g.lo and g.hi < end
+        ),
         round(start, 3),
         round(end, 3),
-        tuple(
-            (round(g.lo, 3), round(g.hi, 3))
-            for g in found
-            if start < g.lo and g.hi < end
-        ),
     )
 
 
@@ -359,8 +413,10 @@ class Tape:
     duration: float = 0.0
     music_start: float | None = None
     music_end: float | None = None
+    found_start: float | None = None
+    found_end: float | None = None
     songs: tuple[Song, ...] = ()
-    gaps: tuple[Span, ...] = ()
+    gaps: tuple[Gap, ...] = ()
     inside: tuple[tuple[int, float, float], ...] = ()
     mismatch: str = ""
 
@@ -377,8 +433,11 @@ class Tape:
             "duration": self.duration,
             "music_start": self.music_start,
             "music_end": self.music_end,
+            "found_start": self.found_start,
+            "found_end": self.found_end,
             "songs": [s.to_dict() for s in self.songs],
-            "gaps": [list(g) for g in self.gaps],
+            "gaps": [[g.lo, g.hi] for g in self.gaps],
+            "quiet": [list(g.quiet) for g in self.gaps],
             "inside": [{"song": n, "lo": lo, "hi": hi} for n, lo, hi in self.inside],
             "mismatch": self.mismatch,
         }
@@ -393,8 +452,15 @@ class Tape:
             duration=float(data["duration"]),
             music_start=data["music_start"],
             music_end=data["music_end"],
+            found_start=data.get("found_start"),
+            found_end=data.get("found_end"),
             songs=tuple(Song.from_dict(s) for s in data["songs"]),
-            gaps=tuple((float(lo), float(hi)) for lo, hi in data["gaps"]),
+            gaps=tuple(
+                Gap(float(lo), float(hi), float(quiet_lo), float(quiet_hi))
+                for (lo, hi), (quiet_lo, quiet_hi) in zip(
+                    data["gaps"], data.get("quiet", data["gaps"]), strict=True
+                )
+            ),
             inside=tuple((i["song"], i["lo"], i["hi"]) for i in data["inside"]),
             mismatch=str(data["mismatch"]),
         )
@@ -421,6 +487,8 @@ def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
         mismatch="",
         music_start=None,
         music_end=None,
+        found_start=None,
+        found_end=None,
     )
 
 
@@ -467,6 +535,7 @@ def _mismatch(songs: Sequence[Song], fits: bool, stretches: int) -> str:
 def place(tape: Tape, music: Music) -> Tape:
     """Set every boundary not set by ear; those split the list and stay put."""
     out = list(tape.songs)
+    quiet = [g.quiet for g in music.gaps]
     fits = True
     cursor = music.start
     index = 0
@@ -480,8 +549,8 @@ def place(tape: Tape, music: Music) -> Tape:
         while stop < len(out) and out[stop].set_by != EAR:
             stop += 1
         limit = (out[stop].start or music.end) if stop < len(out) else music.end
-        lo, hi = _margin(cursor, limit, music.gaps)
-        within = [g for g in music.gaps if lo < g[0] and g[1] < hi]
+        lo, hi = _margin(cursor, limit, quiet)
+        within = [g for g in quiet if lo < g[0] and g[1] < hi]
         found = align(within, lo, hi, [s.length for s in out[index:stop]])
         fits = fits and found.fits
         for at, span in enumerate(found.spans, index):
@@ -490,7 +559,7 @@ def place(tape: Tape, music: Music) -> Tape:
 
     inside = tuple(
         (s.number, lo, hi)
-        for lo, hi in music.gaps
+        for lo, hi in quiet
         for s in out
         if s.start is not None and s.end is not None and s.start < lo and hi < s.end
     )
@@ -499,6 +568,8 @@ def place(tape: Tape, music: Music) -> Tape:
         songs=tuple(out),
         music_start=music.start,
         music_end=music.end,
+        found_start=music.found_start,
+        found_end=music.found_end,
         gaps=music.gaps,
         inside=inside,
         mismatch=_mismatch(out, fits, len(music.gaps) + 1),
