@@ -268,13 +268,36 @@ def test_an_overlap_is_refused_and_changes_nothing(service: Service) -> None:
 
 
 @pytest.mark.parametrize(
-    "body", [{}, {"start": "soon", "end": 1}, {"start": True, "end": 2}]
+    "body",
+    [
+        {},
+        {"start": 0.0},
+        {"start": "", "end": 1},
+        {"start": None, "end": 1},
+        {"start": "soon", "end": 1},
+        {"start": True, "end": 2},
+    ],
 )
 def test_an_edge_that_is_no_number_is_refused(service: Service, body: dict) -> None:
     app = build(service)
     tape = placed(app, service)
     url = f"/api/tapes/{tape}/songs/1/edges"
     assert post(app, url, service, body).status == 400
+
+
+def test_a_real_zero_is_a_good_edge(service: Service) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    url = f"/api/tapes/{tape}/songs/1/edges"
+    assert post(app, url, service, {"start": 0.0, "end": 1.0}).status == 200
+    assert T.read(service.layout, tape).songs[0].start == 0.0
+
+
+def test_the_ear_check_refuses_a_blank_edge_before_it_can_become_zero() -> None:
+    source = (Path(__file__).parent.parent / "ripdoctor/web/static/app.js").read_text()
+    guard = source.index("a blank one is not 0")
+    assert source.index('if (!edge("start") || !edge("end"))') < guard
+    assert guard < source.index('Number(edge("start"))')
 
 
 def test_an_edge_for_a_song_not_on_the_list_is_not_found(service: Service) -> None:

@@ -1471,7 +1471,11 @@ function earRow(row, t) {
 
   const judge = el("td", "moves");
   judge.append(judgeButton("Set", "keep these two edges as yours", () => {
-    const edge = (name) => tr.querySelector(`input[data-edge=${name}]`).value;
+    const edge = (name) => tr.querySelector(`input[data-edge=${name}]`).value.trim();
+    if (!edge("start") || !edge("end")) {
+      $("#tp-err").textContent = `song ${song.number}: both edges need a number of seconds - a blank one is not 0`;
+      return;
+    }
     const [start, end] = [Number(edge("start")), Number(edge("end"))];
     settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/edges`, { start, end }));
   }));
