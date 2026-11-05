@@ -1419,7 +1419,7 @@ function showPlaylist(t) {
   $("#tp-playlist").disabled = !t || !t.songs.length;
   $("#tp-archive").disabled = !t || !!p.archive_refusal;
   $("#tp-pl-path").textContent = !t ? "" : p.path || "no playlist written yet";
-  const said = !p?.outcome ? "" : [
+  const said = !p?.outcome ? p?.note ?? "" : [
     `${p.left_out.length ? "Incomplete" : "Complete"}: ${p.songs} of ${t.songs.length} songs in the file.`,
     `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`,
     p.note,

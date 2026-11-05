@@ -100,7 +100,10 @@ def rebuild_all(
         if tape.id == besides:
             continue
         try:
-            if not S.read(place.layout, tape.id).file:
+            kept = S.read(place.layout, tape.id)
+            if kept.note == S.UNREADABLE:
+                notes.append(f"{tape.name}: its playlist was not rebuilt: {kept.note}")
+            if not kept.file:
                 continue
             with jobs.claim(T.key_of(tape.id), "a playlist rebuild"):
                 state = rebuild(place, beets, tape.id, now)

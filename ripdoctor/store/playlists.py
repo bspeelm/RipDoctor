@@ -16,6 +16,7 @@ from ripdoctor.store.files import Layout, write_json
 from ripdoctor.store.safety import under
 
 STATE = "playlist.json"
+UNREADABLE = "what was kept about this playlist cannot be read - rebuild to replace it"
 
 
 class Taken(ValueError):
@@ -35,12 +36,15 @@ def known(layout: Layout, tape: str) -> bool:
 
 
 def read(layout: Layout, tape: str) -> P.State:
+    """A file that cannot be read is an answer the page can show, and a rebuild
+    writes over it."""
     where = _state_file(layout, tape)
-    return (
-        P.State.from_dict(json.loads(where.read_text()))
-        if where.is_file()
-        else P.State()
-    )
+    if not where.is_file():
+        return P.State()
+    try:
+        return P.State.from_dict(json.loads(where.read_text()))
+    except (OSError, ValueError, KeyError, TypeError):
+        return P.State(note=UNREADABLE)
 
 
 def save(layout: Layout, tape: str, state: P.State) -> None:

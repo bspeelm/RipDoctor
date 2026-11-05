@@ -70,7 +70,10 @@ class State:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> State:
         gone = tuple(Entry(**x) for x in data["left_out"])
-        return cls(**{**data, "left_out": gone})
+        state = cls(**{**data, "left_out": gone})
+        if not isinstance(state.file, str):
+            raise ValueError(f"file {state.file!r} is not a name")
+        return state
 
 
 def file_name(name: str, key: str) -> str:

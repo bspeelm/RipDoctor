@@ -222,6 +222,61 @@ def test_filing_one_tape_brings_another_tapes_playlist_up_to_date(
     assert told == ["Mix: Vol. 1: playlist rewritten, 2 songs"]
 
 
+def corrupt(service: Service, tape: str, text: bytes) -> None:
+    (T.dir_for(service.layout, tape) / S.STATE).write_bytes(text)
+
+
+UNREADABLE_STATES = [
+    b'{"file": "mix.m3u8", "left',
+    b"\xff\xfe not text",
+    b"[]",
+    b"{}",
+    b'{"left_out": [], "file": 5}',
+    b'{"left_out": [{"nonsense": 1}]}',
+    b'{"left_out": [], "unheard_of": 1}',
+]
+
+
+@pytest.mark.parametrize("text", UNREADABLE_STATES)
+def test_a_corrupt_playlist_memory_is_a_plain_message_on_the_tape_s_view(
+    service: Service, text: bytes
+) -> None:
+    app = build(service)
+    tape = filed(app, service)
+    corrupt(service, tape, text)
+    answer = get(app, f"/api/tapes/{tape}", service)
+    assert answer.status == 200
+    assert answer.json()["playlist"]["note"] == S.UNREADABLE
+    assert answer.json()["playlist"]["archive_refusal"]
+    assert get(app, "/api/tapes", service).status == 200
+
+
+def test_a_rebuild_replaces_a_corrupt_playlist_memory_and_finds_the_same_file(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = filed(app, service)
+    before = lines_of(service, tape)
+    where = file_of(service, tape)
+    corrupt(service, tape, b"{ not json")
+    assert not rebuild(app, tape, service)["error"]
+    remembered = state_of(service, tape)
+    assert remembered.file == where.name and remembered.note == ""
+    assert lines_of(service, tape) == before
+    assert view(app, tape, service)["playlist"]["note"] == ""
+
+
+def test_another_tape_s_corrupt_playlist_memory_is_noted_when_filing_moves_on(
+    service: Service,
+) -> None:
+    app = build(service)
+    first = filed(app, service)
+    corrupt(service, first, b"{ not json")
+    second = filed(app, service)
+    told = job_of(app, second, service)["result"]["notes"]
+    assert told == [f"Mix: Vol. 1: its playlist was not rebuilt: {S.UNREADABLE}"]
+
+
 # ----------------------------------------------------------------------- rebuild
 
 
