@@ -850,6 +850,20 @@ def test_library_rows_read_every_field_and_ask_whether_the_file_is_there(
     assert runner.calls[0][3:5] == ("ls", "-f")
 
 
+@pytest.mark.parametrize("mark", ["\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\x1c"])
+def test_a_title_holding_a_line_separator_is_one_row_and_not_a_fragment(
+    tmp_path: Path, mark: str
+) -> None:
+    title = f"One{mark}Two"
+    line = "\x1f".join((title, "A Band", "A Record", "3:20", "a.flac", "", ""))
+    runner = FakeRunner().expect("ls", stdout=line.encode())
+    rows = _beets().library_rows(runner, str(tmp_path), ["artist:A Band"])
+    assert [r.title for r in rows] == [title]
+    runner = FakeRunner().expect("ls", stdout=f"{line}\x1frel".encode())
+    rows = _beets().held_rows(runner, str(tmp_path), ("artist:A Band",))
+    assert [(r.title, r.release) for r in rows] == [(title, "rel")]
+
+
 def test_a_relative_row_is_rooted_in_the_library(tmp_path: Path) -> None:
     (tmp_path / "a.flac").write_bytes(b"x")
     line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac", "", ""))

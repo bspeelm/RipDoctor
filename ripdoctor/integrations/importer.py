@@ -719,7 +719,9 @@ class Beets:
 
 
 def _fields(said: str) -> list[list[str]]:
-    return [line.split(_SEP) for line in _plain(said).splitlines()]
+    """By `\\n` alone: beets ends a row with that, and `splitlines` would also break
+    one at any of the line separators a title may hold."""
+    return [line.split(_SEP) for line in _plain(said).split("\n")]
 
 
 def _row(
