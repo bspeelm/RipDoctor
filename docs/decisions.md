@@ -2102,13 +2102,25 @@ the same document.
 
 **Vinyl thresholds do not apply.** The band lane's threshold is a margin
 above the measured floor, and digital zero pins that floor at the bottom of the
-scale. On the one tape measured, the shipped band lane found fewer gaps than the
-list needed. A fixed -60 dBFS on the full lane found all of them, and the result
-held steady from -30 to -80 dBFS. One tape is what this rests on.
+scale. On a tape measured, the shipped band lane found fewer gaps than the list
+needed. A fixed -60 dBFS on the full lane found all of them, and the result held
+steady from -30 to -80 dBFS. Two tapes are what this rests on.
 
-**Gaps set the boundaries when their count equals songs minus one.** Otherwise
-the boundaries are placed by ear. Either way, a boundary a person set is never
-moved.
+**Gaps are candidates, and list lengths in order decide which are song
+boundaries.** A song spanning a silence is always flagged for the ear, whatever
+its length, because that silence is sometimes a passage in the song and sometimes
+damage, and it can be a song the list left out. When more than one grouping fits
+as well, the tape says how many, and every song they disagree over is flagged. A
+boundary a person set is never moved.
+
+**Edges come from a gap's quiet interior.** Finding at -60 dBFS leaves fades cut:
+measured, one song's -60 edge fell 4.1 s before its true end and another's 8.55 s.
+So -60 only finds the gap, which is then walked in from each side to within 3 dB
+of its own minimum, its own because some gaps are low noise at about -70 dB rather
+than digital zero. The tape's leading and trailing silence are treated the same
+way; a last song came out 3.5 s short at its -60 edge. Measured this way, every
+song on both tapes that spans no silence landed within 1.1 s of its list length,
+which is what the 3 s tolerance rests on.
 
 **Spans are cross-checked against list lengths, in list order.** The fit cannot
 detect wrong order on its own: a list out of order passed the shipped fit
@@ -2160,9 +2172,22 @@ ADR-062: nothing is cleared until the record is proved to be somewhere else.
 **Long files need less measuring.** Restricting astats to the measures actually
 used left the envelope byte-identical, and took peak memory from about 2.1 GB to
 about 320 MB at nearly seven hours. The change reaches records too, which is why
-the byte comparison matters. The 2 GB upload limit is raised, since a hundred
+the byte comparison matters.
+
+**The upload limit is 16 GiB, for tapes only.** Records keep 2 GB. A hundred
 lossless songs is roughly 3 GB by estimate, and the existing disk-space check
-still applies.
+still applies. A tape's upload lasts as long as its tape rather than being swept
+by age, since one that size can take days to send.
+
+**Removing a tape moves it aside**, whole, to a timestamped directory beside the
+tapes, and the person is told where: it holds the only audio and any boundaries
+set by ear. An upload not yet taken in is dropped, since its source is still
+wherever it was sent from.
+
+**Unresolved.** A song with no recording id cannot be rebuilt from an id: it
+resolves by title, artist and length, and is named if that is ambiguous. The
+too-many check (ADR-057) and the archive gate do not apply to tapes as written, so
+tapes get a check of their own, which is not designed yet.
 
 **Not included.** Recording a physical cassette through capture. The document
 does not assume a tape's audio came from an upload, so this stays possible, but
