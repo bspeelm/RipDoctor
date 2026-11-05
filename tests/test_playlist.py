@@ -42,7 +42,7 @@ def test_the_text_is_the_header_then_relative_lines_in_list_order_with_lf() -> N
         "A Band/#1 Record/#5 Hash.flac",
         "A Band/100% Record/05 50%25 off.flac",
         ".hidden band/..dotted/.leading.flac",
-        "Sigur Rós/Ágætis byrjun/01 Svefn-g-englar.flac",
+        "Þórný Bönd/Éttir sögur/01 Ljósið á Ñandú.flac",
         "日本語/アルバム/01 歌.flac",
     ],
 )
