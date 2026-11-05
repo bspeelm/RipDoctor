@@ -2242,7 +2242,9 @@ new one after, so a crash at any point leaves a song that needs cutting.
 **The filing job.** It is refused until the tape is cut and every song not skipped
 is settled. A song with a recording id is owned only by a row with that id: a row of
 another id is another recording, and a row of none that agrees on title, artist and
-length waits for a person to set its id or skip the song. A song with no id is owned
+length waits for a person, who can use that copy, set its id or skip the song. Using
+it records the song as theirs at that path, settled by them, and as finished it is
+never run again. A new list clears it, as it clears every song's filing. A song with no id is owned
 by cleaned title, artist and length within 3 s. Either way it is not imported. A row
 with no length is a failure that names the row, not an assumption, and a row whose
 file is gone is a stale-row failure. A library that could not be asked is a failure

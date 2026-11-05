@@ -1382,13 +1382,25 @@ const FILING_WORDS = {
 
 const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
 
+// The playlist is written from what filing recorded, so it is told straight away.
+function useCopyButton(o) {
+  const b = el("button", "ghost tiny", "Use the copy in my library");
+  b.type = "button";
+  b.onclick = async () => {
+    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${o.number}/use-copy`, { path: o.unconfirmed }));
+    if (!$("#tp-err").textContent) writePlaylist();
+  };
+  return b;
+}
+
 function filingRow(o) {
   const tr = el("tr", FILING_NEEDS_A_LOOK.includes(o.state) ? "doubt" : null);
   const who = el("td");
   who.append(el("div", null, o.title), el("div", "dim", o.artist));
   const where = el("td", FILING_NEEDS_A_LOOK.includes(o.state) ? "mark" : "dim");
-  where.append(el("div", null, o.path));
+  where.append(el("div", null, o.path || o.unconfirmed));
   if (o.note) where.append(el("div", "why", o.note));
+  if (o.unconfirmed) where.append(useCopyButton(o));
   tr.append(el("td", "num", o.number), who,
             el("td", null, FILING_WORDS[o.state] ?? o.state), where);
   return tr;

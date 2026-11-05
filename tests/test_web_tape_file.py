@@ -385,6 +385,88 @@ def test_a_row_with_no_id_is_shown_for_a_person_to_confirm_and_nothing_is_import
     assert str(where) in one.filing_note and "rec-One" in one.filing_note
 
 
+def doubted_copy(app, service: Service) -> tuple[str, Path]:  # type: ignore[no-untyped-def]
+    tape = pinned(app, service)
+    where = beet_of(service).owns("One", length="0:06")
+    assert file_it(app, tape, service)["error"]
+    return tape, where
+
+
+def use_copy(app, tape: str, service: Service, path: object):  # type: ignore[no-untyped-def]
+    return post(
+        app, f"/api/tapes/{tape}/songs/1/use-copy", service, {"path": str(path)}
+    )
+
+
+def test_a_no_id_doubt_shows_the_row_and_nothing_else_has_a_copy_to_use(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape, where = doubted_copy(app, service)
+    outcomes = {
+        o["number"]: o for o in get(app, f"/api/tapes/{tape}", service).json()["filing"]
+    }
+    assert outcomes[1]["unconfirmed"] == str(where)
+    assert not outcomes[2]["unconfirmed"]
+
+
+def test_using_the_copy_in_the_library_records_it_as_the_person_s_at_that_path(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape, where = doubted_copy(app, service)
+    where.chmod(0o600)
+    answer = use_copy(app, tape, service, where)
+    assert answer.status == 200, answer.json()
+    row = {o["number"]: o for o in answer.json()["filing"]}[1]
+    assert (row["state"], row["path"]) == (F.ALREADY, str(where))
+    assert row["settled_by"] == M.PERSON and not row["unconfirmed"]
+    assert answer.json()["all_filed"]
+    assert stat.S_IMODE(where.stat().st_mode) == 0o600
+
+
+def test_a_copy_a_person_chose_is_not_moved_by_a_later_run(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape, where = doubted_copy(app, service)
+    use_copy(app, tape, service, where)
+    before = len(beet_of(service).imports)
+    runs = TJ.F.runs(T.read(service.layout, tape))
+    assert 1 not in [t.song.number for run in runs for t in run.tracks]
+    assert post(app, f"/api/tapes/{tape}/match", service, {"again": True}).status == 202
+    job_of(app, tape, service)
+    one = songs(service, tape)[0]
+    assert (one.filing, one.path, one.settled_by) == (F.ALREADY, str(where), M.PERSON)
+    assert len(beet_of(service).imports) == before
+
+
+def test_a_copy_nothing_is_waiting_on_cannot_be_used(service: Service) -> None:
+    app = build(service)
+    tape, where = doubted_copy(app, service)
+    assert (
+        use_copy(app, tape, service, service.settings.library + "/other.flac").status
+        == 409
+    )
+    assert use_copy(app, tape, service, "").status == 409
+    assert (
+        post(
+            app, f"/api/tapes/{tape}/songs/2/use-copy", service, {"path": str(where)}
+        ).status
+        == 409
+    )
+    assert songs(service, tape)[0].filing == F.FAILED
+
+
+def test_a_copy_gone_from_the_library_cannot_be_used(service: Service) -> None:
+    app = build(service)
+    tape, where = doubted_copy(app, service)
+    where.unlink()
+    answer = use_copy(app, tape, service, where)
+    assert answer.status == 409 and "any more" in answer.json()["error"]
+    assert songs(service, tape)[0].filing == F.FAILED
+
+
 def test_a_from_list_song_owned_by_title_and_length_is_not_imported(
     service: Service,
 ) -> None:

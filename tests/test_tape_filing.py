@@ -449,3 +449,28 @@ def test_all_filed_counts_owned_songs_and_ignores_skips() -> None:
         )
     )
     assert not F.all_filed(a_tape(a_song(1, "One", skip=True)))
+
+
+def test_a_row_only_a_person_can_vouch_for_is_named_on_the_verdict() -> None:
+    said = F.precheck(a_pinned_song(), [], [a_row("One", path="/lib/x.flac")])
+    assert (said.action, said.path) == (F.FAILED, "")
+    assert said.unconfirmed == "/lib/x.flac"
+
+
+def test_a_later_outcome_forgets_the_row_that_was_waiting_on_a_person() -> None:
+    tape = a_tape(a_song(1, "One"))
+    asked = F.recorded(tape, 1, F.FAILED, note="?", unconfirmed="/lib/x.flac")
+    assert asked.songs[0].unconfirmed == "/lib/x.flac"
+    assert not F.recorded(asked, 1, F.FAILED, note="other").songs[0].unconfirmed
+
+
+def test_a_person_owning_a_copy_is_finished_and_theirs() -> None:
+    begun = a_song(1, "One", settled_by=M.CATALOGUE, import_begun=True)
+    tape = F.recorded(
+        a_tape(begun), 1, F.FAILED, unconfirmed="/lib/x.flac", keep_begun=True
+    )
+    song = F.person_owns(tape, 1).songs[0]
+    assert (song.filing, song.path) == (F.ALREADY, "/lib/x.flac")
+    assert song.settled_by == M.PERSON
+    assert not song.unconfirmed and not song.import_begun
+    assert F.outcomes(F.person_owns(tape, 1))[0]["settled_by"] == M.PERSON

@@ -458,6 +458,26 @@ def test_a_song_owned_on_another_album_keeps_its_line_through_a_rebuild(
     assert not job_of(app, tape, service)["error"]
 
 
+def test_a_copy_a_person_chose_answers_its_playlist_through_a_rebuild(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    where = beet_of(service).owns("One", length="0:06")
+    file_it(app, tape, service)
+    assert (
+        post(
+            app, f"/api/tapes/{tape}/songs/1/use-copy", service, {"path": str(where)}
+        ).status
+        == 200
+    )
+    assert post(app, f"/api/tapes/{tape}/playlist", service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    state = state_of(service, tape)
+    assert (state.songs, state.left_out) == (2, ())
+    assert T.read(service.layout, tape).songs[0].path == str(where)
+
+
 def test_a_beets_failure_is_unknown_never_missing_and_leaves_the_file_alone(
     service: Service,
 ) -> None:

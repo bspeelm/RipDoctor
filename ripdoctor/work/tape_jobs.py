@@ -164,9 +164,16 @@ class _Filing:
         note: str = "",
         *,
         keep_begun: bool = False,
+        unconfirmed: str = "",
     ) -> None:
         self.tape = F.recorded(
-            self.tape, song.number, state, path, note, keep_begun=keep_begun
+            self.tape,
+            song.number,
+            state,
+            path,
+            note,
+            keep_begun=keep_begun,
+            unconfirmed=unconfirmed,
         )
         T.save(self.layout, self.tape)
         self.unanswered.discard(song.number)
@@ -241,7 +248,13 @@ class _Filing:
             elif said.action == F.ALREADY and song.import_begun:
                 self.complete(song, said.action, said.path, said.note)
             else:
-                self.tell(song, said.action, said.path, said.note)
+                self.tell(
+                    song,
+                    said.action,
+                    said.path,
+                    said.note,
+                    unconfirmed=said.unconfirmed,
+                )
         return waiting
 
     def read_back(self, run: F.Run, song: TP.Song) -> tuple[F.Row, ...]:

@@ -7,7 +7,14 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ripdoctor.core.match import Choice, fold, names, search_album, search_artists
+from ripdoctor.core.match import (
+    PERSON,
+    Choice,
+    fold,
+    names,
+    search_album,
+    search_artists,
+)
 from ripdoctor.core.tape import (
     CUT,
     LENGTH_TOLERANCE,
@@ -63,9 +70,12 @@ class Run:
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
+    """`unconfirmed` is a row that only a person can say is this song."""
+
     action: str
     path: str = ""
     note: str = ""
+    unconfirmed: str = ""
 
 
 def lead(artist: str) -> str:
@@ -182,8 +192,9 @@ def _unconfirmed(row: Row, recording: str) -> Verdict:
     return Verdict(
         FAILED,
         note=f"{row.path} has this title, artist and length and no recording id - "
-        f"listen to it, then set its mb_trackid with beet modify, to {recording} if "
-        "it is this song, and file again, or skip this song",
+        "listen to it, and if it is this song use that copy, or set its mb_trackid "
+        f"with beet modify to {recording} and file again, or skip this song",
+        unconfirmed=row.path,
     )
 
 
@@ -361,6 +372,7 @@ def recorded(
     note: str = "",
     *,
     keep_begun: bool = False,
+    unconfirmed: str = "",
 ) -> Tape:
     """One song's outcome. Pending or failed may become anything; finished stays.
 
@@ -379,9 +391,30 @@ def recorded(
             path=path,
             filing_note=note,
             import_begun=song.import_begun and (keep_begun or state == UNKNOWN),
+            unconfirmed=unconfirmed,
         )
 
     return replace(tape, songs=tuple(told(s) for s in tape.songs))
+
+
+def person_owns(tape: Tape, number: int) -> Tape:
+    """A person heard the row the pre-check could not vouch for, and says it is this
+    song. A finished song is never run again, so no later job can move this."""
+
+    def owned(song: Song) -> Song:
+        if song.number != number:
+            return song
+        return replace(
+            song,
+            filing=ALREADY,
+            path=song.unconfirmed,
+            filing_note="your choice: the copy already in your library",
+            settled_by=PERSON,
+            import_begun=False,
+            unconfirmed="",
+        )
+
+    return replace(tape, songs=tuple(owned(s) for s in tape.songs))
 
 
 def begun(tape: Tape, numbers: Collection[int]) -> Tape:
@@ -431,6 +464,8 @@ def outcomes(tape: Tape) -> list[dict[str, Any]]:
             "state": status(s),
             "path": s.path,
             "note": s.filing_note,
+            "unconfirmed": s.unconfirmed,
+            "settled_by": s.settled_by,
         }
         for s in ordered
     ]

@@ -18,6 +18,7 @@ from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import incoming as IN
 from ripdoctor.store import playlists as PS
 from ripdoctor.store import tapes as T
+from ripdoctor.store.safety import contains
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.routes.records import slug_of
@@ -459,6 +460,24 @@ def add(app: App, service: Service) -> None:
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
         return kept(TP.settle(tape, song_of(tape, r).number, None))
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/use-copy")
+    @settled
+    def use_copy(r: H.Request, tape: TP.Tape) -> H.Response:
+        """A person says the row the pre-check could not vouch for is this song. The
+        path is sent back so a page left open can only speak for the row it showed."""
+        not_archived(tape)
+        song, given = song_of(tape, r), str(r.json().get("path", ""))
+        if not song.unconfirmed or given != song.unconfirmed:
+            raise H.HttpError(
+                409, f"song {song.number} is not waiting on that copy - file again"
+            )
+        library = service.settings.library
+        if not (contains(library, given) and Path(given).is_file()):
+            raise H.HttpError(
+                409, f"{given} is not a file in the library any more - file again"
+            )
+        return kept(TF.person_owns(tape, song.number))
 
     def served(where: Path | None, what: str) -> H.Response:
         if where is None or not where.is_file():

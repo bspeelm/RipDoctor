@@ -116,6 +116,7 @@ class Song:
     filing_note: str = ""
     import_begun: bool = False
     owes_ear: bool = False
+    unconfirmed: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
