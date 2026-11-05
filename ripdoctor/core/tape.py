@@ -126,6 +126,12 @@ def _csv_rows(text: str) -> list[tuple[int, list[str]]]:
         ) from e
 
 
+def _absent(first: int, stop: int) -> str:
+    if stop - first == 1:
+        return f"position {first} is"
+    return f"positions {first} to {stop - 1} are"
+
+
 def parse_list(text: str) -> tuple[Song, ...]:
     """A CSV with the `COLUMNS`, one playlist per file. `owned` is not used."""
     rows = _csv_rows(text)
@@ -137,6 +143,12 @@ def parse_list(text: str) -> tuple[Song, ...]:
         raise BadList(
             f"row {rows[0][0]}: no {', '.join(missing)} column - "
             f"the first row must name {','.join(COLUMNS)}"
+        )
+    repeated = sorted({c for c in header if c and header.count(c) > 1})
+    if repeated:
+        raise BadList(
+            f"row {rows[0][0]}: more than one {', '.join(repeated)} column - "
+            "keep one of each"
         )
 
     placed: list[tuple[int, int, dict[str, str]]] = []
@@ -165,6 +177,11 @@ def parse_list(text: str) -> tuple[Song, ...]:
         )
 
     placed.sort(key=lambda p: p[0])
+    if placed[0][0] != 1:
+        raise BadList(
+            f"row {placed[0][1]}: positions begin at {placed[0][0]} - "
+            f"{_absent(1, placed[0][0])} missing; add the songs or renumber from 1"
+        )
     for (before, line_a, _), (after, line_b, _) in pairwise(placed):
         if after == before:
             raise BadList(
@@ -174,7 +191,7 @@ def parse_list(text: str) -> tuple[Song, ...]:
         if after != before + 1:
             raise BadList(
                 f"row {line_b}: positions jump from {before} to {after} - "
-                "add the missing songs or renumber"
+                f"{_absent(before + 1, after)} missing; add the songs or renumber"
             )
     return tuple(
         _song(f"row {line}", n, fields, fields["duration"])

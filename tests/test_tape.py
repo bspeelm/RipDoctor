@@ -90,6 +90,33 @@ def test_a_gap_in_positions_names_the_row() -> None:
         TP.parse_list(a_list("M,,1,One,A,R,1:00", "M,,3,Three,A,R,1:00"))
 
 
+def test_a_gap_in_positions_names_what_is_missing() -> None:
+    with pytest.raises(TP.BadList, match="position 2 is missing"):
+        TP.parse_list(a_list("M,,1,One,A,R,1:00", "M,,3,Three,A,R,1:00"))
+    with pytest.raises(TP.BadList, match="positions 2 to 4 are missing"):
+        TP.parse_list(a_list("M,,1,One,A,R,1:00", "M,,5,Five,A,R,1:00"))
+
+
+def test_positions_that_do_not_begin_at_one_were_renumbered_and_are_now_refused() -> (
+    None
+):
+    with pytest.raises(TP.BadList, match=r"row 2: .*positions 1 to 2 are missing"):
+        TP.parse_list(a_list("M,,3,Three,A,R,1:00", "M,,4,Four,A,R,1:00"))
+    with pytest.raises(TP.BadList, match="begin at 2 - position 1 is missing"):
+        TP.parse_list(a_list("M,,2,Two,A,R,1:00"))
+
+
+def test_a_repeated_column_took_the_last_silently_and_is_now_refused() -> None:
+    text = HEADER.strip() + ",title\nM,,1,One,A,R,1:00,Two\n"
+    with pytest.raises(TP.BadList, match="row 1: more than one title column"):
+        TP.parse_list(text)
+
+
+def test_blank_columns_from_a_spreadsheet_are_not_repeated_columns() -> None:
+    text = HEADER.strip() + ",,\nM,,1,One,A,R,1:00,,\n"
+    assert TP.parse_list(text)[0].title == "One"
+
+
 def test_a_repeated_position_is_refused() -> None:
     with pytest.raises(TP.BadList, match="position 1 is also on row 2"):
         TP.parse_list(a_list("M,,1,One,A,R,1:00", "M,,1,Two,A,R,1:00"))
