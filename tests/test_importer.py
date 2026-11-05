@@ -829,11 +829,22 @@ def test_library_rows_read_every_field_and_ask_whether_the_file_is_there(
 ) -> None:
     here = tmp_path / "here.flac"
     here.write_bytes(b"x")
-    line = "\x1f".join(("One", "A Band", "A Record", "3:20", str(here)))
-    gone = "\x1f".join(("Two", "A Band", "A Record", "", str(tmp_path / "gone.flac")))
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", str(here), "rec-1", "04"))
+    gone = "\x1f".join(
+        ("Two", "A Band", "A Record", "", str(tmp_path / "gone.flac"), "", "")
+    )
     runner = FakeRunner().expect("ls", stdout=f"{line}\n{gone}\n".encode())
     rows = _beets().library_rows(runner, str(tmp_path), ["artist:A Band"])
-    assert rows[0] == F.Row("One", "A Band", "A Record", 200.0, str(here), True)
+    assert rows[0] == F.Row(
+        "One",
+        "A Band",
+        "A Record",
+        200.0,
+        str(here),
+        True,
+        recording="rec-1",
+        track=4,
+    )
     assert (rows[1].length, rows[1].present) == (None, False)
     assert runner.calls[0][-1] == "artist:A Band"
     assert runner.calls[0][3:5] == ("ls", "-f")
@@ -841,7 +852,7 @@ def test_library_rows_read_every_field_and_ask_whether_the_file_is_there(
 
 def test_a_relative_row_is_rooted_in_the_library(tmp_path: Path) -> None:
     (tmp_path / "a.flac").write_bytes(b"x")
-    line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac"))
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac", "", ""))
     runner = FakeRunner().expect("ls", stdout=line.encode())
     rows = _beets().library_rows(runner, str(tmp_path), [])
     assert (rows[0].path, rows[0].present) == (str(tmp_path / "a.flac"), True)

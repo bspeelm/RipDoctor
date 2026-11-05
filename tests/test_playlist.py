@@ -180,8 +180,8 @@ def test_a_failed_pending_or_skipped_song_is_said_and_not_dropped() -> None:
 # ------------------------------------------------------------------- re-resolving
 
 
-def held(path: str, recording: str = "", release: str = "", **kw: object) -> P.Held:
-    return P.Held(a_row(path=path, **kw), recording, release)
+def held(path: str, recording: str = "", release: str = "", **kw: object) -> F.Row:
+    return a_row(path=path, recording=recording, release=release, **kw)
 
 
 def filed_song(**kw: object) -> TP.Song:

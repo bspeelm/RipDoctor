@@ -129,6 +129,7 @@ class Beet:
             "path": str(where),
             "mb_trackid": self.recordings.get(told[TG_TITLE], ""),
             "mb_albumid": "" if key == self.LIST else key,
+            "track": told["TRACKNUMBER"],
         }
 
     def _embed(self, args: tuple[str, ...]) -> Result:
@@ -159,10 +160,9 @@ class Beet:
         if self.ls_fails:
             return Result(args, 1, b"", b"database is locked\n")
         terms = [t.split(":", 1) for t in args[args.index("-f") + 2 :]]
+        asked = [k.removeprefix("$") for k in args[args.index("-f") + 1].split("\x1f")]
         lines = [
-            "\x1f".join(
-                r.get(k, "") for k in ("title", "artist", "album", "length", "path")
-            )
+            "\x1f".join(r.get(k, "") for k in asked)
             for r in self.rows
             if all(v.casefold() in r.get(k, "").casefold() for k, v in terms)
         ]

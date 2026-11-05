@@ -43,15 +43,6 @@ class Rendered:
 
 
 @dataclass(frozen=True, slots=True)
-class Held:
-    """One library row and the ids a playlist is rebuilt by."""
-
-    row: F.Row
-    recording: str = ""
-    release: str = ""
-
-
-@dataclass(frozen=True, slots=True)
 class State:
     """What is known about one tape's playlist. `file` is set once one is written;
     `outcome` and `note` are the last attempt, which may not have touched it."""
@@ -176,37 +167,37 @@ def to_ask(tape: TP.Tape) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _matching(song: TP.Song, held: Sequence[Held]) -> list[Held]:
+def _matching(song: TP.Song, rows: Sequence[F.Row]) -> list[F.Row]:
     recording = F.recording_of(song)
     if recording:
-        same = [h for h in held if h.recording == recording]
-        return same or [h for h in held if h.row.path == song.path]
+        same = [r for r in rows if r.recording == recording]
+        return same or [r for r in rows if r.path == song.path]
     choice = F.choice_of(song)
     albums = {fold(song.album), *([fold(choice.release_title)] if choice else [])}
-    return [h for h in held if F.alike(song, h.row) and fold(h.row.album) in albums]
+    return [r for r in rows if F.alike(song, r) and fold(r.album) in albums]
 
 
-def resolve(song: TP.Song, held: Sequence[Held]) -> Entry:
+def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
     """The one file that is this song, or why not. More than one candidate narrows
     to the chosen release, then to the path filing proved, and is never guessed."""
     if song.skip:
         return Entry(song.number, state=TP.SKIPPED, why="skipped")
-    same = _matching(song, held)
-    here = [h for h in same if h.row.present]
+    same = _matching(song, rows)
+    here = [r for r in same if r.present]
     if not here:
         if same:
-            why = f"beets has a row at {same[0].row.path}, and the file is not there"
+            why = f"beets has a row at {same[0].path}, and the file is not there"
             return Entry(song.number, state=MISSING, why=why)
         unfiled = _not_filed(song)
         return unfiled or Entry(
             song.number, state=MISSING, why="the library has no row for this song"
         )
     choice = F.choice_of(song)
-    release = [h for h in here if choice and h.release == choice.release]
-    for pool in (here, release, [h for h in here if h.row.path == song.path]):
+    release = [r for r in here if choice and r.release == choice.release]
+    for pool in (here, release, [r for r in here if r.path == song.path]):
         if len(pool) == 1:
-            return Entry(song.number, pool[0].row.path)
-    named = ", ".join(h.row.path for h in here)
+            return Entry(song.number, pool[0].path)
+    named = ", ".join(r.path for r in here)
     why = f"{len(here)} rows could be this song: {named}"
     return Entry(song.number, state=AMBIGUOUS, why=why)
 

@@ -23,7 +23,6 @@ from typing import Protocol
 from ripdoctor.audio.runner import Runner, ToolMissing
 from ripdoctor.core.filing import Row, row_length
 from ripdoctor.core.plan import Plan
-from ripdoctor.core.playlist import Held
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
 
@@ -218,7 +217,10 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # string: beets passes "\t" through as a literal backslash-t, every line then
 # fails to split, and the album reads as having no tracks at all.
 _SEP = "\x1f"
-_ROW = _SEP.join(("$title", "$artist", "$album", "$length", "$path"))
+_ROW = _SEP.join(
+    ("$title", "$artist", "$album", "$length", "$path", "$mb_trackid", "$track")
+)
+_HELD = _SEP.join((_ROW, "$mb_albumid"))
 
 # What is typed at beets' matcher to accept the candidate it printed, and then
 # at the question it asks when the album is already in the library. One answer
@@ -536,12 +538,11 @@ class Beets:
             raise ImportFailed(
                 f"beets could not look in the library: {TapeRun(1, result.err).why()}"
             )
-        rows = []
-        for line in _plain(result.text).splitlines():
-            fields = line.split(_SEP)
-            if len(fields) == 5:
-                rows.append(_row(root, *fields))
-        return tuple(rows)
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _ROW.count(_SEP) + 1
+        )
 
     def owned(
         self, runner: Runner, root: str, recording: str, artist: str
@@ -697,28 +698,49 @@ class Beets:
 
     def held_rows(
         self, runner: Runner, root: str, terms: tuple[str, ...]
-    ) -> tuple[Held, ...]:
+    ) -> tuple[Row, ...]:
         """One query for many songs: a lone comma is beets' OR. No terms asks nothing,
         where beets would read it as the whole library. A failure to answer raises."""
         if not terms:
             return ()
         query = [part for term in terms for part in (",", term)][1:]
-        said = _SEP.join(("$mb_trackid", "$mb_albumid", _ROW))
-        result = runner.run(self._argv(["ls", "-f", said, *query]), timeout=300)
+        result = runner.run(self._argv(["ls", "-f", _HELD, *query]), timeout=300)
         if not result.ok:
             raise ImportFailed(TapeRun(result.returncode, result.err).why())
-        held = []
-        for line in _plain(result.text).splitlines():
-            fields = line.split(_SEP)
-            if len(fields) == 7:
-                recording, release, *row = fields
-                held.append(Held(_row(root, *row), recording, release))
-        return tuple(held)
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _HELD.count(_SEP) + 1
+        )
 
 
-def _row(root: str, title: str, artist: str, album: str, length: str, said: str) -> Row:
+def _fields(said: str) -> list[list[str]]:
+    return [line.split(_SEP) for line in _plain(said).splitlines()]
+
+
+def _row(
+    root: str,
+    title: str,
+    artist: str,
+    album: str,
+    length: str,
+    said: str,
+    recording: str,
+    track: str,
+    release: str = "",
+) -> Row:
     where = _rooted(root, said)
-    return Row(title, artist, album, row_length(length), str(where), where.is_file())
+    return Row(
+        title,
+        artist,
+        album,
+        row_length(length),
+        str(where),
+        where.is_file(),
+        recording=recording,
+        track=int(track) if track.isdigit() else 0,
+        release=release,
+    )
 
 
 def _rooted(root: str, said: str) -> Path:

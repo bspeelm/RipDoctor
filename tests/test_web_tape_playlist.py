@@ -30,18 +30,17 @@ from tests.test_web_tape_cut import Cutting, job_of
 from tests.test_web_tape_file import Beet, cut_tape, file_it, pinned
 from tests.test_web_tapes import a_service, a_tape_runner
 
-FORMAT = "\x1f".join(
-    f"${k}"
-    for k in (
-        "mb_trackid",
-        "mb_albumid",
-        "title",
-        "artist",
-        "album",
-        "length",
-        "path",
-    )
+KEYS = (
+    "title",
+    "artist",
+    "album",
+    "length",
+    "path",
+    "mb_trackid",
+    "track",
+    "mb_albumid",
 )
+FORMAT = "\x1f".join(f"${k}" for k in KEYS)
 
 
 class Library(Beet):
@@ -62,7 +61,7 @@ class Library(Beet):
 
     def _ls(self, args: tuple[str, ...]) -> Result:
         said = args[args.index("-f") + 1]
-        if not said.startswith("$mb_trackid"):
+        if not said.endswith("$mb_albumid"):
             return super()._ls(args)
         assert said == FORMAT
         self.asked.append(args)
@@ -71,9 +70,8 @@ class Library(Beet):
         query = list(args[args.index("-f") + 2 :])
         assert query[1::2] == [","] * (len(query) // 2)
         terms = [t.split(":", 1) for t in query[0::2]]
-        keys = ("mb_trackid", "mb_albumid", "title", "artist", "album", "length")
         lines = [
-            "\x1f".join([*(r.get(k, "") for k in keys), r["path"]])
+            "\x1f".join(r.get(k, "") for k in KEYS)
             for r in self.rows
             if any(v.casefold() in r.get(k, "").casefold() for k, v in terms)
         ]
@@ -566,7 +564,7 @@ def test_a_finished_album_import_rebuilds_a_tapes_playlist_and_notes_it(
     moved = library / "new place" / "1.flac"
     moved.parent.mkdir(parents=True)
     moved.write_bytes(b"a")
-    row = "\x1f".join(["", "", "One", "A Band", "A Record", "0:05", str(moved)])
+    row = "\x1f".join(["One", "A Band", "A Record", "0:05", str(moved), "", "", ""])
     runner.replies.insert(
         0, (lambda a: "$mb_trackid" in " ".join(a), Result((), 0, row.encode(), b""))
     )

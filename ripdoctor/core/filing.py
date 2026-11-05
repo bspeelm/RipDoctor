@@ -29,7 +29,8 @@ _SHOWN = {FAILED: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 @dataclass(frozen=True, slots=True)
 class Row:
     """One library row. `present` is whether its file is on disk, and `home` whether
-    that path is under the library's root and outside the tape's own directories."""
+    that path is under the library's root and outside the tape's own directories.
+    `track` is 0 and an id empty where beets holds none."""
 
     title: str
     artist: str
@@ -38,6 +39,9 @@ class Row:
     path: str
     present: bool = True
     home: bool = True
+    recording: str = ""
+    track: int = 0
+    release: str = ""
 
 
 @dataclass(frozen=True, slots=True)
