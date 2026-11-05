@@ -138,7 +138,7 @@ def repair_argv(source: str, dest: str) -> list[str]:
 SUPERSEDED = "_superseded"
 
 
-def _step_aside(target: Path) -> Path | None:
+def step_aside(target: Path) -> Path | None:
     """Move an archived side aside, returning where, so it can be put back."""
     if not target.exists():
         return None
@@ -148,6 +148,13 @@ def _step_aside(target: Path) -> Path | None:
     moved = kept / f"{stamp}--{target.name}"
     target.replace(moved)
     return moved
+
+
+def read_back(runner: Runner, target: Path, timeout: float | None = None) -> float:
+    """Seconds of audio at `target`, or nothing if it does not play and verify."""
+    limits = {} if timeout is None else {"timeout": timeout}
+    seconds = true_duration(runner, str(target), **limits)
+    return seconds if seconds > 0 and verify(runner, str(target), **limits) else 0.0
 
 
 def put_away(
@@ -182,7 +189,7 @@ def put_away(
     stepped: list[Path] = []
     for side in sorted(source.glob("side-*.flac")):
         target = dest / side.name
-        superseded = _step_aside(target)
+        superseded = step_aside(target)
         if superseded:
             stepped.append(superseded)
         if verify(runner, str(side)):
@@ -195,8 +202,8 @@ def put_away(
             runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
             notes.append(f"{side.name} was truncated and has been re-encoded")
 
-        seconds = true_duration(runner, str(target))
-        if seconds <= 0 or not verify(runner, str(target)):
+        seconds = read_back(runner, target)
+        if not seconds:
             target.unlink(missing_ok=True)
             if superseded:
                 superseded.replace(target)
