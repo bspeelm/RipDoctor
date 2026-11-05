@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 
-from ripdoctor.audio.runner import Runner
+from ripdoctor.audio.runner import Runner, ToolFailed
 from ripdoctor.core.naming import track_filename
 from ripdoctor.core.plan import Plan, PlanTrack
 
@@ -47,8 +48,8 @@ def plan_cuts(plan: Plan, source_dir: str, dest_dir: str) -> list[Cut]:
     ]
 
 
-def cut_argv(cut: Cut) -> list[str]:
-    """The command that writes one track.
+def span_argv(source: str, start: float, end: float, dest: str) -> list[str]:
+    """The command that writes one stretch of a source.
 
     `-ss` and `-to` come before `-i` so ffmpeg seeks rather than decoding and
     discarding, and both are absolute times on the source.
@@ -60,14 +61,19 @@ def cut_argv(cut: Cut) -> list[str]:
         "error",
         "-y",
         "-ss",
-        f"{cut.track.start:.3f}",
+        f"{start:.3f}",
         "-to",
-        f"{cut.track.end:.3f}",
+        f"{end:.3f}",
         "-i",
-        cut.source,
+        source,
         *CODEC,
-        cut.dest,
+        dest,
     ]
+
+
+def cut_argv(cut: Cut) -> list[str]:
+    """The command that writes one track."""
+    return span_argv(cut.source, cut.track.start, cut.track.end, cut.dest)
 
 
 def cut_one(runner: Runner, cut: Cut, timeout: float = 300.0) -> None:
@@ -152,3 +158,20 @@ def verify_argv(path: str) -> list[str]:
 
 def verify(runner: Runner, path: str, timeout: float = 300.0) -> bool:
     return runner.run(verify_argv(path), timeout=timeout).ok
+
+
+def cut_verified(
+    runner: Runner, source: str, start: float, end: float, dest: str, timeout: float
+) -> str:
+    """Cut one stretch and test it: what went wrong, or nothing.
+
+    A cut that fails or hangs is about this stretch, so it is answered rather than
+    raised. A missing program is about every stretch, and still raises.
+    """
+    try:
+        runner.run(span_argv(source, start, end, dest), timeout=timeout).require()
+        return "" if verify(runner, dest, timeout=timeout) else "it would not decode"
+    except ToolFailed as e:
+        return str(e)
+    except subprocess.TimeoutExpired:
+        return f"it took longer than {timeout:.0f} s"

@@ -7,9 +7,12 @@ nothing at all.
 
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Sequence
+
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner, ToolFailed
+from ripdoctor.audio.runner import FakeRunner, Result, ToolFailed, ToolMissing
 from ripdoctor.audio.split import (
     CLIP_RATE,
     EOF_MARGIN,
@@ -17,7 +20,9 @@ from ripdoctor.audio.split import (
     Cut,
     cut_argv,
     cut_one,
+    cut_verified,
     plan_cuts,
+    span_argv,
     tick_argv,
     tick_one,
     verify,
@@ -186,3 +191,75 @@ def test_verification_reports_rather_than_raising() -> None:
     bad = FakeRunner().expect("flac", returncode=1, stderr=b"LOST_SYNC")
     assert verify(good, "a.flac") is True
     assert verify(bad, "a.flac") is False
+
+
+# ----------------------------------------------------- one stretch of a source
+
+
+def test_the_album_flow_argv_is_exactly_what_it_was() -> None:
+    assert cut_argv(a_cut()) == [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        "15.350",
+        "-to",
+        "167.150",
+        "-i",
+        "raw/side-a.flac",
+        "-c:a",
+        "flac",
+        "-compression_level",
+        "8",
+        "out/01 Track 1.flac",
+    ]
+
+
+def test_a_stretch_seeks_before_the_input_and_re_encodes_exactly() -> None:
+    argv = span_argv("tape.flac", 61.5, 200.125, "part/01 A.flac")
+    assert argv.index("-ss") < argv.index("-to") < argv.index("-i")
+    assert flag(argv, "-ss") == "61.500"
+    assert flag(argv, "-to") == "200.125"
+    assert flag(argv, "-c:a") == "flac"
+    assert "copy" not in argv
+    assert argv[-1] == "part/01 A.flac"
+
+
+def test_a_cut_that_verifies_says_nothing() -> None:
+    runner = FakeRunner()
+    assert cut_verified(runner, "t.flac", 1.0, 2.0, "o.flac", 60.0) == ""
+    assert [c[0] for c in runner.calls] == ["ffmpeg", "flac"]
+
+
+def test_a_cut_that_will_not_decode_says_so() -> None:
+    runner = FakeRunner().expect(lambda a: a[0] == "flac", returncode=1)
+    assert "would not decode" in cut_verified(runner, "t", 1.0, 2.0, "o.flac", 60.0)
+
+
+def test_a_failed_cut_is_not_verified_and_carries_what_ffmpeg_said() -> None:
+    runner = FakeRunner().expect(
+        lambda a: a[0] == "ffmpeg", returncode=1, stderr=b"No space left on device"
+    )
+    assert "No space left" in cut_verified(runner, "t", 1.0, 2.0, "o.flac", 60.0)
+    assert [c[0] for c in runner.calls] == ["ffmpeg"]
+
+
+def test_a_cut_that_hangs_is_answered_rather_than_raised() -> None:
+    class Hangs(FakeRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            stdin: bytes | None = None,
+            timeout: float | None = None,
+        ) -> Result:
+            raise subprocess.TimeoutExpired(list(argv), timeout or 0.0)
+
+    assert "longer than 60 s" in cut_verified(Hangs(), "t", 1.0, 2.0, "o.flac", 60.0)
+
+
+def test_a_missing_ffmpeg_stops_the_whole_cut_rather_than_each_song() -> None:
+    with pytest.raises(ToolMissing):
+        cut_verified(FakeRunner(installed=set()), "t", 1.0, 2.0, "o.flac", 60.0)
