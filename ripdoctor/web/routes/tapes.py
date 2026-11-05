@@ -105,6 +105,12 @@ def add(app: App, service: Service) -> None:
 
         return holding
 
+    def started(tape: str, op: str, work: Callable[[Job], Any]) -> H.Response:
+        try:
+            return H.ok(service.jobs.start(T.key_of(tape), op, work).as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
     def ear_rows(tape: TP.Tape) -> list[dict[str, Any]]:
         """The songs in the order to listen to them, with what is built for each."""
         built = T.clips_on_disk(layout, tape.id)
@@ -331,10 +337,7 @@ def add(app: App, service: Service) -> None:
             job.finished = 4
             return current.to_dict()
 
-        try:
-            return H.ok(service.jobs.start(key, "tape", work).as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "tape", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/match")
     def match(r: H.Request) -> H.Response:
@@ -356,11 +359,7 @@ def add(app: App, service: Service) -> None:
                 job.finished += len(songs)
             return current.to_dict()
 
-        try:
-            job = service.jobs.start(T.key_of(tape.id), "match", work)
-            return H.ok(job.as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "match", work)
 
     def song_named(tape: TP.Tape, number: object) -> TP.Song:
         for song in tape.songs:
@@ -468,11 +467,7 @@ def add(app: App, service: Service) -> None:
             wanted = boundaries_asked(current, body)
             return TJ.clips(service.runner, layout, current, wanted, job)
 
-        try:
-            job = service.jobs.start(T.key_of(tape.id), "clips", work)
-            return H.ok(job.as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "clips", work)
 
     @app.route("GET", r"/api/tapes/([^/]+)/songs/(\d+)/clip/([^/]+)")
     def clip(r: H.Request) -> H.Response:
@@ -491,11 +486,7 @@ def add(app: App, service: Service) -> None:
         def work(job: Job) -> dict[str, Any]:
             return TJ.preview(service.runner, layout, tape, job)
 
-        try:
-            job = service.jobs.start(T.key_of(tape.id), "preview", work)
-            return H.ok(job.as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "preview", work)
 
     @app.route("GET", "/api/tapes/([^/]+)/preview")
     def preview_audio(r: H.Request) -> H.Response:
@@ -512,11 +503,7 @@ def add(app: App, service: Service) -> None:
         def work(job: Job) -> dict[str, Any]:
             return TJ.cut(service.runner, layout, tape.id, job, service.now())
 
-        try:
-            job = service.jobs.start(T.key_of(tape.id), "cut", work)
-            return H.ok(job.as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "cut", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/file")
     def file_songs(r: H.Request) -> H.Response:
@@ -545,11 +532,7 @@ def add(app: App, service: Service) -> None:
                 dir_mode=settings.dir_mode,
             )
 
-        try:
-            job = service.jobs.start(T.key_of(tape.id), "file", work)
-            return H.ok(job.as_dict(), 202)
-        except Busy as e:
-            raise H.HttpError(409, str(e)) from e
+        return started(tape.id, "file", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled
