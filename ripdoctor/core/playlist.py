@@ -12,6 +12,7 @@ from typing import Any
 from ripdoctor.core import filing as F
 from ripdoctor.core import tape as TP
 from ripdoctor.core.match import fold
+from ripdoctor.core.naming import is_token
 
 FOLDER = "Playlists"
 
@@ -62,7 +63,7 @@ class State:
     def from_dict(cls, data: dict[str, Any]) -> State:
         gone = tuple(Entry(**x) for x in data["left_out"])
         state = cls(**{**data, "left_out": gone})
-        if not isinstance(state.file, str):
+        if not isinstance(state.file, str) or (state.file and not is_token(state.file)):
             raise ValueError(f"file {state.file!r} is not a name")
         return state
 

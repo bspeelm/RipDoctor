@@ -234,6 +234,7 @@ UNREADABLE_STATES = [
     b"[]",
     b"{}",
     b'{"left_out": [], "file": 5}',
+    b'{"left_out": [], "file": "../../x.m3u8"}',
     b'{"left_out": [{"nonsense": 1}]}',
     b'{"left_out": [], "unheard_of": 1}',
 ]
