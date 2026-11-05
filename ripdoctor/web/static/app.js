@@ -1217,6 +1217,7 @@ async function openTape(id) {
   try {
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
+    else if (tape.job?.error && !$("#tp-err").textContent) $("#tp-err").textContent = tape.job.error;
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
@@ -1241,6 +1242,7 @@ function showTape(t) {
   $("#tp-file-pick").disabled = !has || t.audio || t.playlist.done;
   $("#tp-cancel").hidden = !has || !t.upload;
   $("#tp-go").disabled = !tapePicked || !has || t.audio;
+  $("#tp-go").textContent = has && t.upload && t.upload.have < t.upload.total ? "Resume" : "Upload";
   setBar(has && t.upload && t.upload.total ? t.upload.have / t.upload.total : 0, "#tp-bar");
   $("#tp-audio").textContent = !has ? ""
     : t.playlist.done ? `archived: ${t.playlist.archived.file}`
@@ -1262,6 +1264,15 @@ function showTape(t) {
   showPlaylist(t);
   // Opening the tape again during a job would otherwise offer what it would refuse.
   if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  if (has && t.playlist.done) archivedControls();
+}
+
+// An archived tape stays as it is, so nothing here may offer to change it. Its
+// clips still play, and its playlist can still be asked about.
+function archivedControls() {
+  for (const id of ["#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-match", "#tp-rematch"])
+    $(id).disabled = true;
+  for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.

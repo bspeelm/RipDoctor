@@ -247,3 +247,17 @@ def test_a_pasted_release_keeps_its_place_in_the_edition_picker() -> None:
     """A release from no candidate list left the picker blank, and Use then sent ''."""
     js = (STATIC / "app.js").read_text()
     assert "[current, ...others]" in js
+
+
+def test_an_archived_tape_offers_nothing_that_would_change_it() -> None:
+    """Find boundaries on one said to upload audio, and every other control refused."""
+    js = (STATIC / "app.js").read_text()
+    assert "if (has && t.playlist.done) archivedControls()" in js
+    body = re.search(r"function archivedControls\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "#tp-process" in body and '$("#tapepane").querySelectorAll' in body
+
+
+def test_a_job_s_error_is_still_there_after_a_reload() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function openTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tape.job?.error" in body
