@@ -275,6 +275,8 @@ def test_a_remaster_word_beside_any_other_word_is_a_different_recording(
         ("Song feat. A Guest", "Song"),
         ("Song - feat. Bob (Club Mix)", "Song"),
         ("Song (feat. Bob - Club Mix)", "Song"),
+        ("Song (Feat of Clay)", "Song"),
+        ("Song (Ft Bob)", "Song"),
         ("(feat. Bob)", "(feat. Al)"),
     ],
 )
@@ -401,6 +403,12 @@ def test_the_same_names_or_a_listed_lead_agree(listed: str, credited: str) -> No
     assert got.status == M.MATCHED
 
 
+def test_a_band_with_ft_in_its_name_is_not_cut_at_it() -> None:
+    assert M.search_artists("Six Ft Under") == ("Six Ft Under",)
+    got = M.propose(wanted(artist="Six Ft Under"), [edition(artist="Six")])
+    assert got.status == M.REVIEW
+
+
 def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> None:
     whole = M.lookup_key(wanted(artist="Earth, Wind & Fire"))
     assert whole != M.lookup_key(wanted(artist="Earth"))
@@ -416,6 +424,8 @@ def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> No
         ("A Record", "A Record (Live Edition)"),
         ("A Record", "A Record - Remixed"),
         ("A Record", "A Record (Original Version)"),
+        ("A Record", "A Record (Special Karaoke Edition)"),
+        ("A Record", "A Record (Deluxe Instrumental Edition)"),
         ("A Record", "A Record (1999)"),
         ("Hits", "Hits Vol. 2"),
         ("Live 1970", "Live 1985"),

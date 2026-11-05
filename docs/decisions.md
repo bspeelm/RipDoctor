@@ -2134,11 +2134,23 @@ playlist has to resolve against the library, so that is what gets asked: by
 recording id, then by title, artist and length, because not every row has an id.
 An owned song is not filed again, and the playlist points at the existing copy.
 
-**The match rule.** The list supplies album and length. An official edition
-with the exact or remaster-stripped title, and the nearest length within 3 s, is
-accepted, with the earliest date winning a tie. Everything else goes to review,
-and nothing files until review is settled. The false-accept rate of this rule
-has not been measured.
+**The match rule.** The list supplies album and length. `matched` files a song
+with nobody looking, so it means all of: the same title, artist and album, on an
+official edition, with a length within 3 s. The nearest length wins among those,
+an exactly named album first, then the earliest date.
+
+A title is the same in canonical form and case, typographic quotes and dashes
+aside. A trailing suffix wholly of remaster words and years is ignored, and so is
+a bracketed or dash-led clause starting `feat.`, `ft.` or `featuring`, though two
+different such clauses disagree. Equality reached only by compatibility folding
+is a close title. An album is the same, or differs only by a suffix of edition
+words. A group with a secondary type needs the list to name exactly it, and a live
+one also needs that name to say live. Artists are the same names, or the list's
+lead credit alone; Various Artists agrees with nobody. Two tracks a list cannot
+tell apart are a doubt.
+
+Everything else goes to review, and nothing files until review is settled. The
+false-accept rate of this rule has not been measured.
 
 **A song with no release** takes the ADR-049 route: tagged from the list,
 flagged, with no automatic art. That was about 15% of the one list measured.
