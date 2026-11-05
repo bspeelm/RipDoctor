@@ -12,6 +12,7 @@ from ripdoctor.store import unpack as U
 from ripdoctor.store.safety import under
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
+from ripdoctor.web.routes.tapes import after_import
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Busy, Job
 
@@ -184,7 +185,7 @@ def add(app: App, service: Service) -> None:
             if done.tracks:
                 shutil.rmtree(into, ignore_errors=True)
                 IN.clear(layout, HELD)
-            return dict(done.as_dict())
+            return {**done.as_dict(), "notes": [*done.notes, *after_import(service)]}
 
         try:
             return H.ok(service.jobs.start(HELD, "precut-import", work).as_dict(), 202)

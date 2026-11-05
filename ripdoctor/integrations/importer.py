@@ -23,6 +23,7 @@ from typing import Protocol
 from ripdoctor.audio.runner import Runner, ToolMissing
 from ripdoctor.core.filing import Row, row_length
 from ripdoctor.core.plan import Plan
+from ripdoctor.core.playlist import Held
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
 
@@ -693,6 +694,28 @@ class Beets:
         if left:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
+
+    def held_rows(
+        self, runner: Runner, root: str, terms: tuple[str, ...]
+    ) -> tuple[Held, ...]:
+        """One query for many songs: a lone comma is beets' OR. No terms asks nothing,
+        where beets would read it as the whole library. A failure to answer raises."""
+        if not terms:
+            return ()
+        query = [part for term in terms for part in (",", term)][1:]
+        said = _SEP.join(("$mb_trackid", "$mb_albumid", _ROW))
+        result = runner.run(self._argv(["ls", "-f", said, *query]), timeout=300)
+        if not result.ok:
+            raise ImportFailed(TapeRun(result.returncode, result.err).why())
+        held = []
+        for line in _plain(result.text).splitlines():
+            fields = line.split(_SEP)
+            if len(fields) == 7:
+                recording, release, title, artist, album, length, path = fields
+                where = _rooted(root, path)
+                found = row_length(length), str(where), where.is_file()
+                held.append(Held(Row(title, artist, album, *found), recording, release))
+        return tuple(held)
 
 
 def _row(root: str, title: str, artist: str, album: str, length: str, said: str) -> Row:

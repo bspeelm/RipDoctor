@@ -17,6 +17,7 @@ from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.routes.records import slug_of
+from ripdoctor.web.routes.tapes import after_import
 from ripdoctor.web.service import Service
 from ripdoctor.work.jobs import Busy, Job
 
@@ -298,7 +299,8 @@ def add(app: App, service: Service) -> None:
                 dir_mode=service.settings.dir_mode,
             )
             job.finished = done.tracks
-            return {**done.as_dict(), "importer": importer.name}
+            notes = [*done.notes, *after_import(service)]
+            return {**done.as_dict(), "importer": importer.name, "notes": notes}
 
         try:
             return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)

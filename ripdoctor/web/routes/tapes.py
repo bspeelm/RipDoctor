@@ -15,11 +15,13 @@ from ripdoctor.core import tape as TP
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import incoming as IN
+from ripdoctor.store import playlists as PS
 from ripdoctor.store import tapes as T
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.routes.records import slug_of
 from ripdoctor.web.service import Service
+from ripdoctor.work import tape_finish as TX
 from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Busy, Job
 
@@ -74,6 +76,29 @@ def _seconds(body: dict[str, Any], edge: str) -> float:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError) as e:
         raise H.HttpError(400, f"{edge} has to be a number of seconds") from e
+
+
+def _place(service: Service) -> TX.Place:
+    s = service.settings
+    return TX.Place(service.runner, service.layout, s.library, s.file_mode, s.dir_mode)
+
+
+def after_import(service: Service) -> list[str]:
+    """Notes from rebuilding every tape's playlist, after a finished album import.
+
+    Failure is caught because the album is already filed and its result is already
+    true: nothing here may change that, and a playlist can be rebuilt from its page.
+    """
+    try:
+        if not TX.any_known(service.layout):
+            return []
+        settings = service.settings
+        importer = IMP.choose(service.runner, settings.importer, service.state_dir)
+        if not isinstance(importer, IMP.Beets):
+            return ["playlists were not rebuilt: that takes beets"]
+        return TX.rebuild_all(_place(service), importer, service.jobs, service.now())
+    except Exception as e:
+        return [f"playlists were not rebuilt: {e}"]
 
 
 def add(app: App, service: Service) -> None:
@@ -155,7 +180,25 @@ def add(app: App, service: Service) -> None:
             "file_refusal": TF.file_refusal(tape, cuts),
             "all_filed": TF.all_filed(tape),
             "filing": TF.outcomes(tape),
+            "playlist": playlist_view(tape),
         }
+
+    def playlist_view(tape: TP.Tape) -> dict[str, Any]:
+        state = PS.read(layout, tape.id)
+        library = service.settings.library
+        return {
+            **state.to_dict(),
+            "path": str(PS.path_of(library, state.file)) if state.file else "",
+        }
+
+    def beets_for(what: str) -> IMP.Beets:
+        settings = service.settings
+        if not settings.library:
+            raise H.HttpError(409, "no library directory is configured")
+        importer = IMP.choose(service.runner, settings.importer, service.state_dir)
+        if not isinstance(importer, IMP.Beets):
+            raise H.HttpError(409, what)
+        return importer
 
     def kept(changed: TP.Tape) -> H.Response:
         T.save(layout, changed)
@@ -512,27 +555,44 @@ def add(app: App, service: Service) -> None:
         refusal = TF.file_refusal(tape, T.cuts_on_disk(layout, tape.id))
         if refusal:
             raise H.HttpError(409, refusal)
+        importer = beets_for("filing a tape needs beets, to join albums")
         settings = service.settings
-        if not settings.library:
-            raise H.HttpError(409, "no library directory is configured")
-        importer = IMP.choose(service.runner, settings.importer, service.state_dir)
-        if not isinstance(importer, IMP.Beets):
-            raise H.HttpError(409, "filing a tape needs beets, to join albums")
 
         def work(job: Job) -> dict[str, Any]:
-            return TJ.file_songs(
-                service.runner,
-                importer,
-                layout,
-                tape.id,
-                job,
-                service.now(),
-                library=settings.library,
-                file_mode=settings.file_mode,
-                dir_mode=settings.dir_mode,
-            )
+            try:
+                done = TJ.file_songs(
+                    service.runner,
+                    importer,
+                    layout,
+                    tape.id,
+                    job,
+                    service.now(),
+                    library=settings.library,
+                    file_mode=settings.file_mode,
+                    dir_mode=settings.dir_mode,
+                )
+            finally:
+                notes = TX.after_filing(
+                    _place(service), importer, service.jobs, tape.id, service.now()
+                )
+            return {**done, "notes": notes}
 
         return started(tape.id, "file", work)
+
+    @app.route("POST", "/api/tapes/([^/]+)/playlist")
+    def playlist(r: H.Request) -> H.Response:
+        """Ask the library about every song and write what resolves."""
+        tape = held(r)
+        if not tape.songs:
+            raise H.HttpError(409, "this tape has no song list yet - add one first")
+        importer = beets_for("a playlist is asked of beets")
+
+        def work(job: Job) -> dict[str, Any]:
+            job.step(tape.name, "asking the library about every song")
+            state = TX.rebuild(_place(service), importer, tape.id, service.now())
+            return state.to_dict()
+
+        return started(tape.id, "playlist", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled
