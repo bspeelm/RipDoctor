@@ -149,6 +149,17 @@
         <button type="button" id="tp-file-songs" disabled>File</button>
       </div>
       <p class="warn" id="tp-file-why" hidden></p>
+      <h2>Playlist</h2>
+      <p class="dim">This file drives the music server, which follows changes to it.
+        Removing a tape, or deleting the file, does not remove its playlist there.</p>
+      <p class="dim mono" id="tp-pl-path"></p>
+      <p class="dim" id="tp-pl-state"></p>
+      <ul class="dim" id="tp-pl-left"></ul>
+      <div class="row btns">
+        <button type="button" id="tp-playlist" disabled>Write playlist</button>
+        <button type="button" id="tp-archive" disabled>Archive</button>
+      </div>
+      <p class="warn" id="tp-arch-why" hidden></p>
       <p class="err" id="tp-err"></p>
     </div>
 

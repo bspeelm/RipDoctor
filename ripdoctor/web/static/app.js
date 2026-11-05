@@ -1191,7 +1191,7 @@ async function loadTapes(keep) {
     const found = await api("/api/tapes");
     const pick = $("#tp-pick");
     pick.replaceChildren(...found.tapes.map((t) => {
-      const o = el("option", null, `${t.name} (${t.songs})${t.mismatch ? " - mismatch" : ""}`);
+      const o = el("option", null, `${t.name} (${t.songs})${t.mismatch ? " - mismatch" : ""}${t.done ? " - archived" : ""}`);
       o.value = t.id;
       return o;
     }));
@@ -1228,11 +1228,12 @@ function showTape(t) {
   $("#tp-what").textContent = has ? t.name : "No tape chosen";
   $("#tp-mismatch").textContent = has ? t.mismatch : "";
   $("#tp-mismatch").hidden = !has || !t.mismatch;
-  $("#tp-file-pick").disabled = !has || t.audio;
+  $("#tp-file-pick").disabled = !has || t.audio || t.playlist.done;
   $("#tp-cancel").hidden = !has || !t.upload;
   $("#tp-go").disabled = !tapePicked || !has || t.audio;
   setBar(has && t.upload && t.upload.total ? t.upload.have / t.upload.total : 0, "#tp-bar");
   $("#tp-audio").textContent = !has ? ""
+    : t.playlist.done ? `archived: ${t.playlist.archived.file}`
     : t.audio ? `audio here${t.source ? `: ${t.source}` : ""}${t.duration ? `, ${mss(t.duration)}` : ""}`
     : t.upload ? `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)} here. Pick the same file to carry on.`
     : "no audio yet";
@@ -1247,6 +1248,7 @@ function showTape(t) {
   showReview(t);
   showEar(t);
   showFiling(t);
+  showPlaylist(t);
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1395,7 +1397,8 @@ function showFiling(t) {
   const failed = started ? t.filing.filter((o) => o.state === "failed").length : 0;
   button.disabled = !t || !!t.file_refusal || t.all_filed;
   button.textContent = failed ? "File again" : "File";
-  const why = t ? t.file_refusal || (t.all_filed ? "every song is in the library" : "") : "";
+  const why = !t || t.playlist.done ? ""
+    : t.file_refusal || (t.all_filed ? "every song is in the library" : "");
   $("#tp-file-why").textContent = why;
   $("#tp-file-why").hidden = !why;
   $("#tp-filing-wrap").hidden = !started;
@@ -1403,6 +1406,31 @@ function showFiling(t) {
   $("#tp-filing-sum").textContent = failed
     ? `${failed} of ${t.filing.length} failed - the reasons are below; File again retries only those`
     : "";
+}
+
+const PLAYLIST_WORDS = {
+  written: "file rewritten", unchanged: "file unchanged, so left untouched",
+  unknown: "the library could not be asked", nothing: "no song resolved",
+  failed: "the file could not be written",
+};
+
+function showPlaylist(t) {
+  const p = t?.playlist;
+  $("#tp-playlist").disabled = !t || !t.songs.length;
+  $("#tp-archive").disabled = !t || !!p.archive_refusal;
+  $("#tp-pl-path").textContent = !t ? "" : p.path || "no playlist written yet";
+  const said = !p?.outcome ? "" : [
+    `${p.left_out.length ? "Incomplete" : "Complete"}: ${p.songs} of ${t.songs.length} songs in the file.`,
+    `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`,
+    p.note,
+  ].join(" ");
+  $("#tp-pl-state").textContent = said;
+  const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
+  $("#tp-pl-left").replaceChildren(...(p ? p.left_out.map((g) =>
+    el("li", null, `song ${g.number} (${named(g.number)}): ${g.why}`)) : []));
+  const why = p?.done ? "archived, and listed here as done" : p?.archive_refusal ?? "";
+  $("#tp-arch-why").textContent = why;
+  $("#tp-arch-why").hidden = !why;
 }
 
 function edgeCell(song, row, edge) {
@@ -1509,6 +1537,11 @@ const buildClips = (body) => startTapeJob(`/api/tapes/${tape.id}/clips`, body);
 const buildPreview = () => startTapeJob(`/api/tapes/${tape.id}/preview`, {});
 const cutTape = () => startTapeJob(`/api/tapes/${tape.id}/cut`, {});
 const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
+const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
+function archiveTape() {
+  if (confirm(`Archive ${tape.name}? Its uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.`))
+    startTapeJob(`/api/tapes/${tape.id}/archive`, {});
+}
 
 function songInput(field, value, label) {
   const input = el("input");
@@ -1645,7 +1678,7 @@ async function matchTape(again) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut", "#tp-file-songs"];
+const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
@@ -1676,7 +1709,7 @@ async function watchTape() {
 }
 
 async function removeTape() {
-  if (!confirm(`Remove ${tape.name}? Its audio and list are moved aside, not deleted. An upload still arriving is dropped.`)) return;
+  if (!confirm(`Remove ${tape.name}? Its audio and list are moved aside, not deleted. An upload still arriving is dropped. This does not remove its playlist from the music server.`)) return;
   try {
     const gone = await postJSON(`/api/tapes/${tape.id}/remove`, {});
     tape = null;
@@ -2754,6 +2787,8 @@ function wire() {
   $("#tp-preview").onclick = buildPreview;
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
+  $("#tp-playlist").onclick = writePlaylist;
+  $("#tp-archive").onclick = archiveTape;
   $("#tp-remove").onclick = removeTape;
   $("#pc-pick").onclick = () => $("#pc-file").click();
   $("#pc-file").onchange = (e) => {

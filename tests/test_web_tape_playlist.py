@@ -786,3 +786,12 @@ def test_the_page_shows_the_path_the_count_and_the_last_outcome(
     assert shown["path"] == str(file_of(service, tape))
     assert shown["songs"] == 2 and shown["outcome"] == P.WRITTEN
     assert shown["at"] == service.now() and shown["archive_refusal"] == ""
+
+
+def test_the_page_says_what_drives_the_server_and_what_removing_does_not_do() -> None:
+    static = Path(RT.__file__).parent.parent / "static"
+    markup = (static / "index.html").read_text()
+    script = (static / "app.js").read_text()
+    assert "drives the music server" in markup
+    assert "does not remove its playlist" in markup
+    assert "does not remove its playlist from the music server" in script
