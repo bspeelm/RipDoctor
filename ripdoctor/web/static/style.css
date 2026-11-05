@@ -126,7 +126,17 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 
 /* ---- tapes ---- */
 .warn{color:var(--warn);margin:0}
-.tp-scroll{overflow:auto;min-height:0;flex:1}
+/* The whole view scrolls. A table with a height share of its own would scroll
+   inside that, and hide rows behind a scrollbar nobody is looking for. */
+.tp-scroll{overflow-x:auto;flex:none}
+/* A job's error or a refusal has to be read wherever the button pressed was. */
+#tp-err:not(:empty){position:fixed;left:0;right:0;bottom:0;z-index:5;max-height:30vh;
+  overflow:auto;padding:.5rem 1rem;background:var(--panel);border-top:1px solid #ff8080}
+#tapeform p:empty{display:none}
+#tapeform .row.btns button{white-space:normal}
+/* A tape is not a record, so what acts on the record picker has no place here. */
+body[data-mode=tapes] header > button,body[data-mode=tapes] #album-q,
+body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 table.songs{border-collapse:collapse;width:100%;font-size:12px}
 table.songs th{text-align:left;color:var(--dim);font-weight:500;padding:.2rem .35rem;
   position:sticky;top:0;background:var(--bg)}
@@ -139,13 +149,29 @@ table.songs tr.doubt td{background:rgba(232,196,104,.08)}
 table.songs .moves button{padding:.1rem .35rem}
 table.review td{white-space:normal;vertical-align:top}
 table.review .pick{display:flex;gap:.3rem;margin-bottom:.2rem}
-table.ear .why{white-space:normal;min-width:14rem}
+table.review td:last-child{min-width:17rem}
+table.ear td{white-space:normal;vertical-align:top}
+table.ear .why{min-width:10rem}
+table.ear .moves{min-width:7.5rem}
 table.ear .edge input{min-width:5.5rem;width:5.5rem;display:block;margin-bottom:.2rem}
-table.ear audio{height:1.9rem;width:11rem;display:block}
+table.ear audio{height:1.9rem;width:9rem;display:block}
 #tp-whole{width:100%;margin-bottom:.4rem}
 table.review select{min-width:0;flex:1;max-width:22rem}
-table.review input{min-width:0;flex:1}
-table.review input[data-field=track]{flex:none;width:3.5rem}
+table.review input{min-width:7rem;flex:1}
+table.review input[data-field=track]{flex:none;min-width:0;width:3.5rem}
+/* A phone: the columns stack, and a row of a table becomes a block of its own. */
+@media (max-width:48rem){
+  #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
+  .ripform{width:100%}
+  .ripmeter{flex:none}
+  table.review thead,table.ear thead{display:none}
+  table.review tr,table.ear tr{display:block;padding:.4rem 0;border-top:1px solid var(--line)}
+  table.review td,table.ear td{display:block;border:0;min-width:0;text-align:left}
+  table.ear td:empty{display:none}
+  table.ear .edge{display:inline-block;width:50%}
+  table.ear audio,table.ear .edge input{width:100%}
+  table.review select{max-width:none}
+}
 
 /* ---- rip view ---- */
 #captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}

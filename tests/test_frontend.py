@@ -196,3 +196,21 @@ def test_a_tape_job_s_error_outlives_the_reload_that_follows_the_job() -> None:
     assert not re.search(r'#tp-err"\)\.textContent = [^;]*: ""', body)
     assert '$("#tp-err").textContent = "";' not in body
     assert '$("#tp-pick").onchange = (e) => { $("#tp-err").textContent = "";' in source
+
+
+def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None:
+    """Thirty rem of form clipped every sentence at 390 px, each table held a share
+    of the height and scrolled inside it, and the judge column ran off the edge.
+    An error sat under the last button of a long column, off the screen."""
+    css = (STATIC / "style.css").read_text()
+    narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S)
+    assert narrow, "nothing changes on a narrow screen"
+    assert "#captureview{flex-direction:column" in narrow.group(1)
+    assert ".ripform{width:100%}" in narrow.group(1)
+    scroll = re.search(r"\.tp-scroll\{([^}]*)\}", css)
+    assert scroll and "flex:none" in scroll.group(1)
+    assert "white-space:normal" in re.search(r"table\.ear td\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "position:fixed" in re.search(
+        r"#tp-err:not\(:empty\)\{([^}]*)\}", css
+    ).group(1)  # type: ignore[union-attr]
+    assert "document.body.dataset.mode = mode" in (STATIC / "app.js").read_text()

@@ -1737,6 +1737,7 @@ async function removeTape() {
 // -------------------------------------------------------------------- modes
 
 function setMode(mode) {
+  document.body.dataset.mode = mode;
   for (const b of document.querySelectorAll("#modes button"))
     b.classList.toggle("on", b.dataset.mode === mode);
   // Rip and Upload are one job from two sources, so they share a column and the
