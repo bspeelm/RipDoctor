@@ -539,18 +539,7 @@ class Beets:
         for line in _plain(result.text).splitlines():
             fields = line.split(_SEP)
             if len(fields) == 5:
-                title, artist, album, length, said = fields
-                where = _rooted(root, said)
-                rows.append(
-                    Row(
-                        title,
-                        artist,
-                        album,
-                        row_length(length),
-                        str(where),
-                        where.is_file(),
-                    )
-                )
+                rows.append(_row(root, *fields))
         return tuple(rows)
 
     def owned(
@@ -573,6 +562,11 @@ class Beets:
             why = TapeRun(result.returncode, result.err).why()
             raise ImportFailed(f"beets could not clear its row for {path}: {why}")
 
+    def _complaint(self, runner: Runner, args: list[str], timeout: float) -> str:
+        """What beets said, when it did not exit clean."""
+        result = runner.run(self._argv(args), timeout=timeout)
+        return "" if result.ok else TapeRun(result.returncode, result.err).why()
+
     def art_of(self, runner: Runner, root: str, path: str) -> str:
         """The art beets holds for the album of this file, or nothing."""
         result = runner.run(
@@ -586,19 +580,15 @@ class Beets:
 
     def embed_art(self, runner: Runner, path: str, art: str) -> str:
         """Into this one file: `-f` takes items, where the form without it rewrites
-        every track of a whole album. What beets said, when it did not exit clean."""
-        result = runner.run(
-            self._argv(["embedart", "-y", "-f", art, f"path:{path}"]), timeout=600
+        every track of a whole album."""
+        return self._complaint(
+            runner, ["embedart", "-y", "-f", art, f"path:{path}"], 600
         )
-        return "" if result.ok else TapeRun(result.returncode, result.err).why()
 
     def replaygain(self, runner: Runner, path: str) -> str:
         """This one file's gain. `-f` because a lookup-off import leaves a gain in the
         row and not in the file, and without it beets sees that row and skips."""
-        result = runner.run(
-            self._argv(["replaygain", "-f", f"path:{path}"]), timeout=3600
-        )
-        return "" if result.ok else TapeRun(result.returncode, result.err).why()
+        return self._complaint(runner, ["replaygain", "-f", f"path:{path}"], 3600)
 
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -703,6 +693,11 @@ class Beets:
         if left:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
+
+
+def _row(root: str, title: str, artist: str, album: str, length: str, said: str) -> Row:
+    where = _rooted(root, said)
+    return Row(title, artist, album, row_length(length), str(where), where.is_file())
 
 
 def _rooted(root: str, said: str) -> Path:
