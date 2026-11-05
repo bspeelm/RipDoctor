@@ -214,3 +214,20 @@ def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None
         r"#tp-err:not\(:empty\)\{([^}]*)\}", css
     ).group(1)  # type: ignore[union-attr]
     assert "document.body.dataset.mode = mode" in (STATIC / "app.js").read_text()
+
+
+def test_a_reload_on_a_tape_comes_back_to_that_tape() -> None:
+    """It landed on Cut, and on the first tape on the list once Tapes was pressed,
+    with any job on the tape left unwatched."""
+    js = (STATIC / "app.js").read_text()
+    assert 'remember("rd-mode", mode)' in js
+    assert 'if (t) remember("rd-tape", t.id)' in js
+    assert 'recalled("rd-mode") === "tapes"' in js
+    assert 'keep || tape?.id || recalled("rd-tape")' in js
+
+
+def test_a_refusal_is_said_once_where_it_can_be_acted_on() -> None:
+    """The File and Archive blocks repeated the cut's whole refusal, song by song."""
+    js = (STATIC / "app.js").read_text()
+    assert '"waits for the cut, above"' in js
+    assert '"waits until the songs are filed"' in js

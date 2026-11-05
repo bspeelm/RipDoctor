@@ -1176,6 +1176,14 @@ async function cancelPrecut() {
 
 // -------------------------------------------------------------------- tapes
 
+// Only this tab's place, so a browser that refuses storage just starts at Cut.
+function remember(key, value) {
+  try { sessionStorage.setItem(key, value); } catch { /* the place is a convenience */ }
+}
+function recalled(key) {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+
 // A tape is not a record: it has its own store and never reaches the picker in
 // the header, so it is chosen here. ADR-063.
 let tape = null, tapePicked = null, tapeEdited = false, tapeWatching = false;
@@ -1198,7 +1206,7 @@ async function loadTapes(keep) {
     // Only an action clears this: it runs after a job, whose error is still being read.
     if (found.unreadable.length && !$("#tp-err").textContent)
       $("#tp-err").textContent = `could not read: ${found.unreadable.join(", ")}`;
-    const wanted = keep || tape?.id;
+    const wanted = keep || tape?.id || recalled("rd-tape");
     if (found.tapes.some((t) => t.id === wanted)) pick.value = wanted;
     if (pick.value) await openTape(pick.value);
     else showTape(null);
@@ -1223,6 +1231,7 @@ async function createTape() {
 
 function showTape(t) {
   tape = t; tapeEdited = false;
+  if (t) remember("rd-tape", t.id);
   const has = !!t;
   for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-remove", "#tp-match", "#tp-rematch"])
     $(id).disabled = !has;
@@ -1236,6 +1245,7 @@ function showTape(t) {
   $("#tp-audio").textContent = !has ? ""
     : t.playlist.done ? `archived: ${t.playlist.archived.file}`
     : t.audio ? `audio here${t.source ? `: ${t.source}` : ""}${t.duration ? `, ${mss(t.duration)}` : ""}`
+    : t.upload && t.upload.have === t.upload.total ? `${t.upload.name}: all ${mb(t.upload.total)} here, not yet read`
     : t.upload ? `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)} here. Pick the same file to carry on.`
     : "no audio yet";
   $("#tp-rows").replaceChildren(...(has ? t.songs.map(songRow) : []));
@@ -1355,7 +1365,8 @@ const clipUrl = (song, edge) => `/api/tapes/${tape.id}/songs/${song.number}/clip
 function showEar(t) {
   const placed = !!t && t.songs.some((s) => s.start != null);
   $("#tp-ear-wrap").hidden = !placed;
-  for (const id of ["#tp-clips", "#tp-preview", "#tp-cut"]) $(id).disabled = !t || !t.audio;
+  for (const id of ["#tp-preview", "#tp-cut"]) $(id).disabled = !t || !t.audio;
+  $("#tp-clips").disabled = !t || !t.audio || !t.ear.some((row) => row.doubtful);
   if (!placed) { $("#tp-ear").replaceChildren(); $("#tp-cut-why").hidden = true; return; }
   const whole = $("#tp-whole");
   whole.hidden = !t.preview;
@@ -1413,6 +1424,7 @@ function showFiling(t) {
   button.disabled = !t || !!t.file_refusal || t.all_filed;
   button.textContent = failed ? "File again" : "File";
   const why = !t || t.playlist.done ? ""
+    : t.cut_refusal ? "waits for the cut, above"
     : t.file_refusal || (t.all_filed ? "every song is in the library" : "");
   $("#tp-file-why").textContent = why;
   $("#tp-file-why").hidden = !why;
@@ -1444,7 +1456,9 @@ function showPlaylist(t) {
   const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
   $("#tp-pl-left").replaceChildren(...(p ? p.left_out.map((g) =>
     el("li", null, `song ${g.number} (${named(g.number)}): ${g.why}`)) : []));
-  const why = p?.done ? "archived, and listed here as done" : p?.archive_refusal ?? "";
+  const unfiled = t?.filing.every((o) => o.state === "pending" || o.state === "skipped");
+  const why = p?.done ? "archived, and listed here as done"
+    : unfiled ? "waits until the songs are filed" : p?.archive_refusal ?? "";
   $("#tp-arch-why").textContent = why;
   $("#tp-arch-why").hidden = !why;
 }
@@ -1654,8 +1668,10 @@ async function sendTape(file) {
       }
       setBar(at / file.size, "#tp-bar");
       $("#tp-state").textContent = `${mb(at)} of ${mb(file.size)}`;
+      status(`uploading ${file.name}: ${mb(at)} of ${mb(file.size)}`, true);
     }
     $("#tp-state").textContent = "all here. Add the list if it is missing, then find the boundaries.";
+    status("");
     tapePicked = null;
     $("#tp-picked").textContent = "";
     await openTape(id);
@@ -1706,9 +1722,12 @@ async function watchTape() {
     for (;;) {
       const j = await api(`/api/job/${key}`);
       if (j.total) setBar(j.finished / j.total, "#tp-bar");
-      $("#tp-state").textContent = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
+      const doing = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
+      $("#tp-state").textContent = doing;
+      status(doing, true);
       if (j.done) {
         $("#tp-state").textContent = "";
+        status("");
         if (j.error) $("#tp-err").textContent = j.error;
         break;
       }
@@ -1738,6 +1757,7 @@ async function removeTape() {
 
 function setMode(mode) {
   document.body.dataset.mode = mode;
+  remember("rd-mode", mode);
   for (const b of document.querySelectorAll("#modes button"))
     b.classList.toggle("on", b.dataset.mode === mode);
   // Rip and Upload are one job from two sources, so they share a column and the
@@ -3013,6 +3033,8 @@ async function boot() {
   // there looking empty.
   try {
     await refreshAlbums();
+    // A reload on a tape stays there; a job still going is picked up by opening it.
+    if (recalled("rd-mode") === "tapes") setMode("tapes");
   } catch (e) {
     status(`load failed: ${e.message}`, true);
     logline(String(e.stack || e));
