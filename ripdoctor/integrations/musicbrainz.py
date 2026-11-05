@@ -7,15 +7,17 @@ through a Runner: everything above it is then testable with no network at all.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ripdoctor import __version__
+from ripdoctor.core.match import OFFICIAL, CatalogueTrack, Edition
 
 BASE = "https://musicbrainz.org/ws/2"
 
@@ -29,6 +31,9 @@ VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
 # How many candidates are asked for a tracklist. Each is its own request to a
 # service that allows one a second.
 PROBE = 4
+# A search costs one request however many it answers, and the earliest edition
+# of a record is often not among the first few.
+WIDE = 25
 
 RETRY_STATUS = (429, 500, 502, 503, 504)
 RETRIES = 4
@@ -55,10 +60,44 @@ class HttpFetcher:
 
 
 @dataclass
+class Pace:
+    """One request a second, shared by everything holding this pace."""
+
+    gap: float = 1.0
+    now: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    last: float | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def wait(self) -> None:
+        with self.lock:
+            if self.last is not None:
+                left = self.last + self.gap - self.now()
+                if left > 0:
+                    self.sleep(left)
+            self.last = self.now()
+
+
+@dataclass
+class Paced:
+    """A Fetcher that keeps a pace, for runs of many requests."""
+
+    inner: Fetcher
+    pace: Pace
+
+    def get(self, url: str, headers: dict[str, str]) -> bytes:
+        self.pace.wait()
+        return self.inner.get(url, headers)
+
+
+@dataclass
 class Track:
     number: int
     title: str
     length: float | None  # seconds, or nothing at all
+    disc: int = 1
+    position: int = 0  # on its disc, where `number` runs through the release
+    recording: str = ""
 
 
 @dataclass
@@ -76,6 +115,10 @@ class Release:
     # read the same.
     disambiguation: str = ""
     country: str = ""
+    status: str = ""
+    group: str = ""
+    live: bool = False
+    credit: str = ""  # everyone on the credit, where `artist` is the first
 
     @property
     def has_durations(self) -> bool:
@@ -155,9 +198,19 @@ def _tracks(media: list[dict[str, Any]]) -> list[Track]:
                     length=(ms / 1000.0)
                     if isinstance(ms, int | float) and ms
                     else None,
+                    disc=int(medium.get("position") or 1),
+                    position=int(t.get("position") or 0),
+                    recording=str((t.get("recording") or {}).get("id", "")),
                 )
             )
     return out
+
+
+def _credit(data: dict[str, Any]) -> str:
+    return "".join(
+        str(c.get("name", "")) + str(c.get("joinphrase", ""))
+        for c in data.get("artist-credit") or []
+    )
 
 
 def _phrase(value: str) -> str:
@@ -196,6 +249,7 @@ def search(
     out = []
     for r in data.get("releases", []):
         credit = r.get("artist-credit") or [{}]
+        group = r.get("release-group") or {}
         out.append(
             Release(
                 mbid=str(r.get("id", "")),
@@ -206,6 +260,10 @@ def search(
                 tracks=[],
                 disambiguation=str(r.get("disambiguation", "")),
                 country=str(r.get("country", "")),
+                status=str(r.get("status", "")),
+                group=str(group.get("id", "")),
+                live="Live" in (group.get("secondary-types") or []),
+                credit=_credit(r),
             )
         )
     return out
@@ -257,7 +315,65 @@ def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
     if not release.artist:
         credit = data.get("artist-credit") or [{}]
         release.artist = str(credit[0].get("name", ""))
+    release.status = release.status or str(data.get("status", ""))
+    release.credit = release.credit or _credit(data)
     return release
+
+
+def release_by_id(fetcher: Fetcher, mbid: str, **kw: Any) -> Release:
+    """A release somebody named. A search would have answered with its group."""
+    release = fetch_tracks(fetcher, Release(mbid, "", "", "", "", []), **kw)
+    release.group = release_group(fetcher, mbid, **kw)
+    return release
+
+
+def _worth_probing(found: list[Release]) -> list[Release]:
+    """Official editions if there are any, the earliest of each group first, so
+    that two records with one name are both seen before any second pressing."""
+    official = [r for r in found if r.status.lower() == OFFICIAL] or found
+    firsts: list[Release] = []
+    rest: list[Release] = []
+    groups: set[str] = set()
+    for release in sorted(official, key=lambda r: (r.date or "9999", r.mbid)):
+        group = release.group or release.mbid
+        (rest if group in groups else firsts).append(release)
+        groups.add(group)
+    return (firsts + rest)[:PROBE]
+
+
+def editions(
+    fetcher: Fetcher, artists: Sequence[str], album: str, **kw: Any
+) -> list[Release]:
+    """The editions of an album with their tracks, from the first of `artists`
+    the catalogue knows it under. Raises LookupFailed, which is not "none"."""
+    if not album:
+        return []
+    for artist in artists:
+        found = search(fetcher, artist, album, limit=WIDE, **kw)
+        if found:
+            return [fetch_tracks(fetcher, r, **kw) for r in _worth_probing(found)]
+    return []
+
+
+def edition_of(release: Release) -> Edition:
+    return Edition(
+        release=release.mbid,
+        group=release.group,
+        title=release.title,
+        artist=release.credit or release.artist,
+        date=release.date,
+        status=release.status,
+        tracks=tuple(
+            CatalogueTrack(
+                t.title, t.position or t.number, t.disc, t.length, t.recording
+            )
+            for t in release.tracks
+        ),
+        live=release.live,
+        note=" ".join(
+            filter(None, (release.format, release.country, release.disambiguation))
+        ),
+    )
 
 
 def rank(releases: list[Release]) -> list[Release]:
