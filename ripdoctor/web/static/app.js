@@ -1325,7 +1325,11 @@ async function settleSong(send) {
   try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const FILED_STATES = ["filed", "already"];
+const CHOICE_HELD = {
+  filed: "in the library, so this stays as it was filed",
+  already: "in the library, so this stays as it was filed",
+  unknown: "not confirmed, so this waits until File again gets an answer",
+};
 
 function reviewRow(song) {
   const row = el("tr", song.settled_by ? null : "doubt");
@@ -1376,10 +1380,11 @@ function reviewRow(song) {
   listButton.type = "button";
   listButton.onclick = () => settleSong(() => postJSON(fromList, {}));
   change.append(paste, listButton);
-  // What the library holds was filed as this choice, and the route refuses another.
-  if (FILED_STATES.includes(song.filing)) {
+  // What the library holds, or may hold, was filed as this choice, and the route
+  // refuses another.
+  if (CHOICE_HELD[song.filing]) {
     for (const c of change.querySelectorAll("input, select, button")) c.disabled = true;
-    change.append(el("div", "dim", "in the library, so this stays as it was filed"));
+    change.append(el("div", "dim", CHOICE_HELD[song.filing]));
   }
   row.append(change);
   return row;

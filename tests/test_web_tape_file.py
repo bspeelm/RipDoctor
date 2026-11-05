@@ -1685,6 +1685,30 @@ def test_a_song_whose_filing_failed_can_still_be_changed(service: Service) -> No
     assert F.choice_of(songs(service, tape)[0]) is None
 
 
+def test_a_song_not_confirmed_keeps_its_release_until_a_read_back_answers(
+    service: Service,
+) -> None:
+    """Another choice would look for another recording, find no row and import a
+    second copy of what the first run may have filed."""
+    app = build(service)
+    tape = pinned(app, service, two="rel-1")
+    runner = beet_of(service)
+    locked_after_the_import(service)
+    file_it(app, tape, service)
+    before = T.read(service.layout, tape)
+    assert before.songs[0].filing == F.UNKNOWN
+    for action, body in (("release", {"release": "rel-other"}), ("from-list", {})):
+        answer = post(app, f"/api/tapes/{tape}/songs/1/{action}", service, body)
+        assert answer.status == 409, action
+        assert "until a read-back answers" in answer.json()["error"]
+    assert T.read(service.layout, tape) == before
+    imported = len(runner.imports)
+    runner.ls_fails = False
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.ALREADY
+    assert len(runner.imports) == imported
+
+
 def test_a_boundary_moved_on_a_filed_song_is_recut_and_never_filed_twice(
     service: Service,
 ) -> None:

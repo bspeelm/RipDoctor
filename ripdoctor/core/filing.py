@@ -446,7 +446,13 @@ def file_refusal(tape: Tape, on_disk: Collection[str]) -> str:
 
 def choice_refusal(song: Song) -> str:
     """Why this song's release may not change, or nothing. A finished song's choice
-    is what the library's copy was filed as, and later jobs find that copy by it."""
+    is what the library's copy was filed as, and later jobs find that copy by it. One
+    not confirmed may have such a copy, which another choice would not find."""
+    if song.filing == UNKNOWN:
+        return (
+            f"{label(song)} is not confirmed, and the library may already hold it, so "
+            "its release stays as it is until a read-back answers - press File again"
+        )
     if song.filing not in FINISHED:
         return ""
     return (

@@ -2289,8 +2289,10 @@ a crash on any other missing path names it.
 
 **A filed song and what can still change.** A song in the library keeps its release:
 the routes refuse another and the view disables the choice, because the library's copy
-was filed as that release and later jobs find it by that. A song whose filing failed
-can still be changed. A boundary moved after a song is filed needs a recut before the
+was filed as that release and later jobs find it by that. A song not confirmed keeps
+its release too, until a read-back answers: the library may hold a copy, and another
+choice would look for another recording, find no row and import a second one. A song
+whose filing failed can still be changed. A boundary moved after a song is filed needs a recut before the
 tape can be filed again, and does not re-file that song: the library's copy stands
 until a person replaces it. Skipping a filed song takes it out of the playlist and
 leaves its copy alone. A new list clears every song's filing, and filing again finds
