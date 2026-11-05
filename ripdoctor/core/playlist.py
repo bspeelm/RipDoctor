@@ -20,6 +20,7 @@ HERE, MISSING, AMBIGUOUS = "here", "missing", "ambiguous"
 NOT_FILED, OUTSIDE, UNPRINTABLE = "not filed", "outside", "unprintable"
 WRITTEN, UNCHANGED, UNKNOWN = "written", "unchanged", "unknown"
 NOTHING, FAILED = "nothing", "failed"
+ALL_SKIPPED = "every song on this tape is skipped, so its playlist has no lines"
 
 
 class OutsideLibrary(ValueError):
@@ -287,6 +288,10 @@ def with_paths(tape: TP.Tape, entries: Iterable[Entry]) -> TP.Tape:
     return replace(tape, songs=tuple(moved(s) for s in tape.songs))
 
 
+def all_skipped(tape: TP.Tape) -> bool:
+    return bool(tape.songs) and all(s.skip for s in tape.songs)
+
+
 def archived(state: State, audio: bool) -> bool:
     """Done: the uncut file has gone from here. With `audio` still here, a clear was
     interrupted and archiving again finishes it."""
@@ -302,6 +307,11 @@ def archive_refusal(
     in the library when this tape's song never reached it."""
     if archived(state, audio):
         return f"{tape.name} is already archived"
+    if all_skipped(tape):
+        return (
+            f"{tape.name} cannot be archived: every song is skipped, so nothing "
+            "proves its audio is anywhere else"
+        )
     why = [] if audio else ["its uncut file is not here"]
     if not state.file:
         why.append("no playlist has been written")

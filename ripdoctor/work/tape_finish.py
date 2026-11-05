@@ -52,19 +52,26 @@ def _write(
 ) -> P.State:
     """Write what resolves. With nothing resolving the file is left alone: that is
     what a library gone from under its mount looks like, and emptying a playlist
-    on the music server is no way to report it."""
+    on the music server is no way to report it. A tape with every song skipped was
+    emptied by a person, so its lines go."""
     prior = S.read(place.layout, tape.id)
     root = Path(place.library).resolve()
     state = replace(prior, at=now, note="")
     try:
         done = P.render(tape.name, [_inside(root, e) for e in entries], str(root))
         state = replace(state, left_out=done.left_out)
-        if done.songs:
+        emptied = P.all_skipped(tape)
+        if done.songs or (emptied and prior.file):
             file = prior.file or P.file_of(tape)
             modes = place.file_mode, place.dir_mode
             changed = S.write(place.library, tape.name, file, done.text, *modes)
             outcome = P.WRITTEN if changed else P.UNCHANGED
-            state = replace(state, file=file, songs=done.songs, outcome=outcome)
+            note = P.ALL_SKIPPED if emptied else ""
+            state = replace(
+                state, file=file, songs=done.songs, outcome=outcome, note=note
+            )
+        elif emptied:
+            state = replace(state, outcome=P.NOTHING, note=P.ALL_SKIPPED)
         else:
             note = "no song resolves, so the file was left as it was"
             state = replace(state, outcome=P.NOTHING, note=note)

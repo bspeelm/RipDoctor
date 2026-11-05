@@ -876,6 +876,39 @@ def test_a_song_whose_filing_failed_holds_the_gate_though_a_row_now_has_its_id(
     untouched(service, tape)
 
 
+def test_every_song_skipped_leaves_no_stale_lines_says_so_and_clears_nothing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready_to_archive(app, service)
+    assert len(lines_of(service, tape)) == 4
+    for number in (1, 2):
+        answer = post(app, f"/api/tapes/{tape}/songs/{number}/skip", service)
+        assert answer.status == 200
+
+    assert not rebuild(app, tape, service)["error"]
+    assert lines_of(service, tape)[2:] == []
+    shown = view(app, tape, service)["playlist"]
+    assert shown["note"] == P.ALL_SKIPPED and shown["songs"] == 0
+
+    refused = archive(app, tape, service)
+    assert refused.status == 409 and "every song is skipped" in refused.json()["error"]
+    untouched(service, tape)
+    assert not archived_at(service, tape).exists()
+
+
+def test_a_tape_skipped_whole_before_any_playlist_has_no_file_and_says_why(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    for number in (1, 2):
+        post(app, f"/api/tapes/{tape}/songs/{number}/skip", service)
+    assert not rebuild(app, tape, service)["error"]
+    done = state_of(service, tape)
+    assert (done.file, done.note) == ("", P.ALL_SKIPPED)
+
+
 def test_archive_is_refused_before_any_playlist_is_written(service: Service) -> None:
     app = build(service)
     tape = pinned(app, service)

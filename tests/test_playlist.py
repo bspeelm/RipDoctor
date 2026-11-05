@@ -438,6 +438,16 @@ def test_a_song_left_out_and_unfinished_is_named_once() -> None:
     assert refusal(P.State("a.m3u8", 0, gone), tape).count("song 1") == 1
 
 
+def test_a_tape_with_every_song_skipped_proves_nothing_and_shuts_the_gate() -> None:
+    tape = a_tape(a_song(1, "One", skip=True), a_song(2, "Two", skip=True))
+    gone = tuple(P.Entry(n, state=TP.SKIPPED, why="skipped") for n in (1, 2))
+    assert "every song is skipped" in refusal(P.State("a.m3u8", 0, gone), tape)
+
+
+def test_a_tape_with_no_songs_is_not_said_to_have_skipped_them() -> None:
+    assert "no playlist" in refusal(P.State(), a_tape())
+
+
 def test_no_playlist_written_shuts_the_gate() -> None:
     assert "no playlist" in refusal(P.State())
 
