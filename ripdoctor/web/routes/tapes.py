@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -41,17 +42,19 @@ def add(app: App, service: Service) -> None:
         except FileNotFoundError as e:
             raise H.HttpError(404, "no such tape") from e
 
-    def running(tape: str) -> Job | None:
-        job = service.jobs.status(T.key_of(tape))
-        return job if job and not job.done else None
+    def settled(
+        change: Callable[[H.Request, TP.Tape], H.Response],
+    ) -> Callable[[H.Request], H.Response]:
+        """Hold the tape through a change, so no job starts halfway through it."""
 
-    def settled(r: H.Request) -> TP.Tape:
-        """The tape, provided no job is about to overwrite what is done to it."""
-        tape = held(r)
-        job = running(tape.id)
-        if job:
-            raise H.HttpError(409, f"{job.op} is running for {tape.name} - wait for it")
-        return tape
+        def holding(r: H.Request) -> H.Response:
+            try:
+                with service.jobs.claim(T.key_of(slug_of(r)), "a change"):
+                    return change(r, held(r))
+            except Busy as e:
+                raise H.HttpError(409, "this tape is busy - wait for it") from e
+
+        return holding
 
     def view(tape: TP.Tape) -> dict[str, Any]:
         key = T.key_of(tape.id)
@@ -107,18 +110,18 @@ def add(app: App, service: Service) -> None:
         return H.ok(view(held(r)))
 
     @app.route("POST", "/api/tapes/([^/]+)/songs")
-    def songs(r: H.Request) -> H.Response:
+    @settled
+    def songs(r: H.Request, tape: TP.Tape) -> H.Response:
         """The whole list by hand; adding, editing and reordering all send this."""
-        tape = settled(r)
         try:
             return with_songs(tape, TP.songs_from(r.json().get("songs")))
         except TP.BadList as e:
             raise H.HttpError(400, str(e)) from e
 
     @app.route("POST", "/api/tapes/([^/]+)/list")
-    def from_csv(r: H.Request) -> H.Response:
+    @settled
+    def from_csv(r: H.Request, tape: TP.Tape) -> H.Response:
         """The body is the file. It pairs with this tape because it was sent here."""
-        tape = settled(r)
         try:
             return with_songs(tape, TP.parse_list(r.body.decode("utf-8")))
         except UnicodeDecodeError as e:
@@ -127,8 +130,8 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, str(e)) from e
 
     @app.route("POST", "/api/tapes/([^/]+)/upload/begin")
-    def begin(r: H.Request) -> H.Response:
-        tape = settled(r)
+    @settled
+    def begin(r: H.Request, tape: TP.Tape) -> H.Response:
         if T.audio_file(layout, tape.id).is_file():
             raise H.HttpError(
                 409,
@@ -154,8 +157,8 @@ def add(app: App, service: Service) -> None:
         return H.ok({"have": 0, "total": size, "chunk": CHUNK})
 
     @app.route("POST", "/api/tapes/([^/]+)/upload/chunk")
-    def chunk(r: H.Request) -> H.Response:
-        tape = settled(r)
+    @settled
+    def chunk(r: H.Request, tape: TP.Tape) -> H.Response:
         key = T.key_of(tape.id)
         here = IN.state(layout, key)
         if here is None:
@@ -177,13 +180,12 @@ def add(app: App, service: Service) -> None:
         return H.ok({"have": have, "total": here.total})
 
     @app.route("POST", "/api/tapes/([^/]+)/upload/cancel")
-    def cancel(r: H.Request) -> H.Response:
-        tape = settled(r)
+    @settled
+    def cancel(r: H.Request, tape: TP.Tape) -> H.Response:
         return H.ok({"freed_bytes": IN.clear(layout, T.key_of(tape.id))})
 
-    @app.route("POST", "/api/tapes/([^/]+)/process")
-    def process(r: H.Request) -> H.Response:
-        """Make the audio a tape's, measure it, and lay the list over it."""
+    def ready(r: H.Request) -> tuple[TP.Tape, IN.Incoming | None]:
+        """The tape and what has arrived for it, or why it cannot be processed."""
         tape = held(r)
         key = T.key_of(tape.id)
         if not tape.songs:
@@ -198,6 +200,13 @@ def add(app: App, service: Service) -> None:
                     f"only {arrived.have} of {arrived.total} bytes arrived "
                     "- send the rest",
                 )
+        return tape, arrived
+
+    @app.route("POST", "/api/tapes/([^/]+)/process")
+    def process(r: H.Request) -> H.Response:
+        """Make the audio a tape's, measure it, and lay the list over it."""
+        tape, _ = ready(r)
+        key = T.key_of(tape.id)
 
         def take_in(job: Job, source: str) -> None:
             part, done = IN.part_file(layout, key), IN.done_file(layout, key)
@@ -218,7 +227,8 @@ def add(app: App, service: Service) -> None:
 
         def work(job: Job) -> dict[str, Any]:
             job.total = 4
-            current = tape
+            # Read again: only now does the job hold the tape against a change.
+            current, arrived = ready(r)
             if not T.audio_file(layout, tape.id).is_file() and arrived is not None:
                 take_in(job, arrived.name)
                 current = replace(current, source=arrived.name)
@@ -246,8 +256,8 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, str(e)) from e
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
-    def remove(r: H.Request) -> H.Response:
-        tape = settled(r)
+    @settled
+    def remove(r: H.Request, tape: TP.Tape) -> H.Response:
         moved = T.remove(layout, tape.id, service.now())
         where = moved.relative_to(layout.root.resolve())
         return H.ok({"removed": tape.id, "moved_to": str(where)})

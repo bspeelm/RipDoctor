@@ -432,6 +432,35 @@ def test_nothing_changes_under_a_running_job(
     assert T.read(service.layout, tape).songs
 
 
+def test_a_change_under_way_refuses_a_job_and_another_change(service: Service) -> None:
+    app = build(service)
+    tape = a_ready_tape(app, service)
+    with service.jobs.claim(T.key_of(tape), "a change"):
+        assert post(app, f"/api/tapes/{tape}/process", service).status == 409
+        changed = post(app, f"/api/tapes/{tape}/songs", service, {"songs": BY_HAND})
+        assert changed.status == 409
+    process(app, tape, service)
+
+
+def test_a_list_changed_just_before_a_job_starts_was_lost_and_is_now_used(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = build(service)
+    tape = a_ready_tape(app, service)
+    start = service.jobs.start
+
+    def after_a_change(*args):  # type: ignore[no-untyped-def]
+        monkeypatch.setattr(service.jobs, "start", start)
+        new = [{**BY_HAND[0], "title": "Newer"}, BY_HAND[1]]
+        assert (
+            post(app, f"/api/tapes/{tape}/songs", service, {"songs": new}).status == 200
+        )
+        return start(*args)
+
+    monkeypatch.setattr(service.jobs, "start", after_a_change)
+    assert process(app, tape, service)["songs"][0]["title"] == "Newer"
+
+
 def test_processing_needs_a_list_and_a_whole_upload(service: Service) -> None:
     app = build(service)
     tape = a_new_tape(app, service)

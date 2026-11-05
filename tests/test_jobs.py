@@ -159,3 +159,26 @@ def test_a_skipped_item_is_reported_rather_than_failing_the_job() -> None:
     jobs = a_runner()
     job = jobs.start("album", "prepare", lambda j: j.skipped.append("b"))
     assert job.as_dict()["skipped"] == ["b"] and not job.error
+
+
+def test_a_claim_keeps_a_job_from_starting_and_ends_with_the_request() -> None:
+    jobs = Jobs(spawn=lambda work: None)
+    with jobs.claim("a-record", "a change"):
+        assert jobs.status("a-record") is None
+        with pytest.raises(Busy, match="a change is under way"):
+            jobs.start("a-record", "cut", lambda job: None)
+        with pytest.raises(Busy), jobs.claim("a-record", "another"):
+            pass
+        assert jobs.start("other", "cut", lambda job: None)
+    assert jobs.start("a-record", "cut", lambda job: None)
+
+
+def test_a_claim_is_refused_while_a_job_runs_and_let_go_after_an_error() -> None:
+    jobs = Jobs(spawn=lambda work: None)
+    jobs.start("a-record", "cut", lambda job: None)
+    running = pytest.raises(Busy, match="cut is already running")
+    with running, jobs.claim("a-record", "a change"):
+        pass
+    with pytest.raises(ValueError, match="went wrong"), jobs.claim("other", "change"):
+        raise ValueError("went wrong")
+    assert jobs.start("other", "cut", lambda job: None)

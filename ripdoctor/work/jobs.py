@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,8 +81,8 @@ def _thread(work: Callable[[], None]) -> None:
 class Jobs:
     """The running and recently finished jobs, one per record.
 
-    A job that is not done is the claim on that record; there is no second
-    table of locks to fall out of step with this one.
+    A job that is not done holds its record. So does a `claim`, for the length of
+    one request, kept apart because nothing polls a request for its progress.
     """
 
     keep: float = KEEP
@@ -89,6 +90,26 @@ class Jobs:
     spawn: Callable[[Callable[[], None]], None] = _thread
     running: dict[str, Job] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    claims: dict[str, str] = field(default_factory=dict)
+
+    def _refuse_if_held(self, slug: str) -> None:
+        current = self.running.get(slug)
+        if current and not current.done:
+            raise Busy(f"{current.op} is already running for {slug}")
+        if slug in self.claims:
+            raise Busy(f"{self.claims[slug]} is under way for {slug}")
+
+    @contextmanager
+    def claim(self, slug: str, op: str) -> Iterator[None]:
+        """Hold the record while a request changes it, with no worker involved."""
+        with self.lock:
+            self._refuse_if_held(slug)
+            self.claims[slug] = op
+        try:
+            yield
+        finally:
+            with self.lock:
+                del self.claims[slug]
 
     def status(self, slug: str) -> Job | None:
         with self.lock:
@@ -102,9 +123,7 @@ class Jobs:
         """
         self.prune()
         with self.lock:
-            current = self.running.get(slug)
-            if current and not current.done:
-                raise Busy(f"{current.op} is already running for {slug}")
+            self._refuse_if_held(slug)
             job = Job(slug=slug, op=op, started=self.now())
             self.running[slug] = job
 
