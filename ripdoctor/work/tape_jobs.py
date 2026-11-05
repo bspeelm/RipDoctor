@@ -32,18 +32,13 @@ def clips(
     job.total = len(wanted)
     built = 0
     for song, edge in wanted:
-        name = TP.clip_name(TP.edge_at(song, edge) or 0.0)
+        at = TP.edge_at(song, edge) or 0.0
+        name = TP.clip_name(at)
         target = T.clip_file(layout, tape.id, name)
         if not target.is_file():
             job.step(TP.label(song), f"building the {edge} clip")
             part = partial / name
-            split.tick_one(
-                runner,
-                source,
-                TP.edge_at(song, edge) or 0.0,
-                str(part),
-                duration=tape.duration,
-            )
+            split.tick_one(runner, source, at, str(part), duration=tape.duration)
             T.promote(part, target)
             built += 1
         job.finished += 1
@@ -158,6 +153,9 @@ class _Filing:
     unanswered: set[int] = field(default_factory=set)
     plugins: tuple[str, ...] | None = None
 
+    def rows(self, query: list[str]) -> tuple[F.Row, ...]:
+        return self.beets.library_rows(self.runner, self.library, query)
+
     def tell(self, song: TP.Song, state: str, path: str = "", note: str = "") -> None:
         self.tape = F.recorded(self.tape, song.number, state, path, note)
         T.save(self.layout, self.tape)
@@ -180,8 +178,7 @@ class _Filing:
         would otherwise read as owned. Their paths, and nothing else, are cleared."""
         filing = T.filing_dir(self.layout, self.tape.id)
         cleared = set()
-        query = [f"path:{filing}"]
-        for row in self.beets.library_rows(self.runner, self.library, query):
+        for row in self.rows([f"path:{filing}"]):
             if contains(filing, row.path):
                 self.beets.forget_row(self.runner, self.library, row.path)
                 cleared.add(row.path)
@@ -213,7 +210,7 @@ class _Filing:
             query = [f"mb_albumid:{run.release}"]
         else:
             query = [f"artist:{F.lead(song.artist)}", f"album:{song.album}"]
-        return self.sited(self.beets.library_rows(self.runner, self.library, query))
+        return self.sited(self.rows(query))
 
     def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
         """A song the library holds. Beets rewrites what it files at the writer's
@@ -285,14 +282,8 @@ class _Filing:
 
         doubled = ""
         if not run.release:
-            doubled = F.second_row(
-                run,
-                self.beets.library_rows(
-                    self.runner,
-                    self.library,
-                    [f"albumartist:{run.artist}", f"album:{run.album}"],
-                ),
-            )
+            query = [f"albumartist:{run.artist}", f"album:{run.album}"]
+            doubled = F.second_row(run, self.rows(query))
         self.tape = F.begun(self.tape, copies)
         T.save(self.layout, self.tape)
         self.job.step(run.album, "importing with beets")
