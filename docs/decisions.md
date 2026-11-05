@@ -2213,6 +2213,26 @@ marked, the rest carry on, and the job ends carrying the names. A recut that fai
 leaves the earlier file under its name, marked failed so nothing can take it for
 current. What a recut replaces, and any cut no song claims, goes to `superseded`.
 
+**The filing job.** It is refused until the tape is cut and every song not skipped
+is settled. A song owned by recording id, or by cleaned title, artist and length
+within 3 s, is not imported: a row with no length is a failure that names the row,
+not an assumption, and a row whose file is gone is a stale-row failure. A library
+that could not be asked is a failure too, never a miss. Filing works on a copy of
+the cut, not a hard link, since tags written through a link could change the cut
+that stands as proof, and the copies are dropped once each album is done. Each
+attempt uses a new directory, because beets asks about resuming a path it was
+interrupted on. That was not tried against real beets.
+
+The library decides the outcome. A song filed is one with a row and a file on disk
+and no copy left behind, whatever the exit status said, and with an exit of 1 and
+the song verifiably there it counts as filed. A crash on a relative path says what
+to do rather than leaving a traceback. A from-list song is numbered by its place
+among its album's songs on this tape, and takes no date, which a list does not
+carry. One with no album fails rather than being given one. A second album row is
+said on the song's outcome, not refused. A boundary moved after a song is filed
+needs a recut before the tape can be filed again, and does not re-file that song:
+the library's copy stands until a person replaces it.
+
 **Unresolved.** A song with no recording id cannot be rebuilt from an id: it
 resolves by title, artist and length, and is named if that is ambiguous. The
 too-many check (ADR-057) and the archive gate do not apply to tapes as written, so
