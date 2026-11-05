@@ -31,9 +31,21 @@ def edition(
     date: str = "1990",
     status: str = "Official",
     live: bool = False,
+    secondary: tuple[str, ...] = (),
 ) -> M.Edition:
     track = M.CatalogueTrack(title, 3, 1, length, f"rec-{release}")
-    return M.Edition(release, group, album, artist, date, status, (track,), live)
+    return M.Edition(
+        release,
+        group,
+        album,
+        artist,
+        date,
+        status,
+        (track,),
+        live,
+        primary="Album",
+        secondary=secondary,
+    )
 
 
 def test_an_official_edition_with_the_title_and_length_is_accepted() -> None:
@@ -182,19 +194,125 @@ def test_releases_with_no_such_track_are_a_doubt_not_no_release() -> None:
     ("listed", "catalogue"),
     [
         ("Cafe\u0301 del Sol", "Caf\u00e9 del Sol"),
-        ("\uff26\uff35\uff2c\uff2c Width", "FULL Width"),
         ("\u591c\u306e\u3046\u305f", "\u591c\u306e\u3046\u305f"),
         ("Don\u2019t  Stop", "Don't Stop"),
         ("Back \u2013 Again", "Back - Again"),
-        ("STRASSE", "Stra\u00dfe"),
-        ("Brand\u2122", "BrandTM"),
     ],
 )
-def test_non_ascii_and_punctuation_variants_are_the_same_title(
+def test_canonical_and_typographic_variants_are_the_same_title(
     listed: str, catalogue: str
 ) -> None:
     got = M.propose(wanted(listed), [edition(title=catalogue)])
     assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    ("listed", "catalogue"),
+    [
+        ("Ma\u00df", "Mass"),
+        ("STRASSE", "Stra\u00dfe"),
+        ("Song \u2461", "Song 2"),
+        ("x\u00b2", "x2"),
+        ("Song \u2161", "Song II"),
+        ("\uff26\uff35\uff2c\uff2c Width", "FULL Width"),
+        ("Brand\u2122", "BrandTM"),
+        ("\ufb01re", "fire"),
+    ],
+)
+def test_a_title_equal_only_by_compatibility_folding_shows_a_person_both_forms(
+    listed: str, catalogue: str
+) -> None:
+    got = M.propose(wanted(listed), [edition(title=catalogue)])
+    assert got.status == M.REVIEW
+    assert repr(listed) in got.reason and repr(catalogue) in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "catalogue"),
+    [
+        ("Song - Remastered", "Song"),
+        ("Song", "Song - Remastered 2011"),
+        ("Song", "Song (2012 Remaster)"),
+        ("Song - Digitally Remastered", "Song"),
+    ],
+)
+def test_a_suffix_wholly_of_remaster_words_and_years_is_stripped(
+    listed: str, catalogue: str
+) -> None:
+    got = M.propose(wanted(listed), [edition(title=catalogue)])
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    ("listed", "catalogue"),
+    [
+        ("Song - Demo / Remastered 2009", "Song"),
+        ("Song", "Song - Mono / Remastered"),
+        ("Song (Remastered Club Mix)", "Song"),
+        ("Song", "Song (Instrumental Remaster)"),
+        ("Song - Karaoke Remaster", "Song"),
+        ("Song - 2011", "Song"),
+        ("Song (Remastered", "Song"),
+    ],
+)
+def test_a_remaster_word_beside_any_other_word_is_a_different_recording(
+    listed: str, catalogue: str
+) -> None:
+    got = M.propose(wanted(listed), [edition(title=catalogue)])
+    assert got.status == M.REVIEW
+    assert "close title" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "catalogue"),
+    [
+        ("Song (With Strings)", "Song"),
+        ("Stay (With You)", "Stay"),
+        ("A Feat of Clay", "A Feat of Strength"),
+        ("Six Ft Under", "Six Ft Deep"),
+        ("(feat. Bob)", "(with Al)"),
+        ("Song (feat. Bob)", "Song (feat. Al)"),
+        ("Song feat. A Guest", "Song"),
+        ("Song - feat. Bob (Club Mix)", "Song"),
+        ("Song (feat. Bob - Club Mix)", "Song"),
+        ("Song (Feat of Clay)", "Song"),
+        ("Song (Ft Bob)", "Song"),
+        ("(feat. Bob)", "(feat. Al)"),
+    ],
+)
+def test_only_a_guest_clause_in_brackets_or_after_a_dash_is_a_credit(
+    listed: str, catalogue: str
+) -> None:
+    assert M.propose(wanted(listed), [edition(title=catalogue)]).status == M.REVIEW
+
+
+def test_the_same_guest_however_it_is_written_is_the_same_title() -> None:
+    got = M.propose(wanted("Song (feat. Bob)"), [edition(title="Song [ft. Bob]")])
+    assert got.status == M.MATCHED
+
+
+def test_a_guest_on_one_side_only_is_still_the_same_title() -> None:
+    got = M.propose(wanted("Song (feat. Bob)"), [edition(title="Song")])
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    ("listed", "catalogue"),
+    [
+        ("Song", "Song (Live)"),
+        ("Song (Live)", "Song"),
+        ("Song Pt. 1", "Song Pt. 2"),
+        ("Song (Club Mix)", "Song"),
+        ("Song", "Song (Karaoke Version)"),
+        ("Caf\u00e9", "Cafe"),
+        ("\u2020", "\u00f7"),
+        ("Song!", "Song?"),
+    ],
+)
+def test_a_title_that_differs_in_any_other_way_is_a_persons_to_judge(
+    listed: str, catalogue: str
+) -> None:
+    assert M.propose(wanted(listed), [edition(title=catalogue)]).status == M.REVIEW
 
 
 def test_a_title_with_only_punctuation_is_matched_exactly_and_not_otherwise() -> None:
@@ -204,7 +322,7 @@ def test_a_title_with_only_punctuation_is_matched_exactly_and_not_otherwise() ->
 
 @pytest.mark.parametrize(
     "title",
-    ["A Song (feat. A Guest)", "A Song [ft. A Guest]", "A Song featuring A Guest"],
+    ["A Song (feat. A Guest)", "A Song [ft. A Guest]", "A Song - featuring A Guest"],
 )
 def test_a_feat_credit_in_the_title_is_not_part_of_the_title(title: str) -> None:
     assert M.propose(wanted(title), [edition()]).status == M.MATCHED
@@ -236,9 +354,190 @@ def test_an_artist_nobody_listed_goes_to_review_and_names_them() -> None:
     assert "Somebody Else" in got.reason
 
 
-def test_a_compilation_does_not_have_to_credit_the_lists_artist() -> None:
-    got = M.propose(wanted(), [edition(artist="Various Artists")])
+@pytest.mark.parametrize("listed", ["A Band", "Various Artists", "various artists"])
+def test_various_artists_never_agrees_with_anyone(listed: str) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist="Various Artists")])
+    assert got.status == M.REVIEW
+    assert "Various Artists" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "credited"),
+    [
+        ("Earth, Wind & Fire", "Earth"),
+        ("Mr. X", "Planet X"),
+        ("X", "Malcolm X"),
+        ("Bob and the Hats", "The Hats"),
+        ("A Band", "A Band & Another Band"),
+        ("Another Band, A Band", "A Band"),
+        ("A Band", ""),
+        ("", "A Band"),
+        ("", ""),
+        (",", ";"),
+        ("AC/DC", "AC"),
+        ("Foo", "Foo Fighters"),
+        ("Ma\u00df", "Mass"),
+    ],
+)
+def test_a_shared_word_or_an_empty_name_is_no_agreement(
+    listed: str, credited: str
+) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist=credited)])
+    assert got.status == M.REVIEW
+    assert "credits" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "credited"),
+    [
+        ("A BAND", "a band"),
+        ("Hall and Oates", "Hall & Oates"),
+        ("A Band (feat. A Guest)", "A Band"),
+        ("A Band feat. A Guest", "A Band feat. A Guest"),
+        ("A Band, A Guest", "A Band feat. A Guest"),
+        ("AC/DC", "AC/DC"),
+    ],
+)
+def test_the_same_names_or_a_listed_lead_agree(listed: str, credited: str) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist=credited)])
     assert got.status == M.MATCHED
+
+
+def test_a_band_with_ft_in_its_name_is_not_cut_at_it() -> None:
+    assert M.search_artists("Six Ft Under") == ("Six Ft Under",)
+    got = M.propose(wanted(artist="Six Ft Under"), [edition(artist="Six")])
+    assert got.status == M.REVIEW
+
+
+def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> None:
+    whole = M.lookup_key(wanted(artist="Earth, Wind & Fire"))
+    assert whole != M.lookup_key(wanted(artist="Earth"))
+
+
+@pytest.mark.parametrize(
+    ("listed", "release"),
+    [
+        ("A Record", "A Record (Instrumentals)"),
+        ("A Record", "A Record: The Karaoke Edition"),
+        ("A Record", "A Record (Karaoke Version)"),
+        ("A Record", "A Record: A Tribute"),
+        ("A Record", "A Record (Live Edition)"),
+        ("A Record", "A Record - Remixed"),
+        ("A Record", "A Record (Original Version)"),
+        ("A Record", "A Record (Special Karaoke Edition)"),
+        ("A Record", "A Record (Deluxe Instrumental Edition)"),
+        ("A Record", "A Record (1999)"),
+        ("Hits", "Hits Vol. 2"),
+        ("Live 1970", "Live 1985"),
+        ("A Record (Deluxe)", "B Record (Deluxe)"),
+        ("Ma\u00df", "Mass"),
+        ("", "A Record"),
+        ("(Deluxe Edition)", "(Expanded Edition)"),
+    ],
+)
+def test_a_release_that_is_not_the_lists_album_is_never_accepted(
+    listed: str, release: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album=release)])
+    assert got.status == M.REVIEW
+    assert release in got.reason
+    assert got.choice is not None and got.choice.release_title == release
+
+
+@pytest.mark.parametrize(
+    ("listed", "release"),
+    [
+        ("A Record", "A RECORD"),
+        ("A Record", "A Record (Deluxe Edition)"),
+        ("A Record", "A Record [Expanded]"),
+        ("A Record", "A Record - 2011 Remastered"),
+        ("A Record", "A Record: 25th Anniversary Edition"),
+        ("A Record", "A Record (Bonus Tracks)"),
+        ("A Record", "A Record (Special Edition)"),
+        ("A Record", "A Record (Remastered) [Deluxe Edition]"),
+        ("A Record (Deluxe Edition)", "A Record"),
+        ("A Record (Deluxe Edition)", "A Record (Expanded Edition)"),
+    ],
+)
+def test_an_album_may_differ_by_a_suffix_wholly_of_edition_words(
+    listed: str, release: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album=release)])
+    assert got.status == M.MATCHED
+
+
+def test_an_exact_album_off_in_length_does_not_lose_to_a_karaoke_fit() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("real", length=215.0, group="a"),
+            edition("sing", album="A Record (Karaoke Version)", group="k"),
+        ],
+    )
+    assert got.status == M.REVIEW
+    assert got.choice is not None and got.choice.release == "real"
+    assert "off by 15 s" in got.reason
+
+
+def test_the_exact_album_is_preferred_to_a_deluxe_edition_that_fits_as_well() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("big", album="A Record (Deluxe Edition)", group="d", date="1980"),
+            edition("plain", date="1999"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "plain"
+
+
+def test_a_deluxe_edition_can_answer_when_the_exact_album_is_off_in_length() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("plain", length=215.0),
+            edition("big", album="A Record (Deluxe Edition)", group="d"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "big"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "Compilation",
+        "Remix",
+        "Soundtrack",
+        "Karaoke",
+        "Mixtape/Street",
+        "DJ-mix",
+        "Demo",
+    ],
+)
+def test_a_release_of_another_kind_is_a_persons_to_judge(kind: str) -> None:
+    named = "A Record (Deluxe Edition)"
+    got = M.propose(wanted(), [edition(album=named, secondary=(kind,))])
+    assert got.status == M.REVIEW
+    assert kind in got.reason
+
+
+@pytest.mark.parametrize(
+    "kind", ["Compilation", "Remix", "Soundtrack", "Karaoke", "Mixtape/Street", "Demo"]
+)
+def test_a_release_of_another_kind_may_match_when_the_list_names_exactly_it(
+    kind: str,
+) -> None:
+    got = M.propose(wanted(), [edition(secondary=(kind,))])
+    assert got.status == M.MATCHED
+
+
+def test_a_live_group_needs_the_lists_album_to_say_live_and_to_be_exact() -> None:
+    held = edition(album="Live at a Hall", secondary=("Live",), live=True)
+    assert M.propose(wanted(album="Live at a Hall"), [held]).status == M.MATCHED
+    assert M.propose(wanted(album="Live at a Barn"), [held]).status == M.REVIEW
+    plain = edition(secondary=("Live",), live=True)
+    assert M.propose(wanted(), [plain]).status == M.REVIEW
 
 
 def test_a_remaster_stripped_match_onto_a_live_album_is_not_accepted() -> None:
@@ -290,6 +589,39 @@ def test_the_track_nearest_in_length_is_taken_when_a_release_repeats_a_title() -
     )
     assert got.choice is not None
     assert (got.choice.number, got.choice.disc) == (7, 2)
+
+
+def on_one_release(*tracks: tuple[str, float | None]) -> M.Edition:
+    made = tuple(
+        M.CatalogueTrack(title, at, 1, length)
+        for at, (title, length) in enumerate(tracks, 1)
+    )
+    return M.Edition("r", "g", "A Record", "A Band", "1990", "Official", made)
+
+
+@pytest.mark.parametrize(("first", "second"), [(198.0, 201.0), (198.0, 202.0)])
+def test_two_tracks_a_list_cannot_tell_apart_go_to_review(
+    first: float, second: float
+) -> None:
+    got = M.propose(
+        wanted("Intro"), [on_one_release(("Intro", first), ("Intro", second))]
+    )
+    assert got.status == M.REVIEW
+    assert "2 tracks" in got.reason
+
+
+def test_a_repeated_title_whose_lengths_separate_it_is_not_a_doubt() -> None:
+    got = M.propose(
+        wanted("Intro"), [on_one_release(("Intro", 215.0), ("Intro", 200.0))]
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.number == 2
+
+
+def test_a_near_title_with_the_length_does_not_count_as_a_repeat() -> None:
+    got = M.propose(wanted(), [on_one_release(("A Song", 200.0), ("A Song 2", 200.0))])
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.number == 1
 
 
 def test_what_to_ask_the_catalogue_for_drops_guests_then_tries_the_lead() -> None:
@@ -440,6 +772,69 @@ def test_a_new_list_may_not_lose_a_persons_choice() -> None:
     tape = TP.settle(a_tape(), 1, None)
     with pytest.raises(TP.ChoiceSet, match="A Song"):
         TP.relist(tape, (tape.songs[1],))
+
+
+def identical_rows(count: int = 2) -> TP.Tape:
+    songs = tuple(
+        TP.Song(n, "A Song", "A Band", "A Record", 200.0) for n in range(1, count + 1)
+    )
+    return replace(TP.named("mix", "Mix", 1.0), songs=songs)
+
+
+def fresh(tape: TP.Tape) -> tuple[TP.Song, ...]:
+    return tuple(
+        TP.Song(s.number, s.title, s.artist, s.album, s.length) for s in tape.songs
+    )
+
+
+def test_resaving_a_list_keeps_a_choice_on_the_first_of_two_identical_rows() -> None:
+    tape = TP.settle(identical_rows(), 1, None)
+    assert [s.settled_by for s in TP.relist(tape, fresh(tape)).songs] == [M.PERSON, ""]
+
+
+def test_a_choice_on_the_second_identical_row_is_not_copied_to_the_first() -> None:
+    tape = TP.settle(identical_rows(), 2, None)
+    assert [s.settled_by for s in TP.relist(tape, fresh(tape)).songs] == ["", M.PERSON]
+
+
+def test_each_of_two_identical_rows_keeps_its_own_choice_through_a_resave() -> None:
+    mine = M.track_on(wanted(), edition("mine"))
+    tape = TP.settle(TP.settle(identical_rows(), 1, mine), 2, None)
+    got = TP.relist(tape, fresh(tape)).songs
+    assert got[0].proposal is not None and got[0].proposal.choice == mine
+    assert got[1].proposal is not None and got[1].proposal.choice is None
+
+
+def test_identical_rows_keep_their_order_when_a_song_is_put_before_them() -> None:
+    mine = M.track_on(wanted(), edition("mine"))
+    tape = TP.settle(TP.settle(identical_rows(), 1, mine), 2, None)
+    rows = (
+        TP.Song(1, "New", "A Band", "A Record", 90.0),
+        TP.Song(2, "A Song", "A Band", "A Record", 200.0),
+        TP.Song(3, "A Song", "A Band", "A Record", 200.0),
+    )
+    got = TP.relist(tape, rows).songs
+    assert got[0].settled_by == ""
+    assert got[1].proposal is not None and got[1].proposal.choice == mine
+    assert got[2].proposal is not None and got[2].proposal.choice is None
+
+
+def test_dropping_the_unchosen_of_two_identical_rows_keeps_the_choice() -> None:
+    tape = TP.settle(identical_rows(), 2, None)
+    only = (TP.Song(1, "A Song", "A Band", "A Record", 200.0),)
+    assert [s.settled_by for s in TP.relist(tape, only).songs] == [M.PERSON]
+
+
+def test_dropping_one_of_two_chosen_identical_rows_is_refused() -> None:
+    tape = TP.settle(TP.settle(identical_rows(), 1, None), 2, None)
+    with pytest.raises(TP.ChoiceSet, match="A Song"):
+        TP.relist(tape, (TP.Song(1, "A Song", "A Band", "A Record", 200.0),))
+
+
+def test_a_new_row_identical_to_a_chosen_one_starts_unchosen() -> None:
+    tape = TP.settle(identical_rows(1), 1, None)
+    rows = fresh(identical_rows(2))
+    assert [s.settled_by for s in TP.relist(tape, rows).songs] == [M.PERSON, ""]
 
 
 def test_placing_boundaries_keeps_what_was_settled() -> None:

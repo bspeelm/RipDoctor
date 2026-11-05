@@ -250,6 +250,10 @@ def test_a_release_with_no_group_is_an_empty_answer() -> None:
     assert MB.release_group(fetcher, "rel-1") == ""
 
 
+def test_the_album_flows_search_still_reads_an_empty_object_as_no_releases() -> None:
+    assert MB.search(FakeFetcher(replies=[b"{}"]), "A Band", "A Record") == []
+
+
 def a_release(fmt: str = "CD", date: str = "2015", mbid: str = "x") -> MB.Release:
     return MB.Release(
         mbid=mbid, title="T", artist="A", date=date, format=fmt, tracks=[]

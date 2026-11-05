@@ -12,12 +12,22 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ripdoctor import __version__
-from ripdoctor.core.match import OFFICIAL, CatalogueTrack, Edition
+from ripdoctor.core.match import (
+    ELSEWHERE,
+    NAMED,
+    OFFICIAL,
+    CatalogueTrack,
+    Edition,
+    agrees,
+    album_agreement,
+    album_nearness,
+)
 
 BASE = "https://musicbrainz.org/ws/2"
 
@@ -29,11 +39,14 @@ USER_AGENT = f"ripdoctor/{__version__} (https://github.com/bspeelm/RipDoctor)"
 VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
 
 # How many candidates are asked for a tracklist. Each is its own request to a
-# service that allows one a second.
+# service that allows one a second. A tape's lookup asks for more only to read
+# every group of the exact name by the list's artist: at worst one search for
+# each form of the credit, then one fetch per such group, at most a page of WIDE.
 PROBE = 4
-# A search costs one request however many it answers, and the earliest edition
-# of a record is often not among the first few.
-WIDE = 25
+# A search costs one request however many it answers, the most the service
+# allows, because the earliest edition of a record and a second album of its name
+# are often not among the first few.
+WIDE = 100
 
 RETRY_STATUS = (429, 500, 502, 503, 504)
 RETRIES = 4
@@ -119,6 +132,8 @@ class Release:
     group: str = ""
     live: bool = False
     credit: str = ""  # everyone on the credit, where `artist` is the first
+    primary: str = ""
+    secondary: tuple[str, ...] = ()
 
     @property
     def has_durations(self) -> bool:
@@ -241,32 +256,39 @@ def search(
     fetcher: Fetcher, artist: str, album: str, limit: int = 10, **kw: Any
 ) -> list[Release]:
     """Candidate releases, most useful first."""
+    data = _search_reply(fetcher, artist, album, limit, **kw)
+    return [_found(r, artist) for r in data.get("releases", [])]
+
+
+def _search_reply(
+    fetcher: Fetcher, artist: str, album: str, limit: int, **kw: Any
+) -> dict[str, Any]:
     terms = f"artist:{_phrase(artist)} AND release:{_phrase(album)}"
     query = urllib.parse.quote(terms, safe="")
-    data = _request(
+    return _request(
         fetcher, f"{BASE}/release?query={query}&limit={limit}&fmt=json", **kw
     )
-    out = []
-    for r in data.get("releases", []):
-        credit = r.get("artist-credit") or [{}]
-        group = r.get("release-group") or {}
-        out.append(
-            Release(
-                mbid=str(r.get("id", "")),
-                title=str(r.get("title", "")),
-                artist=str(credit[0].get("name", artist)),
-                date=str(r.get("date", "")),
-                format=_format_of(r),
-                tracks=[],
-                disambiguation=str(r.get("disambiguation", "")),
-                country=str(r.get("country", "")),
-                status=str(r.get("status", "")),
-                group=str(group.get("id", "")),
-                live="Live" in (group.get("secondary-types") or []),
-                credit=_credit(r),
-            )
-        )
-    return out
+
+
+def _found(r: dict[str, Any], artist: str) -> Release:
+    credit = r.get("artist-credit") or [{}]
+    group = r.get("release-group") or {}
+    return Release(
+        mbid=str(r.get("id", "")),
+        title=str(r.get("title", "")),
+        artist=str(credit[0].get("name", artist)),
+        date=str(r.get("date", "")),
+        format=_format_of(r),
+        tracks=[],
+        disambiguation=str(r.get("disambiguation", "")),
+        country=str(r.get("country", "")),
+        status=str(r.get("status", "")),
+        group=str(group.get("id", "")),
+        live="Live" in (group.get("secondary-types") or []),
+        credit=_credit(r),
+        primary=str(group.get("primary-type") or ""),
+        secondary=tuple(str(t) for t in group.get("secondary-types") or ()),
+    )
 
 
 def _format_of(release: dict[str, Any]) -> str:
@@ -320,25 +342,65 @@ def fetch_tracks(fetcher: Fetcher, release: Release, **kw: Any) -> Release:
     return release
 
 
+@contextmanager
+def _well_formed() -> Iterator[None]:
+    """For a tape's lookups, where a song files on the answer with nobody looking:
+    an answer of the wrong shape is a failure to retry, and never "no release"."""
+    try:
+        yield
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as e:
+        raise LookupFailed("catalogue returned a malformed answer") from e
+
+
 def release_by_id(fetcher: Fetcher, mbid: str, **kw: Any) -> Release:
     """A release somebody named. A search would have answered with its group."""
-    release = fetch_tracks(fetcher, Release(mbid, "", "", "", "", []), **kw)
-    release.group = release_group(fetcher, mbid, **kw)
+    with _well_formed():
+        release = fetch_tracks(fetcher, Release(mbid, "", "", "", "", []), **kw)
+        release.group = release_group(fetcher, mbid, **kw)
     return release
 
 
-def _worth_probing(found: list[Release]) -> list[Release]:
-    """Official editions if there are any, the earliest of each group first, so
-    that two records with one name are both seen before any second pressing."""
+def _searched(fetcher: Fetcher, artist: str, album: str, **kw: Any) -> list[Release]:
+    """A search whose reply must hold its list of releases, empty or not."""
+    with _well_formed():
+        data = _search_reply(fetcher, artist, album, WIDE, **kw)
+        found = data["releases"]
+        if not isinstance(found, list):
+            raise TypeError("releases is not a list")
+        return [_found(r, artist) for r in found]
+
+
+def _worth_probing(found: list[Release], album: str, artist: str) -> list[Release]:
+    """Official editions if there are any, those best agreeing with the album first,
+    so a series cannot crowd out the album asked for.
+
+    The first of each group comes before any second pressing, and every group of
+    the exact name by this artist is read, because two of them are a doubt only if
+    both are seen.
+    """
+
+    def by_agreement(r: Release) -> tuple[int, bool, float, str, str]:
+        return (
+            album_agreement(album, r.title),
+            not agrees(artist, r.credit or r.artist),
+            album_nearness(album, r.title),
+            r.date or "9999",
+            r.mbid,
+        )
+
     official = [r for r in found if r.status.lower() == OFFICIAL] or found
     firsts: list[Release] = []
     rest: list[Release] = []
     groups: set[str] = set()
-    for release in sorted(official, key=lambda r: (r.date or "9999", r.mbid)):
+    for release in sorted(official, key=by_agreement):
         group = release.group or release.mbid
         (rest if group in groups else firsts).append(release)
         groups.add(group)
-    return (firsts + rest)[:PROBE]
+    ordered = sorted(
+        firsts + rest, key=lambda r: album_agreement(album, r.title) == ELSEWHERE
+    )
+    same_named = sum(by_agreement(r)[:2] == (NAMED, False) for r in firsts)
+    return ordered[: max(PROBE, same_named)]
 
 
 def editions(
@@ -349,9 +411,11 @@ def editions(
     if not album:
         return []
     for artist in artists:
-        found = search(fetcher, artist, album, limit=WIDE, **kw)
+        found = _searched(fetcher, artist, album, **kw)
         if found:
-            return [fetch_tracks(fetcher, r, **kw) for r in _worth_probing(found)]
+            with _well_formed():
+                probed = _worth_probing(found, album, artists[0])
+                return [fetch_tracks(fetcher, r, **kw) for r in probed]
     return []
 
 
@@ -373,6 +437,8 @@ def edition_of(release: Release) -> Edition:
         note=" ".join(
             filter(None, (release.format, release.country, release.disambiguation))
         ),
+        primary=release.primary,
+        secondary=release.secondary,
     )
 
 
