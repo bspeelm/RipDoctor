@@ -23,6 +23,9 @@ PART = "{slug}.part"
 NOTE = "{slug}.json"
 DONE = "{slug}.flac"
 
+# A record's slug never starts with an underscore, so this cannot meet one.
+TAPE_KEY = "_tape-"
+
 # How long an abandoned upload is kept before a later one sweeps it.
 STALE_SECONDS = 24 * 60 * 60
 
@@ -140,14 +143,19 @@ def clear(layout: Layout, slug: str) -> int:
 
 
 def sweep(layout: Layout, keep: str, now: float) -> list[str]:
-    """Drop uploads nobody came back to, never the one in hand."""
+    """Drop records' uploads nobody came back to, never the one in hand.
+
+    A tape's upload may be days of a 16 GB file, and answers to `tapes.sweep`.
+    """
     swept: list[str] = []
     where = layout.work / WHERE
     if not where.is_dir():
         return swept
     for part in sorted(where.glob("*.part")):
         slug = part.name[: -len(".part")]
-        if slug == keep or now - part.stat().st_mtime < STALE_SECONDS:
+        if slug == keep or slug.startswith(TAPE_KEY):
+            continue
+        if now - part.stat().st_mtime < STALE_SECONDS:
             continue
         clear(layout, slug)
         swept.append(slug)

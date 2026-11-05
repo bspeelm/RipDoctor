@@ -557,3 +557,13 @@ def test_cancelling_an_upload_frees_it(service: Service) -> None:
 def test_tapes_need_a_session(service: Service) -> None:
     app = build(service)
     assert app.dispatch(H.Request.of("GET", "/api/tapes")).status == 401
+
+
+def test_beginning_an_upload_clears_one_whose_tape_is_gone(service: Service) -> None:
+    app = build(service)
+    orphan = T.key_of("gone")
+    IN.begin(service.layout, orphan, name="old.wav", size=4, now=1.0)
+    tape = a_new_tape(app, service)
+    upload(app, tape, service)
+    assert IN.state(service.layout, orphan) is None
+    assert IN.state(service.layout, T.key_of(tape)) is not None

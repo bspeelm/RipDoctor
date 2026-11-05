@@ -1,7 +1,7 @@
 """One directory per tape under `work/tapes/`, out of sight of the record picker.
 
-A tape's upload and job are keyed by `key_of`. Slugs never start with an
-underscore, so a key cannot meet a record's scratch file or job. ADR-063.
+A tape's upload and job are keyed by `key_of`, which cannot meet a record's
+scratch file or job. ADR-063.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class Listing:
 
 
 def key_of(tape: str) -> str:
-    return f"_tape-{tape}"
+    return f"{IN.TAPE_KEY}{tape}"
 
 
 def dir_for(layout: Layout, tape: str) -> Path:
@@ -133,3 +133,15 @@ def remove(layout: Layout, tape: str) -> None:
     """Only ever asked for by a person. The upload goes with it."""
     shutil.rmtree(dir_for(layout, tape))
     IN.clear(layout, key_of(tape))
+
+
+def sweep(layout: Layout) -> list[str]:
+    """A tape's upload lasts as long as its tape, however old: drop only orphans."""
+    swept: list[str] = []
+    where = layout.work / IN.WHERE
+    for part in sorted(where.glob(f"{IN.TAPE_KEY}*.part")) if where.is_dir() else ():
+        key = part.name[: -len(".part")]
+        if not dir_for(layout, key.removeprefix(IN.TAPE_KEY)).is_dir():
+            IN.clear(layout, key)
+            swept.append(key)
+    return swept

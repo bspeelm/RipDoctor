@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -115,6 +116,45 @@ def test_a_tape_id_that_escapes_the_store_is_refused(tmp_path: Path) -> None:
 
 def test_a_tape_key_cannot_be_a_record_slug() -> None:
     assert T.key_of("mix").startswith("_")
+
+
+def an_aged_upload(layout: Layout, key: str, now: float) -> None:
+    IN.begin(layout, key, name="mix.wav", size=4, now=1.0)
+    aged = now - IN.STALE_SECONDS - 1
+    os.utime(IN.part_file(layout, key), (aged, aged))
+
+
+def test_an_album_upload_swept_a_tape_part_and_now_leaves_it(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    tape = a_tape(layout)
+    key, now = T.key_of(tape.id), 10.0 * IN.STALE_SECONDS
+    an_aged_upload(layout, key, now)
+    an_aged_upload(layout, "old-record", now)
+    assert IN.sweep(layout, keep="a-record", now=now) == ["old-record"]
+    assert IN.state(layout, key) is not None
+
+
+def test_a_tape_upload_lasts_as_long_as_its_tape(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    tape = a_tape(layout)
+    key, now = T.key_of(tape.id), 10.0 * IN.STALE_SECONDS
+    an_aged_upload(layout, key, now)
+    assert T.sweep(layout) == []
+    assert IN.state(layout, key) is not None
+
+
+def test_a_tape_upload_with_no_tape_is_swept(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    key = T.key_of("gone")
+    an_aged_upload(layout, key, 10.0 * IN.STALE_SECONDS)
+    an_aged_upload(layout, "a-record", 10.0 * IN.STALE_SECONDS)
+    assert T.sweep(layout) == [key]
+    assert IN.state(layout, key) is None
+    assert IN.state(layout, "a-record") is not None
+
+
+def test_sweeping_before_any_upload_is_not_an_error(tmp_path: Path) -> None:
+    assert T.sweep(a_layout(tmp_path)) == []
 
 
 def a_measuring_runner(windows: int = 40) -> FakeRunner:

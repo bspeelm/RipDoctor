@@ -149,6 +149,7 @@ def add(app: App, service: Service) -> None:
             )
         if not IN.room_for(layout, size):
             raise H.HttpError(507, "not enough room in the pool for that file")
+        T.sweep(layout)
         IN.begin(layout, key, name=name, size=size, now=service.now())
         return H.ok({"have": 0, "total": size, "chunk": CHUNK})
 
