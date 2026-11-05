@@ -7,8 +7,8 @@ import io
 import math
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Collection, Iterable, Sequence
+from dataclasses import asdict, dataclass, replace
 from itertools import accumulate, pairwise
 from typing import Any
 
@@ -24,7 +24,7 @@ from ripdoctor.core.match import (
     Proposal,
     Wanted,
 )
-from ripdoctor.core.naming import MAX_COMPONENT, Unsafe, slug
+from ripdoctor.core.naming import MAX_COMPONENT, Unsafe, safe_filename, slug
 
 LENGTH_TOLERANCE = 3.0
 SILENCE_DBFS = -60.0
@@ -33,6 +33,12 @@ QUIET_WITHIN = 3.0
 FOUND, EAR = "found", "ear"
 AGREES, DOUBT = "agrees", "doubt"
 PENDING = "pending"
+START, END = "start", "end"
+CUT, CUT_FAILED = "cut", "failed"
+NOT_CUT, OUT_OF_DATE, SKIPPED = "not cut", "out of date", "skipped"
+
+# In bytes, and short of a filesystem's 255: a superseded cut wears a timestamp.
+CUT_TITLE_BYTES = 200
 
 COLUMNS = ("playlist", "owned", "position", "title", "artist", "album", "duration")
 _DURATION = re.compile(r"(?:(\d+):)?(\d+):([0-5]\d)", re.ASCII)
@@ -50,6 +56,10 @@ class EarSet(ValueError):
 
 class ChoiceSet(EarSet):
     """The change would discard a release a person chose."""
+
+
+class BadEdge(ValueError):
+    """A boundary or a judgement that cannot be taken, and why."""
 
 
 def _clean(text: object) -> str:
@@ -73,6 +83,17 @@ def _length(value: object, where: str) -> float:
 
 
 @dataclass(frozen=True, slots=True)
+class CutRecord:
+    """What a cut was made from, so a boundary that moves makes it out of date."""
+
+    status: str
+    file: str
+    start: float
+    end: float
+    why: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Song:
     number: int
     title: str
@@ -89,6 +110,9 @@ class Song:
     reason: str = ""
     proposal: Proposal | None = None
     settled_by: str = ""
+    heard: bool = False
+    skip: bool = False
+    cut: CutRecord | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,12 +131,21 @@ class Song:
             "reason": self.reason,
             "proposal": self.proposal.to_dict() if self.proposal else None,
             "settled_by": self.settled_by,
+            "heard": self.heard,
+            "skip": self.skip,
+            "cut": asdict(self.cut) if self.cut else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Song:
-        found = data.get("proposal")
-        return cls(**{**data, "proposal": Proposal.from_dict(found) if found else None})
+        found, cut = data.get("proposal"), data.get("cut")
+        return cls(
+            **{
+                **data,
+                "proposal": Proposal.from_dict(found) if found else None,
+                "cut": CutRecord(**cut) if cut else None,
+            }
+        )
 
 
 def _song(where: str, number: int, fields: dict[str, Any], length: object) -> Song:
@@ -567,7 +600,7 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
         )
     old = {_same_song(s): s for s in tape.songs}
     return tuple(
-        replace(s, proposal=was.proposal, settled_by=was.settled_by)
+        replace(s, proposal=was.proposal, settled_by=was.settled_by, skip=was.skip)
         if (was := old.get(_same_song(s)))
         else s
         for s in songs
@@ -616,13 +649,16 @@ def _spanning(length: float, span: Placed, silences: Sequence[Span]) -> str:
 
 def _placed_song(song: Song, span: Placed, quiet: Sequence[Span]) -> Song:
     """A song that spans a silence is doubt whatever its length: only an ear can
-    tell a passage from damage or from a song the list left out."""
+    tell a passage from damage or from a song the list left out. What a person
+    heard was these edges, so moving them takes the hearing away."""
     silences = [g for g in quiet if span.start < g[0] and g[1] < span.end]
     said = _spanning(song.length, span, silences) if silences else span.reason
+    start, end = round(span.start, 3), round(span.end, 3)
     return replace(
         song,
-        start=round(span.start, 3),
-        end=round(span.end, 3),
+        start=start,
+        end=end,
+        heard=song.heard and (song.start, song.end) == (start, end),
         delta=round(span.delta, 3),
         verdict=DOUBT if silences else span.verdict,
         reason=" ".join(part for part in (said, span.also) if part),
@@ -688,7 +724,8 @@ def place(tape: Tape, music: Music) -> Tape:
         stop = index
         while stop < len(out) and out[stop].set_by != EAR:
             stop += 1
-        limit = (out[stop].start or music.end) if stop < len(out) else music.end
+        after = out[stop].start if stop < len(out) else None
+        limit = music.end if after is None else after
         lo, hi = _margin(cursor, limit, quiet)
         within = [g for g in quiet if lo < g[0] and g[1] < hi]
         found = align(within, lo, hi, [s.length for s in out[index:stop]])
@@ -764,3 +801,196 @@ def settle(tape: Tape, number: int, choice: Choice | None) -> Tape:
         )
 
     return replace(tape, songs=tuple(chosen(s) for s in tape.songs))
+
+
+def music_of(tape: Tape) -> Music:
+    """What `place` was given, as the document keeps it."""
+    if tape.music_start is None or tape.music_end is None:
+        raise BadEdge(f"{tape.name} has no boundaries yet - find them first")
+    return Music(
+        tape.music_start,
+        tape.music_end,
+        tape.gaps,
+        tape.found_start,
+        tape.found_end,
+    )
+
+
+def _changed(tape: Tape, number: int, **changes: Any) -> Tape:
+    songs = (replace(s, **changes) if s.number == number else s for s in tape.songs)
+    return replace(tape, songs=tuple(songs))
+
+
+def _song_at(tape: Tape, number: int) -> Song:
+    for song in tape.songs:
+        if song.number == number:
+            return song
+    raise BadEdge(f"{tape.name} has no song {number}")
+
+
+def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
+    """A person's boundary, which every other song not set by ear is laid around.
+
+    Ear-set songs keep list order against each other, near or far, because `place`
+    relies on them to split the list.
+    """
+    music = music_of(tape)
+    _song_at(tape, number)
+    if not (math.isfinite(start) and math.isfinite(end)):
+        raise BadEdge("a boundary has to be a number of seconds")
+    if not 0.0 <= start < end <= tape.duration:
+        raise BadEdge(
+            f"{start:.3f} to {end:.3f} does not fit: a song starts before it ends, "
+            f"inside the tape's {tape.duration:.3f} s"
+        )
+    for other in tape.songs:
+        if other.set_by != EAR or other.number == number:
+            continue
+        before = other.number < number and start < (other.end or 0.0)
+        after = other.number > number and end > (other.start or 0.0)
+        if before or after:
+            raise BadEdge(
+                f"that overlaps song {other.number}, which you set by ear to "
+                f"{other.start:.3f} to {other.end:.3f} - change that one first"
+            )
+    placed = _changed(
+        tape,
+        number,
+        start=round(start, 3),
+        end=round(end, 3),
+        set_by=EAR,
+        heard=False,
+    )
+    return place(placed, music)
+
+
+def hear(tape: Tape, number: int, heard: bool = True) -> Tape:
+    """A person accepts the found edges. They stay found, and the verdict stays
+    what was measured: `doubtful` is what the hearing answers."""
+    song = _song_at(tape, number)
+    if song.start is None:
+        raise BadEdge(f"song {number} has no boundaries yet - find them first")
+    if song.set_by == EAR:
+        raise BadEdge(f"song {number} is already set by ear")
+    return _changed(tape, number, heard=heard)
+
+
+def skip(tape: Tape, number: int, skipped: bool = True) -> Tape:
+    _song_at(tape, number)
+    return _changed(tape, number, skip=skipped)
+
+
+def doubtful(tape: Tape, song: Song) -> bool:
+    """Waiting for an ear: its own doubt, or any song on a tape whose list and audio
+    disagree, where a length that happens to fit proves nothing."""
+    if song.skip or song.heard or song.set_by == EAR:
+        return False
+    return song.verdict == DOUBT or bool(tape.mismatch)
+
+
+def ear_order(tape: Tape) -> tuple[Song, ...]:
+    """Doubts first, then the rest of what a mismatch flags, the skipped last."""
+
+    def rank(song: Song) -> tuple[int, int]:
+        if song.skip:
+            return 3, song.number
+        if doubtful(tape, song):
+            return (0 if song.verdict == DOUBT else 1), song.number
+        return 2, song.number
+
+    return tuple(sorted(tape.songs, key=rank))
+
+
+def edge_at(song: Song, edge: str) -> float | None:
+    return song.start if edge == START else song.end
+
+
+def flagged(tape: Tape) -> tuple[tuple[Song, str], ...]:
+    """The boundaries worth a clip without being asked for."""
+    return tuple(
+        (s, edge)
+        for s in ear_order(tape)
+        if doubtful(tape, s) and s.start is not None
+        for edge in (START, END)
+    )
+
+
+def clip_name(at: float) -> str:
+    """By the instant alone: the audio under a tape never changes, so a clip for a
+    boundary that moved is another file and never a stale one."""
+    return f"{round(at * 1000):010d}.flac"
+
+
+def cut_name(song: Song, count: int) -> str:
+    title = safe_filename(song.title).encode()[:CUT_TITLE_BYTES]
+    return f"{file_number(song.number, count)} {title.decode(errors='ignore')}.flac"
+
+
+def label(song: Song) -> str:
+    return f"song {song.number} ({song.title})"
+
+
+def cut_refusal(tape: Tape) -> str:
+    """Why this tape may not be cut yet, naming every song, or nothing."""
+    active = [s for s in tape.songs if not s.skip]
+    if not active:
+        return "every song is marked skip, so there is nothing to cut"
+    groups = (
+        (
+            "no boundaries yet - find them first",
+            [s for s in active if s.start is None or s.end is None],
+        ),
+        (
+            "no room between its boundaries - set them by ear",
+            [
+                s
+                for s in active
+                if s.start is not None and s.end is not None and s.end <= s.start
+            ],
+        ),
+        (
+            "still in doubt - listen, then set it, mark it heard or skip it",
+            [s for s in active if doubtful(tape, s)],
+        ),
+        (
+            "no settled release - match the songs and settle each one",
+            [s for s in active if not s.settled_by],
+        ),
+    )
+    said = [
+        f"{', '.join(label(s) for s in songs)}: {why}" for why, songs in groups if songs
+    ]
+    return f"{tape.name} cannot be cut yet. {'; '.join(said)}" if said else ""
+
+
+def is_current(song: Song, count: int) -> bool:
+    """A verified cut of exactly these edges, under the name it should have."""
+    made = song.cut
+    return (
+        made is not None
+        and made.status == CUT
+        and made.file == cut_name(song, count)
+        and (made.start, made.end) == (song.start, song.end)
+    )
+
+
+def cut_status(song: Song, count: int, on_disk: Collection[str]) -> str:
+    if song.skip:
+        return SKIPPED
+    if song.cut is None:
+        return NOT_CUT
+    if song.cut.status == CUT_FAILED:
+        return CUT_FAILED
+    if not is_current(song, count):
+        return OUT_OF_DATE
+    return CUT if song.cut.file in on_disk else NOT_CUT
+
+
+def all_cut(tape: Tape, on_disk: Collection[str]) -> bool:
+    count = len(tape.songs)
+    statuses = [cut_status(s, count, on_disk) for s in tape.songs if not s.skip]
+    return bool(statuses) and all(status == CUT for status in statuses)
+
+
+def with_cut(tape: Tape, number: int, record: CutRecord) -> Tape:
+    return _changed(tape, number, cut=record)
