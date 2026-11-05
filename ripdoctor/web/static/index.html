@@ -141,6 +141,14 @@
         <button type="button" id="tp-cut" disabled>Cut</button>
       </div>
       <p class="warn" id="tp-cut-why" hidden></p>
+      <h2>File</h2>
+      <p class="dim">Each album gets its own run through beets. A song the library
+        already has is not filed again. One album failing stops no other, and
+        filing again does only what is unfinished.</p>
+      <div class="row btns">
+        <button type="button" id="tp-file-songs" disabled>File</button>
+      </div>
+      <p class="warn" id="tp-file-why" hidden></p>
       <p class="err" id="tp-err"></p>
     </div>
 
@@ -180,6 +188,14 @@
             <th>#</th><th>Song</th><th>Why</th><th>Start</th><th>End</th><th>Judge</th><th>Cut</th>
           </tr></thead>
           <tbody id="tp-ear"></tbody>
+        </table>
+      </div>
+      <div class="tp-scroll" id="tp-filing-wrap" hidden>
+        <h2>Filed</h2>
+        <p class="dim" id="tp-filing-sum"></p>
+        <table class="songs ear">
+          <thead><tr><th>#</th><th>Song</th><th>Outcome</th><th>Where, or why not</th></tr></thead>
+          <tbody id="tp-filing"></tbody>
         </table>
       </div>
     </div>

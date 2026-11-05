@@ -1246,6 +1246,7 @@ function showTape(t) {
   $("#tp-reasons-title").hidden = !doubts.length;
   showReview(t);
   showEar(t);
+  showFiling(t);
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1371,6 +1372,39 @@ function showEar(t) {
   $("#tp-ear").replaceChildren(...t.ear.map((row) => earRow(row, t)));
 }
 
+const FILING_WORDS = {
+  failed: "failed", pending: "not filed yet", filed: "filed",
+  already: "already there", skipped: "skipped",
+};
+
+function filingRow(o) {
+  const tr = el("tr", o.state === "failed" ? "doubt" : null);
+  const who = el("td");
+  who.append(el("div", null, o.title), el("div", "dim", o.artist));
+  const where = el("td", o.state === "failed" ? "mark" : "dim");
+  where.append(el("div", null, o.path));
+  if (o.note) where.append(el("div", "why", o.note));
+  tr.append(el("td", "num", o.number), who,
+            el("td", null, FILING_WORDS[o.state] ?? o.state), where);
+  return tr;
+}
+
+function showFiling(t) {
+  const button = $("#tp-file-songs");
+  const started = !!t && t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
+  const failed = started ? t.filing.filter((o) => o.state === "failed").length : 0;
+  button.disabled = !t || !!t.file_refusal || t.all_filed;
+  button.textContent = failed ? "File again" : "File";
+  const why = t ? t.file_refusal || (t.all_filed ? "every song is in the library" : "") : "";
+  $("#tp-file-why").textContent = why;
+  $("#tp-file-why").hidden = !why;
+  $("#tp-filing-wrap").hidden = !started;
+  $("#tp-filing").replaceChildren(...(started ? t.filing.map(filingRow) : []));
+  $("#tp-filing-sum").textContent = failed
+    ? `${failed} of ${t.filing.length} failed - the reasons are below; File again retries only those`
+    : "";
+}
+
 function edgeCell(song, built, edge) {
   const td = el("td", "edge");
   const input = el("input");
@@ -1465,6 +1499,7 @@ async function startTapeJob(path, body) {
 const buildClips = (body) => startTapeJob(`/api/tapes/${tape.id}/clips`, body);
 const buildPreview = () => startTapeJob(`/api/tapes/${tape.id}/preview`, {});
 const cutTape = () => startTapeJob(`/api/tapes/${tape.id}/cut`, {});
+const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
 
 function songInput(field, value, label) {
   const input = el("input");
@@ -1601,7 +1636,7 @@ async function matchTape(again) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut"];
+const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut", "#tp-file-songs"];
 
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
@@ -2709,6 +2744,7 @@ function wire() {
   $("#tp-clips").onclick = () => buildClips({});
   $("#tp-preview").onclick = buildPreview;
   $("#tp-cut").onclick = cutTape;
+  $("#tp-file-songs").onclick = fileTape;
   $("#tp-remove").onclick = removeTape;
   $("#pc-pick").onclick = () => $("#pc-file").click();
   $("#pc-file").onchange = (e) => {
