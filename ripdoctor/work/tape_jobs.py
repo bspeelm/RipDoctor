@@ -1,14 +1,18 @@
-"""The long work on a tape: clips, a preview and its cuts. ADR-063."""
+"""The long work on a tape: clips, a preview, its cuts and its filing. ADR-063."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio import split
 from ripdoctor.audio.runner import Runner
+from ripdoctor.core import filing as F
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import tagger as TG
+from ripdoctor.integrations.importer import Beets
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
@@ -132,3 +136,172 @@ def cut(
             f"{'; '.join(failed)}. Cut again to retry them, or skip them."
         )
     return {"cut": made, "kept": kept, "skipped": job.skipped}
+
+
+@dataclass
+class _Filing:
+    """One job's filing. Every outcome is saved as it is known, so a restart at any
+    point loses nothing, and a retry finds it or asks the library again."""
+
+    runner: Runner
+    beets: Beets
+    layout: Layout
+    tape: TP.Tape
+    job: Job
+    library: str
+    file_mode: int
+    dir_mode: int
+    unanswered: set[int] = field(default_factory=set)
+
+    def tell(self, song: TP.Song, state: str, path: str = "", note: str = "") -> None:
+        self.tape = F.recorded(self.tape, song.number, state, path, note)
+        T.save(self.layout, self.tape)
+        self.unanswered.discard(song.number)
+        self.job.finished += 1
+
+    def checked(self, run: F.Run) -> list[tuple[F.Track, tuple[F.Row, ...]]]:
+        """The songs still to import, with the rows beside them before the import."""
+        waiting = []
+        for track in run.tracks:
+            song = track.song
+            self.job.step(TP.label(song), "asking the library")
+            by_id, by_name = self.beets.owned(
+                self.runner, self.library, F.recording_of(song), F.lead(song.artist)
+            )
+            said = F.precheck(song, by_id, by_name)
+            if said.action == F.FILE:
+                waiting.append((track, by_name))
+            else:
+                self.tell(song, said.action, said.path, said.note)
+        return waiting
+
+    def read_back(self, run: F.Run, song: TP.Song, before: tuple[F.Row, ...]) -> str:
+        recording = F.recording_of(song)
+        if recording:
+            query = [f"mb_trackid:{recording}"]
+        elif run.release:
+            query = [f"mb_albumid:{run.release}"]
+        else:
+            query = [f"artist:{F.lead(song.artist)}", f"album:{song.album}"]
+        rows = self.beets.library_rows(self.runner, self.library, query)
+        return F.arrived(song, rows, {r.path for r in before})
+
+    def imported(
+        self,
+        run: F.Run,
+        waiting: list[tuple[F.Track, tuple[F.Row, ...]]],
+        directory: str,
+    ) -> None:
+        """Copy, tag, import, and believe only what the library says afterward."""
+        count = len(self.tape.songs)
+        where = T.fresh_filing(self.layout, self.tape.id, directory)
+        copies = {}
+        for track, _ in waiting:
+            song = track.song
+            self.job.step(TP.label(song), "tagging a copy")
+            copy = T.copy_cut(
+                self.layout, self.tape.id, TP.cut_name(song, count), where
+            )
+            TG.write_tags(self.runner, str(copy), _tags(run, track))
+            copies[song.number] = copy
+
+        doubled = ""
+        if not run.release:
+            doubled = F.second_row(
+                run,
+                self.beets.library_rows(
+                    self.runner,
+                    self.library,
+                    [f"albumartist:{run.artist}", f"album:{run.album}"],
+                ),
+            )
+        self.job.step(run.album, "importing with beets")
+        took = self.beets.file_tape_run(self.runner, str(where), run.release)
+
+        found = []
+        for track, before in waiting:
+            song = track.song
+            left = copies[song.number].exists()
+            path = "" if left else self.read_back(run, song, before)
+            found.append((song, left, path))
+        for parent in {Path(path).parent for _, _, path in found if path}:
+            TG.set_modes(parent, self.file_mode, self.dir_mode)
+        for song, left, path in found:
+            if path:
+                self.tell(song, F.FILED, path, doubled)
+            elif left:
+                self.tell(song, F.FAILED, note=f"beets did not take it: {took.why()}")
+            else:
+                self.tell(
+                    song,
+                    F.FAILED,
+                    note="beets took the file and lists no row for this song, so it "
+                    f"may be filed as another track: {took.why()}",
+                )
+
+    def run(self, run: F.Run, directory: str) -> None:
+        """One album, whose failure is about that album and stops no other."""
+        self.unanswered = {t.song.number for t in run.tracks}
+        try:
+            waiting = self.checked(run)
+            if waiting:
+                self.imported(run, waiting, directory)
+        except Exception as e:  # kept in the document against each song it stopped
+            for track in run.tracks:
+                if track.song.number in self.unanswered:
+                    self.tell(track.song, F.FAILED, note=str(e))
+
+
+def _tags(run: F.Run, track: F.Track) -> dict[str, str]:
+    """A pinned run needs only what beets matches by, and fetches the rest. With no
+    release, this is all the file will ever say. ADR-049."""
+    tags = {TG.TAG_TITLE: track.title, TG.TAG_TRACK: str(track.number)}
+    if run.release:
+        return tags
+    return {
+        **tags,
+        TG.TAG_ARTIST: track.song.artist,
+        TG.TAG_ALBUMARTIST: run.artist,
+        TG.TAG_ALBUM: run.album,
+    }
+
+
+def file_songs(
+    runner: Runner,
+    beets: Beets,
+    layout: Layout,
+    tape_id: str,
+    job: Job,
+    now: float,
+    *,
+    library: str,
+    file_mode: int,
+    dir_mode: int,
+) -> dict[str, Any]:
+    """Every album still unfinished, each on its own.
+
+    The gate is read again here: only the job holds the tape against a change. Any
+    song that failed fails the job, once the rest are done, naming it.
+    """
+    tape = T.read(layout, tape_id)
+    refusal = F.file_refusal(tape, T.cuts_on_disk(layout, tape_id))
+    if refusal:
+        raise ValueError(refusal)
+    active = [s for s in tape.songs if not s.skip]
+    job.skipped = [TP.label(s) for s in tape.songs if s.skip]
+    job.total = len(active)
+    job.finished = sum(s.filing in F.FINISHED for s in active)
+
+    filing = _Filing(runner, beets, layout, tape, job, library, file_mode, dir_mode)
+    for index, run in enumerate(F.runs(tape), 1):
+        filing.run(run, f"{round(now)}-{index:03d}")
+    T.clear_filing(layout, tape_id)
+
+    done = filing.tape
+    failed = [TP.label(s) for s in done.songs if F.status(s) == F.FAILED]
+    if failed:
+        raise ValueError(
+            f"{len(failed)} of {len(active)} songs did not file, and the rest did - "
+            f"{', '.join(failed)}. File again to retry them, or skip them."
+        )
+    return {"outcomes": F.outcomes(done)}

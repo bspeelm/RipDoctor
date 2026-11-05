@@ -8,8 +8,10 @@ from typing import Any
 
 from ripdoctor.audio import ffprobe, split
 from ripdoctor.audio import ingest as G
+from ripdoctor.core import filing as TF
 from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
@@ -131,6 +133,9 @@ def add(app: App, service: Service) -> None:
             "ear": ear_rows(tape),
             "cut_refusal": TP.cut_refusal(tape),
             "all_cut": TP.all_cut(tape, T.cuts_on_disk(layout, tape.id)),
+            "file_refusal": TF.file_refusal(tape, T.cuts_on_disk(layout, tape.id)),
+            "all_filed": TF.all_filed(tape),
+            "filing": TF.outcomes(tape),
         }
 
     def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
@@ -507,6 +512,39 @@ def add(app: App, service: Service) -> None:
 
         try:
             job = service.jobs.start(T.key_of(tape.id), "cut", work)
+            return H.ok(job.as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
+
+    @app.route("POST", "/api/tapes/([^/]+)/file")
+    def file_songs(r: H.Request) -> H.Response:
+        """Refused with every reason until the tape is cut and every song settled."""
+        tape = held(r)
+        refusal = TF.file_refusal(tape, T.cuts_on_disk(layout, tape.id))
+        if refusal:
+            raise H.HttpError(409, refusal)
+        settings = service.settings
+        if not settings.library:
+            raise H.HttpError(409, "no library directory is configured")
+        importer = IMP.choose(service.runner, settings.importer, service.state_dir)
+        if not isinstance(importer, IMP.Beets):
+            raise H.HttpError(409, "filing a tape needs beets, to join albums")
+
+        def work(job: Job) -> dict[str, Any]:
+            return TJ.file_songs(
+                service.runner,
+                importer,
+                layout,
+                tape.id,
+                job,
+                service.now(),
+                library=settings.library,
+                file_mode=settings.file_mode,
+                dir_mode=settings.dir_mode,
+            )
+
+        try:
+            job = service.jobs.start(T.key_of(tape.id), "file", work)
             return H.ok(job.as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e

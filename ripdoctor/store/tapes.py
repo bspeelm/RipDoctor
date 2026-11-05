@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ CUTS = "cuts"
 CLIPS = "clips"
 PARTIAL = "partial"
 SUPERSEDED = "superseded"
+FILING = "filing"
 
 # Nearly seven hours of audio has to fit, at a pace no faster than a slow disk.
 LONG_RUN = 3 * 3600.0
@@ -131,6 +133,32 @@ def fresh_partial(layout: Layout, tape: str) -> Path:
 def promote(part: Path, target: Path) -> None:
     target.parent.mkdir(exist_ok=True)
     os.replace(part, target)
+
+
+def fresh_filing(layout: Layout, tape: str, name: str) -> Path:
+    """An empty directory for one album run, and nothing left of any other.
+
+    What beets did not take is a copy, so it was never the only one. The name is
+    new for each attempt, because beets offers to resume a path it was interrupted
+    on, and nothing here would answer that.
+    """
+    clear_filing(layout, tape)
+    where = dir_for(layout, tape) / FILING / name
+    where.mkdir(parents=True)
+    return where
+
+
+def clear_filing(layout: Layout, tape: str) -> None:
+    # Only copies are here; one a filesystem will not give up costs a little room.
+    shutil.rmtree(dir_for(layout, tape) / FILING, ignore_errors=True)
+
+
+def copy_cut(layout: Layout, tape: str, name: str, into: Path) -> Path:
+    """A copy and not a hard link: tags written to a link could change the cut,
+    which has to remain as it was verified, and beets moves whatever it is given."""
+    target = into / name
+    shutil.copy2(cut_file(layout, tape, name), target)
+    return target
 
 
 def save(layout: Layout, tape: Tape) -> None:
