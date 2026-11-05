@@ -73,6 +73,13 @@ def test_a_found_neighbour_that_moved_is_no_longer_heard() -> None:
     assert not tape.songs[2].heard, "what was heard is not where song 3 is now"
 
 
+def test_an_edge_moved_into_the_music_puts_the_found_neighbour_in_doubt() -> None:
+    tape = TP.set_edges(three(), 2, 103.0, 203.0)
+    assert tape.songs[0].end == 103.0
+    assert TP.doubtful(tape, tape.songs[0]), "it now spans the silence before 102"
+    assert "song 1" in TP.cut_refusal(tape)
+
+
 def test_an_edge_outside_the_tape_is_refused() -> None:
     tape = three()
     for start, end in ((-1.0, 50.0), (10.0, tape.duration + 1), (50.0, 50.0)):

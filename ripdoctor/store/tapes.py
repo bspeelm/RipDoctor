@@ -35,6 +35,7 @@ PREVIEW = "tape.opus"
 CUTS = "cuts"
 CLIPS = "clips"
 PARTIAL = "partial"
+SUPERSEDED = "superseded"
 
 # Nearly seven hours of audio has to fit, at a pace no faster than a slow disk.
 LONG_RUN = 3 * 3600.0
@@ -80,6 +81,38 @@ def clips_on_disk(layout: Layout, tape: str) -> set[str]:
 
 def _names_in(where: Path) -> set[str]:
     return {p.name for p in where.iterdir()} if where.is_dir() else set()
+
+
+def cut_file(layout: Layout, tape: str, name: str) -> Path:
+    return dir_for(layout, tape) / CUTS / name
+
+
+def cuts_on_disk(layout: Layout, tape: str) -> set[str]:
+    return _names_in(dir_for(layout, tape) / CUTS)
+
+
+def _stamp(now: float) -> str:
+    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+
+
+def supersede(layout: Layout, tape: str, name: str, now: float) -> Path:
+    """Move a cut aside, because something superseded is never deleted."""
+    aside = dir_for(layout, tape) / SUPERSEDED
+    aside.mkdir(exist_ok=True)
+    target, suffix = aside / f"{_stamp(now)}-{name}", 1
+    while target.exists():
+        suffix += 1
+        target = aside / f"{_stamp(now)}-{suffix}-{name}"
+    os.replace(cut_file(layout, tape, name), target)
+    return target
+
+
+def take_cut(layout: Layout, tape: str, part: Path, name: str, now: float) -> None:
+    """Put a verified cut under its real name. For a moment there may be no file
+    there, which a resume reads as not cut, and never a half-written one."""
+    if cut_file(layout, tape, name).exists():
+        supersede(layout, tape, name, now)
+    promote(part, cut_file(layout, tape, name))
 
 
 def fresh_partial(layout: Layout, tape: str) -> Path:
@@ -174,7 +207,7 @@ def remove(layout: Layout, tape: str, now: float) -> Path:
     It holds the only audio and any boundaries set by ear, so it moves aside.
     An upload not yet taken in still exists wherever it was sent from, and goes.
     """
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+    stamp = _stamp(now)
     aside = under(layout.work, REMOVED)
     aside.mkdir(parents=True, exist_ok=True)
     target, suffix = aside / f"{tape}-{stamp}", 1

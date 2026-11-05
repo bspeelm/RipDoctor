@@ -1,8 +1,9 @@
-"""The long work of a tape's ear check: clips and a preview. ADR-063."""
+"""The long work on a tape: clips, a preview and its cuts. ADR-063."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio import split
@@ -57,3 +58,77 @@ def preview(runner: Runner, layout: Layout, tape: TP.Tape, job: Job) -> dict[str
         T.promote(part, target)
     job.finished = 1
     return {"preview": True}
+
+
+def _cut_one(
+    runner: Runner,
+    layout: Layout,
+    tape: TP.Tape,
+    song: TP.Song,
+    partial: Path,
+    now: float,
+) -> TP.CutRecord:
+    """A cut that fails leaves whatever was under the real name, and says so."""
+    name = TP.cut_name(song, len(tape.songs))
+    start, end = song.start or 0.0, song.end or 0.0
+    part = partial / name
+    why = split.cut_verified(
+        runner,
+        str(T.audio_file(layout, tape.id)),
+        start,
+        end,
+        str(part),
+        T.LONG_RUN,
+    )
+    if why:
+        part.unlink(missing_ok=True)
+        return TP.CutRecord(TP.CUT_FAILED, name, start, end, why)
+    T.take_cut(layout, tape.id, part, name, now)
+    return TP.CutRecord(TP.CUT, name, start, end)
+
+
+def cut(
+    runner: Runner, layout: Layout, tape_id: str, job: Job, now: float
+) -> dict[str, Any]:
+    """Every song not skipped, saved after each so a restart carries on.
+
+    The gate is read again here: only the job holds the tape against a change.
+    Any song that failed fails the job, once the rest are done, naming it.
+    """
+    tape = T.read(layout, tape_id)
+    refusal = TP.cut_refusal(tape)
+    if refusal:
+        raise ValueError(refusal)
+    count = len(tape.songs)
+    active = [s for s in tape.songs if not s.skip]
+    job.skipped = [TP.label(s) for s in tape.songs if s.skip]
+    job.total = len(active)
+
+    wanted = {TP.cut_name(s, count) for s in active}
+    for stray in sorted(T.cuts_on_disk(layout, tape_id) - wanted):
+        T.supersede(layout, tape_id, stray, now)
+
+    partial = T.fresh_partial(layout, tape_id)
+    made, kept, failed = [], [], []
+    for song in active:
+        if TP.is_current(song, count) and (
+            T.cut_file(layout, tape_id, TP.cut_name(song, count)).is_file()
+        ):
+            kept.append(TP.label(song))
+            job.finished += 1
+            continue
+        job.step(TP.label(song), "cutting")
+        record = _cut_one(runner, layout, tape, song, partial, now)
+        tape = TP.with_cut(tape, song.number, record)
+        T.save(layout, tape)
+        if record.status == TP.CUT:
+            made.append(TP.label(song))
+        else:
+            failed.append(f"{TP.label(song)}: {record.why}")
+        job.finished += 1
+    if failed:
+        raise ValueError(
+            f"{len(failed)} of {len(active)} songs did not cut, and the rest did - "
+            f"{'; '.join(failed)}. Cut again to retry them, or skip them."
+        )
+    return {"cut": made, "kept": kept, "skipped": job.skipped}

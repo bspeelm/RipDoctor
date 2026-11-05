@@ -99,6 +99,7 @@ def add(app: App, service: Service) -> None:
     def ear_rows(tape: TP.Tape) -> list[dict[str, Any]]:
         """The songs in the order to listen to them, with what is built for each."""
         built = T.clips_on_disk(layout, tape.id)
+        cuts = T.cuts_on_disk(layout, tape.id)
 
         def clip_ready(song: TP.Song, edge: str) -> bool:
             at = TP.edge_at(song, edge)
@@ -109,6 +110,7 @@ def add(app: App, service: Service) -> None:
                 "number": s.number,
                 "doubtful": TP.doubtful(tape, s),
                 "clips": {e: clip_ready(s, e) for e in (TP.START, TP.END)},
+                "cut": TP.cut_status(s, len(tape.songs), cuts),
             }
             for s in TP.ear_order(tape)
         ]
@@ -127,6 +129,8 @@ def add(app: App, service: Service) -> None:
             "all_settled": TP.all_settled(tape),
             "preview": T.preview_file(layout, tape.id).is_file(),
             "ear": ear_rows(tape),
+            "cut_refusal": TP.cut_refusal(tape),
+            "all_cut": TP.all_cut(tape, T.cuts_on_disk(layout, tape.id)),
         }
 
     def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
@@ -487,6 +491,23 @@ def add(app: App, service: Service) -> None:
         if not where.is_file():
             raise H.HttpError(404, "the preview has not been built")
         return H.file_at(str(where))
+
+    @app.route("POST", "/api/tapes/([^/]+)/cut")
+    def cut(r: H.Request) -> H.Response:
+        """Refused with every reason while anything is still in doubt."""
+        tape = with_audio(r)
+        refusal = TP.cut_refusal(tape)
+        if refusal:
+            raise H.HttpError(409, refusal)
+
+        def work(job: Job) -> dict[str, Any]:
+            return TJ.cut(service.runner, layout, tape.id, job, service.now())
+
+        try:
+            job = service.jobs.start(T.key_of(tape.id), "cut", work)
+            return H.ok(job.as_dict(), 202)
+        except Busy as e:
+            raise H.HttpError(409, str(e)) from e
 
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     @settled
