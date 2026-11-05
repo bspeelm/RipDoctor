@@ -31,9 +31,21 @@ def edition(
     date: str = "1990",
     status: str = "Official",
     live: bool = False,
+    secondary: tuple[str, ...] = (),
 ) -> M.Edition:
     track = M.CatalogueTrack(title, 3, 1, length, f"rec-{release}")
-    return M.Edition(release, group, album, artist, date, status, (track,), live)
+    return M.Edition(
+        release,
+        group,
+        album,
+        artist,
+        date,
+        status,
+        (track,),
+        live,
+        primary="Album",
+        secondary=secondary,
+    )
 
 
 def test_an_official_edition_with_the_title_and_length_is_accepted() -> None:
@@ -343,6 +355,130 @@ def test_an_artist_nobody_listed_goes_to_review_and_names_them() -> None:
 def test_a_compilation_does_not_have_to_credit_the_lists_artist() -> None:
     got = M.propose(wanted(), [edition(artist="Various Artists")])
     assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    ("listed", "release"),
+    [
+        ("A Record", "A Record (Instrumentals)"),
+        ("A Record", "A Record: The Karaoke Edition"),
+        ("A Record", "A Record (Karaoke Version)"),
+        ("A Record", "A Record: A Tribute"),
+        ("A Record", "A Record (Live Edition)"),
+        ("A Record", "A Record - Remixed"),
+        ("A Record", "A Record (Original Version)"),
+        ("A Record", "A Record (1999)"),
+        ("Hits", "Hits Vol. 2"),
+        ("Live 1970", "Live 1985"),
+        ("A Record (Deluxe)", "B Record (Deluxe)"),
+        ("Ma\u00df", "Mass"),
+        ("", "A Record"),
+        ("(Deluxe Edition)", "(Expanded Edition)"),
+    ],
+)
+def test_a_release_that_is_not_the_lists_album_is_never_accepted(
+    listed: str, release: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album=release)])
+    assert got.status == M.REVIEW
+    assert release in got.reason
+    assert got.choice is not None and got.choice.release_title == release
+
+
+@pytest.mark.parametrize(
+    ("listed", "release"),
+    [
+        ("A Record", "A RECORD"),
+        ("A Record", "A Record (Deluxe Edition)"),
+        ("A Record", "A Record [Expanded]"),
+        ("A Record", "A Record - 2011 Remastered"),
+        ("A Record", "A Record: 25th Anniversary Edition"),
+        ("A Record", "A Record (Bonus Tracks)"),
+        ("A Record", "A Record (Special Edition)"),
+        ("A Record", "A Record (Remastered) [Deluxe Edition]"),
+        ("A Record (Deluxe Edition)", "A Record"),
+        ("A Record (Deluxe Edition)", "A Record (Expanded Edition)"),
+    ],
+)
+def test_an_album_may_differ_by_a_suffix_wholly_of_edition_words(
+    listed: str, release: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album=release)])
+    assert got.status == M.MATCHED
+
+
+def test_an_exact_album_off_in_length_does_not_lose_to_a_karaoke_fit() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("real", length=215.0, group="a"),
+            edition("sing", album="A Record (Karaoke Version)", group="k"),
+        ],
+    )
+    assert got.status == M.REVIEW
+    assert got.choice is not None and got.choice.release == "real"
+    assert "off by 15 s" in got.reason
+
+
+def test_the_exact_album_is_preferred_to_a_deluxe_edition_that_fits_as_well() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("big", album="A Record (Deluxe Edition)", group="d", date="1980"),
+            edition("plain", date="1999"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "plain"
+
+
+def test_a_deluxe_edition_can_answer_when_the_exact_album_is_off_in_length() -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("plain", length=215.0),
+            edition("big", album="A Record (Deluxe Edition)", group="d"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "big"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "Compilation",
+        "Remix",
+        "Soundtrack",
+        "Karaoke",
+        "Mixtape/Street",
+        "DJ-mix",
+        "Demo",
+    ],
+)
+def test_a_release_of_another_kind_is_a_persons_to_judge(kind: str) -> None:
+    named = "A Record (Deluxe Edition)"
+    got = M.propose(wanted(), [edition(album=named, secondary=(kind,))])
+    assert got.status == M.REVIEW
+    assert kind in got.reason
+
+
+@pytest.mark.parametrize(
+    "kind", ["Compilation", "Remix", "Soundtrack", "Karaoke", "Mixtape/Street", "Demo"]
+)
+def test_a_release_of_another_kind_may_match_when_the_list_names_exactly_it(
+    kind: str,
+) -> None:
+    got = M.propose(wanted(), [edition(secondary=(kind,))])
+    assert got.status == M.MATCHED
+
+
+def test_a_live_group_needs_the_lists_album_to_say_live_and_to_be_exact() -> None:
+    held = edition(album="Live at a Hall", secondary=("Live",), live=True)
+    assert M.propose(wanted(album="Live at a Hall"), [held]).status == M.MATCHED
+    assert M.propose(wanted(album="Live at a Barn"), [held]).status == M.REVIEW
+    plain = edition(secondary=("Live",), live=True)
+    assert M.propose(wanted(), [plain]).status == M.REVIEW
 
 
 def test_a_remaster_stripped_match_onto_a_live_album_is_not_accepted() -> None:

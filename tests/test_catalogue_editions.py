@@ -106,6 +106,30 @@ def test_a_search_says_what_the_rule_needs_to_know_about_an_edition() -> None:
     assert got.artist == "A Band"
 
 
+def test_a_search_keeps_the_groups_primary_and_secondary_types() -> None:
+    group = {
+        "id": "g9",
+        "primary-type": "Album",
+        "secondary-types": ["Compilation", "Remix"],
+    }
+    got = MB.search(Scripted([entry("a", **{"release-group": group})]), "A", "B")[0]
+    assert (got.primary, got.secondary) == ("Album", ("Compilation", "Remix"))
+    made = MB.edition_of(got)
+    assert (made.primary, made.secondary) == ("Album", ("Compilation", "Remix"))
+    assert not got.live
+
+
+def test_a_compilation_from_the_catalogue_is_not_accepted_on_a_like_title() -> None:
+    group = {"id": "g9", "primary-type": "Album", "secondary-types": ["Compilation"]}
+    found = entry("a", title="A Record (Deluxe)", **{"release-group": group})
+    got = MB.editions(Scripted([found]), ["A Band"], "A Record")
+    made = propose(
+        Wanted("A Song", "A Band", "A Record", 200.0), [MB.edition_of(r) for r in got]
+    )
+    assert made.status == "review"
+    assert "Compilation" in made.reason
+
+
 def test_a_track_carries_its_disc_position_and_recording() -> None:
     release = MB.fetch_tracks(Scripted(), MB.Release("a", "", "", "", "", []))
     track = release.tracks[0]

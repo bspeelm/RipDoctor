@@ -119,6 +119,8 @@ class Release:
     group: str = ""
     live: bool = False
     credit: str = ""  # everyone on the credit, where `artist` is the first
+    primary: str = ""
+    secondary: tuple[str, ...] = ()
 
     @property
     def has_durations(self) -> bool:
@@ -264,6 +266,8 @@ def search(
                 group=str(group.get("id", "")),
                 live="Live" in (group.get("secondary-types") or []),
                 credit=_credit(r),
+                primary=str(group.get("primary-type") or ""),
+                secondary=tuple(str(t) for t in group.get("secondary-types") or ()),
             )
         )
     return out
@@ -373,6 +377,8 @@ def edition_of(release: Release) -> Edition:
         note=" ".join(
             filter(None, (release.format, release.country, release.disambiguation))
         ),
+        primary=release.primary,
+        secondary=release.secondary,
     )
 
 
