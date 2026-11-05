@@ -411,6 +411,7 @@ def test_what_a_crash_left_half_written_is_cleared_and_never_taken_for_a_cut(
     tape = ready(app, service)
     partial = T.fresh_partial(service.layout, tape)
     (partial / "01 One.flac").write_bytes(b"half")
+    (partial / "07 A Song Since Dropped.flac").write_bytes(b"half")
     cut(app, tape, service)
     assert os.listdir(partial) == []
     assert (directory(service, tape) / "01 One.flac").read_bytes() != b"half"
@@ -523,6 +524,25 @@ def test_a_crash_while_the_file_is_replaced_leaves_no_record_of_the_old_cut(
     cut(app, tape, service)
     assert "went away" in job_of(app, tape, service)["error"]
     assert T.read(service.layout, tape).songs[1].cut is None
+
+
+def test_cutting_again_after_a_failed_recut_recuts_though_the_old_file_is_there(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = ready(app, service)
+    cut(app, tape, service)
+    target = directory(service, tape) / "02 Two.flac"
+    set_song_2(app, tape, service, 6.5, 11.5)
+    service.runner.bad.add("02 Two")  # type: ignore[attr-defined]
+    cut(app, tape, service)
+    service.runner.bad.clear()  # type: ignore[attr-defined]
+
+    assert cut(app, tape, service).status == 202
+    done = job_of(app, tape, service)
+    assert not done["error"]
+    assert done["result"]["cut"] == ["song 2 (Two)"]
+    assert target.read_bytes() == b"6.500-11.500"
 
 
 def test_recutting_twice_keeps_every_superseded_cut(service: Service) -> None:

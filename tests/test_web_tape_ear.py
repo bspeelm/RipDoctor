@@ -348,8 +348,17 @@ def test_a_skip_is_kept_and_named_in_the_document_until_taken_back(
     assert not post(app, url, service, {"skip": False}).json()["songs"][1]["skip"]
 
 
-def test_a_judgement_waits_for_a_running_job(service: Service) -> None:
+@pytest.mark.parametrize(
+    ("judgement", "body"),
+    [("heard", {}), ("skip", {}), ("edges", {"start": 6.0, "end": 11.0})],
+)
+def test_a_judgement_waits_for_a_running_job_and_changes_nothing(
+    service: Service, judgement: str, body: dict
+) -> None:
     app = build(service)
     tape = placed(app, service)
+    before = T.read(service.layout, tape)
+    url = f"/api/tapes/{tape}/songs/2/{judgement}"
     with service.jobs.claim(T.key_of(tape), "something"):
-        assert post(app, f"/api/tapes/{tape}/songs/2/heard", service).status == 409
+        assert post(app, url, service, body).status == 409
+    assert T.read(service.layout, tape) == before
