@@ -697,14 +697,18 @@ class Beets:
         return found
 
     def held_rows(
-        self, runner: Runner, root: str, terms: tuple[str, ...]
+        self,
+        runner: Runner,
+        root: str,
+        terms: tuple[str, ...],
+        timeout: float = 300.0,
     ) -> tuple[Row, ...]:
         """One query for many songs: a lone comma is beets' OR. No terms asks nothing,
         where beets would read it as the whole library. A failure to answer raises."""
         if not terms:
             return ()
         query = [part for term in terms for part in (",", term)][1:]
-        result = runner.run(self._argv(["ls", "-f", _HELD, *query]), timeout=300)
+        result = runner.run(self._argv(["ls", "-f", _HELD, *query]), timeout=timeout)
         if not result.ok:
             raise ImportFailed(TapeRun(result.returncode, result.err).why())
         return tuple(

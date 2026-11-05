@@ -3,11 +3,13 @@ ADR-063."""
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.audio.runner import Runner
+from ripdoctor.audio.runner import Runner, TimedOut
 from ripdoctor.core import playlist as P
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations.importer import Beets
@@ -17,6 +19,11 @@ from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains
 from ripdoctor.work.jobs import Busy, Job, Jobs
+
+# What an import waits for, on top of an album already filed: a beets that has hung
+# costs one short wait, and a slow one never more than this all told.
+ONE_QUERY = 20.0
+ALL_QUERIES = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,23 +75,30 @@ def _write(
     return state
 
 
-def rebuild(place: Place, beets: Beets, tape_id: str, now: float) -> P.State:
-    """Ask the library about every song in one query, and rewrite if that changed
-    anything. The caller holds the tape."""
+def _rebuilt(
+    place: Place, beets: Beets, tape_id: str, now: float, timeout: float
+) -> tuple[P.State, bool]:
+    """The state, and whether beets ran out of time rather than answering."""
     tape = T.read(place.layout, tape_id)
     try:
-        held = beets.held_rows(place.runner, place.library, P.to_ask(tape))
+        held = beets.held_rows(place.runner, place.library, P.to_ask(tape), timeout)
     except Exception as e:  # any failure to ask means not knowing, never "missing"
         note = f"beets could not answer, so the playlist was left as it was: {e}"
         prior = S.read(place.layout, tape_id)
         state = replace(prior, outcome=P.UNKNOWN, note=note, at=now)
         S.save(place.layout, tape_id, state)
-        return state
+        return state, isinstance(e, TimedOut)
     entries = P.resolved(tape, held)
     moved = P.with_paths(tape, entries)
     if moved != tape:
         T.save(place.layout, moved)
-    return _write(place, moved, entries, now)
+    return _write(place, moved, entries, now), False
+
+
+def rebuild(place: Place, beets: Beets, tape_id: str, now: float) -> P.State:
+    """Ask the library about every song in one query, and rewrite if that changed
+    anything. The caller holds the tape."""
+    return _rebuilt(place, beets, tape_id, now, 300.0)[0]
 
 
 def any_known(layout: Layout) -> bool:
@@ -92,27 +106,50 @@ def any_known(layout: Layout) -> bool:
 
 
 def rebuild_all(
-    place: Place, beets: Beets, jobs: Jobs, now: float, *, besides: str = ""
+    place: Place,
+    beets: Beets,
+    jobs: Jobs,
+    now: float,
+    *,
+    besides: str = "",
+    clock: Callable[[], float] = time.monotonic,
 ) -> list[str]:
-    """Every tape with a playlist, each on its own, saying what is worth a look."""
+    """Every tape with a playlist, each on its own, saying what is worth a look. This
+    runs inside an import that has already filed its album, so it stops at the first
+    timeout or at the limit and names what it did not ask about."""
     notes: list[str] = []
-    for tape in T.listed(place.layout).tapes:
-        if tape.id == besides:
-            continue
+    tapes = [t for t in T.listed(place.layout).tapes if t.id != besides]
+    limit = clock() + ALL_QUERIES
+    for at, tape in enumerate(tapes):
         try:
             kept = S.read(place.layout, tape.id)
             if kept.note == S.UNREADABLE:
                 notes.append(f"{tape.name}: its playlist was not rebuilt: {kept.note}")
             if not kept.file:
                 continue
+            left = limit - clock()
+            if left <= 0:
+                notes.append(_unasked(place, tapes[at:]))
+                break
             with jobs.claim(T.key_of(tape.id), "a playlist rebuild"):
-                state = rebuild(place, beets, tape.id, now)
+                state, hung = _rebuilt(place, beets, tape.id, now, min(ONE_QUERY, left))
             notes += P.summary(tape, state)
+            if hung:
+                notes.append(_unasked(place, tapes[at + 1 :]))
+                break
         except Busy:
             notes.append(f"{tape.name}: busy, so its playlist was not rebuilt")
         except Exception as e:  # one tape's fault says nothing about the next
             notes.append(f"{tape.name}: its playlist was not rebuilt: {e}")
     return notes
+
+
+def _unasked(place: Place, tapes: list[TP.Tape]) -> str:
+    named = [t.name for t in tapes if S.read(place.layout, t.id).file]
+    return (
+        "beets is taking too long, so these playlists were not checked - rebuild them "
+        f"from their pages: {', '.join(named) or 'none'}"
+    )
 
 
 def after_filing(

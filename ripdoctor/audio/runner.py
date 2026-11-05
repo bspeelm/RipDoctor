@@ -15,6 +15,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import IO, Protocol
 
+# Raised by `run` when a program outlasts its timeout, and named here so that nothing
+# above this layer has to import subprocess to recognise it.
+TimedOut = subprocess.TimeoutExpired
+
 
 class ToolMissing(Exception):
     """A program this needs is not installed."""

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner, Result
+from ripdoctor.audio.runner import FakeRunner, Result, TimedOut
 from ripdoctor.config.settings import Settings
 from ripdoctor.core import filing as F
 from ripdoctor.core import playlist as P
@@ -551,6 +551,93 @@ def test_a_busy_tape_is_said_and_one_tapes_fault_does_not_stop_the_next(
         line.startswith(f"{name}: its playlist was not rebuilt") for line in told
     )
     assert any(line.startswith("Other: ") for line in told)
+
+
+def tapes_with_playlists(service: Service, *names: str) -> None:
+    for at, name in enumerate(names):
+        tape = T.create(service.layout, name, float(at))
+        song = TP.Song(1, "One", "A Band", "A Record", 5.0)
+        T.save(service.layout, replace(tape, songs=(song,)))
+        S.save(service.layout, tape.id, P.State(file=P.file_of(tape)))
+
+
+def beet_that_hangs(service: Service) -> list[float]:
+    """Every wait it was given, each one running out."""
+    runner = beet_of(service)
+    waits: list[float] = []
+    original = runner.run
+
+    def hangs(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if "ls" in argv:
+            waits.append(timeout)
+            raise TimedOut(argv, timeout or 0.0)
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    runner.run = hangs  # type: ignore[method-assign]
+    return waits
+
+
+def test_a_hung_beets_costs_an_import_one_short_wait_and_the_rest_are_named(
+    service: Service,
+) -> None:
+    tapes_with_playlists(service, "First", "Second", "Third", "Fourth")
+    waits = beet_that_hangs(service)
+    told = RT.after_import(service)
+    assert waits == [TX.ONE_QUERY]
+    assert told[0].startswith("First: beets could not answer")
+    assert "not checked" in told[1]
+    assert all(name in told[1] for name in ("Second", "Third", "Fourth"))
+    assert "First" not in told[1]
+
+
+def test_an_import_stops_asking_at_the_limit_and_names_the_rest(
+    service: Service,
+) -> None:
+    tapes_with_playlists(service, "First", "Second", "Third")
+    ticks = iter((0.0, 1.0, TX.ALL_QUERIES + 1.0))
+    told = TX.rebuild_all(
+        RT._place(service),
+        RT.IMP.Beets(),
+        service.jobs,
+        3.0,
+        clock=lambda: next(ticks),
+    )
+    assert len(beet_of(service).asked) == 1
+    assert "not checked" in told[-1]
+    assert "Second" in told[-1] and "Third" in told[-1] and "First" not in told[-1]
+
+
+def test_the_last_of_the_time_is_all_a_query_is_given(service: Service) -> None:
+    tapes_with_playlists(service, "First")
+    waits = beet_that_hangs(service)
+    ticks = iter((0.0, TX.ALL_QUERIES - 2.0))
+    TX.rebuild_all(
+        RT._place(service),
+        RT.IMP.Beets(),
+        service.jobs,
+        3.0,
+        clock=lambda: next(ticks),
+    )
+    assert waits == [2.0]
+
+
+def test_a_rebuild_asked_for_on_a_page_has_the_long_wait(service: Service) -> None:
+    tapes_with_playlists(service, "First")
+    waits = beet_that_hangs(service)
+    only = T.listed(service.layout).tapes[0].id
+    state = TX.rebuild(RT._place(service), RT.IMP.Beets(), only, 3.0)
+    assert waits == [300.0] and state.outcome == P.UNKNOWN
+
+
+def test_the_hook_catches_what_it_owns_and_never_the_machine_going_away(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def gone(_layout: object) -> bool:
+        raise SystemExit(1)
+
+    monkeypatch.setattr(TX, "any_known", gone)
+    with pytest.raises(SystemExit):
+        RT.after_import(service)
 
 
 def test_a_tape_with_no_playlist_is_not_asked_about(service: Service) -> None:
