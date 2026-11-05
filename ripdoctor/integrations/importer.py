@@ -77,13 +77,27 @@ class TapeRun:
 
     returncode: int
     output: str
+    root: str = ""
+
+    def _relative_row(self, missing: str) -> bool:
+        """beets resolves a relative row against where it runs, so the path it names
+        is usually absolute: the row was relative if that tail is under the root."""
+        where = Path(missing)
+        if not where.is_absolute():
+            return True
+        here = Path.cwd()
+        return (
+            bool(self.root)
+            and where.is_relative_to(here)
+            and (Path(self.root) / where.relative_to(here)).is_file()
+        )
 
     def why(self) -> str:
         """The one thing to tell a person, in place of a traceback in a log."""
         lines = [line.strip() for line in self.output.splitlines() if line.strip()]
         said = lines[-1] if lines else f"beets exited {self.returncode}, saying nothing"
         missing = _MISSING.search(self.output)
-        if missing and not Path(missing[1]).is_absolute():
+        if missing and self._relative_row(missing[2]):
             return (
                 "beets crashed with FileNotFoundError, which merging into an album "
                 "does when a library row holds a relative path. Nothing was lost. "
@@ -92,7 +106,7 @@ class TapeRun:
             )
         if missing:
             return (
-                f"beets crashed looking for {missing[1]}, which is not there - put "
+                f"beets crashed looking for {missing[2]}, which is not there - put "
                 "it back, or clear the row that names it with beet remove, which "
                 "leaves files alone, then file again"
             )
@@ -216,7 +230,7 @@ DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
 # failure it causes looks like "the tracks are still in review", which is true
 # and is not the cause.
 _STARVED = "stdin stream ended"
-_MISSING = re.compile(r"FileNotFoundError:[^\n]*?: b?['\"]([^'\"\n]+)['\"]")
+_MISSING = re.compile(r"FileNotFoundError:[^\n]*?: b?(['\"])([^\n]+)\1\s*$", re.M)
 _NO_RELEASE = re.compile(r"^No matching release found.*$", re.M)
 
 # Apply the release; merge when the album is already filed; apply again, because
@@ -499,7 +513,7 @@ class Beets:
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def file_tape_run(
-        self, runner: Runner, directory: str, release: str = ""
+        self, runner: Runner, directory: str, release: str = "", root: str = ""
     ) -> TapeRun:
         """One directory, one album of a tape: pinned, or with no release its tags
         are taken as they stand. Reports and judges nothing, because a tape's album
@@ -509,7 +523,7 @@ class Beets:
             stdin=TAPE_ANSWERS,
             timeout=3600,
         )
-        return TapeRun(result.returncode, _plain(result.text + result.err))
+        return TapeRun(result.returncode, _plain(result.text + result.err), root)
 
     def library_rows(
         self, runner: Runner, root: str, query: list[str]

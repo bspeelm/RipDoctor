@@ -618,6 +618,44 @@ def test_a_missing_absolute_path_is_named_and_not_called_a_relative_row() -> Non
     assert "beet remove" in why
 
 
+def test_a_relative_row_beets_resolved_against_where_it_runs_is_still_called_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "lib"
+    (root / "Band").mkdir(parents=True)
+    (root / "Band" / "a.flac").write_bytes(b"filed")
+    elsewhere = tmp_path / "ran-here"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    said = (
+        "FileNotFoundError: [Errno 2] No such file or directory: "
+        f"b'{elsewhere.resolve()}/Band/a.flac'\n"
+    )
+    assert "relative path" in IMP.TapeRun(1, said, str(root)).why()
+    assert "relative path" not in IMP.TapeRun(1, said).why()
+
+
+def test_a_missing_path_under_where_beets_runs_with_nothing_under_the_root_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    said = (
+        "FileNotFoundError: [Errno 2] No such file or directory: "
+        f"b'{tmp_path.resolve()}/lib/Band/a.flac'\n"
+    )
+    why = IMP.TapeRun(1, said, str(tmp_path / "lib")).why()
+    assert "relative path" not in why
+    assert "beet remove" in why
+
+
+def test_a_missing_path_with_an_apostrophe_is_named_whole() -> None:
+    why = IMP.TapeRun(
+        1,
+        'FileNotFoundError: [Errno 2] No such file or directory: "/lib/You\'ll.flac"\n',
+    ).why()
+    assert "/lib/You'll.flac" in why
+
+
 def test_a_relative_row_crash_in_bytes_is_still_called_a_relative_row() -> None:
     why = IMP.TapeRun(
         1, "FileNotFoundError: [Errno 2] No such file or directory: b'Music/a.flac'\n"

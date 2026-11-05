@@ -296,7 +296,9 @@ class _Filing:
         self.tape = F.begun(self.tape, copies)
         T.save(self.layout, self.tape)
         self.job.step(run.album, "importing with beets")
-        took = self.beets.file_tape_run(self.runner, str(where), run.release)
+        took = self.beets.file_tape_run(
+            self.runner, str(where), run.release, self.library
+        )
 
         cleared, unclear = set(), ""
         try:
