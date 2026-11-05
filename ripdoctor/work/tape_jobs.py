@@ -73,7 +73,9 @@ def _cut_one(
     partial: Path,
     now: float,
 ) -> TP.CutRecord:
-    """A cut that fails leaves whatever was under the real name, and says so."""
+    """A cut that fails leaves whatever was under the real name, and says so. One
+    that worked forgets the old record before replacing the file, so a crash at any
+    point leaves a song that needs cutting, and never a record of other audio."""
     name = TP.cut_name(song, len(tape.songs))
     start, end = song.start or 0.0, song.end or 0.0
     part = partial / name
@@ -88,6 +90,7 @@ def _cut_one(
     if why:
         part.unlink(missing_ok=True)
         return TP.CutRecord(TP.CUT_FAILED, name, start, end, why)
+    T.save(layout, TP.with_cut(tape, song.number, None))
     T.take_cut(layout, tape.id, part, name, now)
     return TP.CutRecord(TP.CUT, name, start, end)
 

@@ -1014,5 +1014,5 @@ def all_cut(tape: Tape, on_disk: Collection[str]) -> bool:
     return bool(statuses) and all(status == CUT for status in statuses)
 
 
-def with_cut(tape: Tape, number: int, record: CutRecord) -> Tape:
+def with_cut(tape: Tape, number: int, record: CutRecord | None) -> Tape:
     return _changed(tape, number, cut=record)

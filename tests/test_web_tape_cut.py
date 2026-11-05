@@ -464,6 +464,67 @@ def test_a_recut_that_fails_verify_leaves_the_old_file_whole_and_says_failed(
     assert not view["all_cut"]
 
 
+def test_a_recut_whose_record_was_never_saved_is_not_read_as_the_old_cut(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file holds the new edges and that outcome was never saved. Moving the
+    boundary back must not make that read as a cut of the old edges."""
+    app = build(service)
+    tape = ready(app, service)
+    set_song_2(app, tape, service, 6.5, 11.5)
+    cut(app, tape, service)
+    target = directory(service, tape) / "02 Two.flac"
+    old = target.read_bytes()
+    assert old == b"6.500-11.500"
+
+    set_song_2(app, tape, service, 6.25, 11.25)
+    saving, taking = T.save, T.take_cut
+    taken = []
+
+    def take(*args: object) -> None:
+        taking(*args)  # type: ignore[arg-type]
+        taken.append(True)
+
+    def save(*args: object) -> None:
+        if taken:
+            raise OSError("no room left to save")
+        saving(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(T, "take_cut", take)
+    monkeypatch.setattr(T, "save", save)
+    cut(app, tape, service)
+    assert "no room left" in job_of(app, tape, service)["error"]
+    assert target.read_bytes() == b"6.250-11.250"
+    monkeypatch.setattr(T, "take_cut", taking)
+    monkeypatch.setattr(T, "save", saving)
+
+    set_song_2(app, tape, service, 6.5, 11.5)
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert {r["number"]: r["cut"] for r in view["ear"]}[2] == TP.NOT_CUT
+    assert not view["all_cut"]
+    assert cut(app, tape, service).status == 202
+    done = job_of(app, tape, service)
+    assert done["result"]["cut"] == ["song 2 (Two)"]
+    assert target.read_bytes() == old
+
+
+def test_a_crash_while_the_file_is_replaced_leaves_no_record_of_the_old_cut(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = build(service)
+    tape = ready(app, service)
+    cut(app, tape, service)
+    set_song_2(app, tape, service, 6.25, 11.25)
+
+    def crash(*_args: object) -> None:
+        raise OSError("the machine went away")
+
+    monkeypatch.setattr(T, "take_cut", crash)
+    cut(app, tape, service)
+    assert "went away" in job_of(app, tape, service)["error"]
+    assert T.read(service.layout, tape).songs[1].cut is None
+
+
 def test_recutting_twice_keeps_every_superseded_cut(service: Service) -> None:
     app = build(service)
     tape = ready(app, service)
