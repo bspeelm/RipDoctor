@@ -2279,8 +2279,9 @@ A lookup-off import computes a gain for the row and never writes it, so a file w
 no gain gets `replaygain -f`, scoped to that file. Any failure there, a timeout
 included, is a note on a song that stays filed. The modes are restored after both, as
 ADR-056 requires. The document says which songs were handed to beets, so one found in
-the library after a restart is finished the same way, and a song the tape merely
-already owned has only its modes put right.
+the library after a restart is finished the same way. A song the tape merely found
+already owned is left as it was found, modes and all: that album is not this tape's
+to change.
 
 A read-back that cannot answer records `unknown`. The mark that a song went to beets
 stays until the library really answers, and while it is set a retry reads back before

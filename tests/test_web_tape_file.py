@@ -1226,12 +1226,27 @@ def test_modes_are_set_on_each_album_directory_after_its_import(
             assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
 
 
-def test_a_song_found_already_owned_has_its_modes_put_right(service: Service) -> None:
+def test_an_owned_album_s_modes_are_left_alone(service: Service) -> None:
     app = build(service)
     tape = pinned(app, service)
     where = beet_of(service).owns("One", mb_trackid="rec-One")
     where.chmod(0o600)
+    where.parent.chmod(0o700)
     file_it(app, tape, service)
+    assert stat.S_IMODE(where.stat().st_mode) == 0o600
+    assert stat.S_IMODE(where.parent.stat().st_mode) == 0o700
+
+
+def test_a_song_only_the_pre_check_recognises_after_its_import_began_gets_its_modes(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    where = beet_of(service).owns("One", length="0:06")
+    where.chmod(0o600)
+    T.save(service.layout, F.begun(T.read(service.layout, tape), {1}))
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.ALREADY
     assert stat.S_IMODE(where.stat().st_mode) == service.settings.file_mode
 
 

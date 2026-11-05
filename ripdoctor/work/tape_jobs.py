@@ -238,14 +238,8 @@ class _Filing:
             )
             if said.action == F.FILE:
                 waiting.append((track, by_name))
-            elif said.action == F.ALREADY:
-                self.complete(
-                    song,
-                    said.action,
-                    said.path,
-                    said.note,
-                    repair=song.import_begun,
-                )
+            elif said.action == F.ALREADY and song.import_begun:
+                self.complete(song, said.action, said.path, said.note)
             else:
                 self.tell(song, said.action, said.path, said.note)
         return waiting
@@ -260,13 +254,11 @@ class _Filing:
             query = [F.term("artist", F.lead(song.artist)), F.term("album", song.album)]
         return self.sited(self.rows(query))
 
-    def complete(
-        self, song: TP.Song, state: str, path: str, *notes: str, repair: bool = True
-    ) -> None:
-        """A song the library holds, and nothing here changes that. Beets rewrites what
-        it files at the writer's umask, so the modes come back last, before the outcome
-        is recorded, and a song merely found owned has only them seen to. ADR-056."""
-        said = [*notes, *(self.repaired(song, path) if repair else ())]
+    def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
+        """A song this tape's own import filed. Beets rewrites what it files at the
+        writer's umask, so the modes come back last, before the outcome is recorded.
+        An album this tape never touched is not its to change. ADR-056."""
+        said = [*notes, *self.repaired(song, path)]
         try:
             TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
         except OSError as e:  # said on the song, whose outcome stands
