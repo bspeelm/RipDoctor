@@ -107,11 +107,16 @@ def add(app: App, service: Service) -> None:
             at = TP.edge_at(song, edge)
             return at is not None and TP.clip_name(at) in built
 
+        def ticked(song: TP.Song, edge: str) -> bool:
+            at = TP.edge_at(song, edge)
+            return at is None or split.tick_lands(at, tape.duration)
+
         return [
             {
                 "number": s.number,
                 "doubtful": TP.doubtful(tape, s),
                 "clips": {e: clip_ready(s, e) for e in (TP.START, TP.END)},
+                "ticks": {e: ticked(s, e) for e in (TP.START, TP.END)},
                 "cut": TP.cut_status(s, len(tape.songs), cuts),
             }
             for s in TP.ear_order(tape)

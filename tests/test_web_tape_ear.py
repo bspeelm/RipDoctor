@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ripdoctor.audio import split
 from ripdoctor.audio.split import TICK_HZ
 from ripdoctor.core import tape as TP
 from ripdoctor.store import cache as C
@@ -109,6 +110,39 @@ def test_a_tick_is_held_short_of_the_end_of_the_tape(service: Service) -> None:
     post(app, f"/api/tapes/{tape}/clips", service, {"song": 2, "edge": "end"})
     duration = T.read(service.layout, tape).duration
     assert float(flag(ticks(service)[0], "-to")) <= duration
+
+
+def test_a_clip_too_near_the_end_for_a_tick_says_so_and_the_argv_is_unchanged(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    duration = T.read(service.layout, tape).duration
+    url = f"/api/tapes/{tape}/songs/2/edges"
+    last = duration - split.EOF_MARGIN
+    answer = post(app, url, service, {"start": 6.0, "end": last})
+    assert answer.status == 200, answer.text
+    row = {r["number"]: r for r in answer.json()["ear"]}[2]
+    assert row["ticks"] == {TP.START: True, TP.END: False}
+
+    asked = {"song": 2, "edge": TP.END}
+    assert post(app, f"/api/tapes/{tape}/clips", service, asked).status == 202
+    argv = ticks(service)[-1]
+    assert argv[argv.index("-to") + 1] == f"{last:.2f}"
+    assert any("adelay=4000|4000" in a for a in argv), "never moved to fit"
+
+
+def test_a_tick_that_only_just_fits_is_not_flagged() -> None:
+    duration = 100.0
+    room = split.EOF_MARGIN + split.TICK_SECONDS
+    assert split.tick_lands(duration - room, duration)
+    assert not split.tick_lands(duration - room + 0.001, duration)
+
+
+def test_the_ear_check_shows_a_clip_with_no_tick_for_what_it_is() -> None:
+    source = (Path(__file__).parent.parent / "ripdoctor/web/static/app.js").read_text()
+    assert "row.ticks[edge]" in source
+    assert "no tick in this clip" in source
 
 
 def test_a_boundary_that_moved_needs_its_own_clip(service: Service) -> None:

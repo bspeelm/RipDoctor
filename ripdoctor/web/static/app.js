@@ -1405,7 +1405,8 @@ function showFiling(t) {
     : "";
 }
 
-function edgeCell(song, built, edge) {
+function edgeCell(song, row, edge) {
+  const built = row.clips[edge];
   const td = el("td", "edge");
   const input = el("input");
   input.type = "number"; input.step = "0.01"; input.min = "0";
@@ -1418,6 +1419,10 @@ function edgeCell(song, built, edge) {
     clip.controls = true; clip.preload = "none";
     clip.src = `${clipUrl(song, edge)}?at=${song[edge]}`;
     td.append(clip);
+    if (!row.ticks[edge]) {
+      td.append(el("div", "why mark",
+        "no tick in this clip: this edge is too near the tape's end for one - what you hear stops before it, and silence here says nothing"));
+    }
   } else {
     const make = el("button", "ghost tiny", "Build clip");
     make.type = "button";
@@ -1462,7 +1467,7 @@ function earRow(row, t) {
              el("div", "dim", `${song.artist}, ${mss(song.length)}`
                + `${song.delta != null ? `, ${signed(song.delta)}` : ""}`));
   tr.append(who, whyCell(song, row, t),
-            edgeCell(song, row.clips.start, "start"), edgeCell(song, row.clips.end, "end"));
+            edgeCell(song, row, "start"), edgeCell(song, row, "end"));
 
   const judge = el("td", "moves");
   judge.append(judgeButton("Set", "keep these two edges as yours", () => {
