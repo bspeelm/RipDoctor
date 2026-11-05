@@ -215,11 +215,11 @@ class _Filing:
     def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
         """A song the library holds. Beets rewrites what it files at the writer's
         umask, so the modes come back last, before the outcome is recorded. ADR-056."""
-        said = (*notes, *self.repaired(path))
+        said = (*notes, *self.repaired(song, path))
         TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
         self.tell(song, state, path, "; ".join(n for n in said if n))
 
-    def repaired(self, path: str) -> list[str]:
+    def repaired(self, song: TP.Song, path: str) -> list[str]:
         """What an import can leave out of a file it filed. The song is in the library
         whatever happens here, so a failure is a note on it and not its outcome."""
         if self.plugins is None:
@@ -228,9 +228,23 @@ class _Filing:
         try:
             if "embedart" in self.plugins:
                 said.append(self.with_art(path))
+            said.append(self.with_gain(song, path))
         except ImportFailed as e:
             said.append(str(e))
         return said
+
+    def with_gain(self, song: TP.Song, path: str) -> str:
+        """A from-list song is excused its art and date and not its gain, and with no
+        plugin to compute one, that is said against it."""
+        if TG.has_gain(self.runner, path):
+            return ""
+        if "replaygain" not in (self.plugins or ()):
+            missing = "no ReplayGain: beets' replaygain plugin is not loaded"
+            return "" if F.choice_of(song) else missing
+        why = self.beets.replaygain(self.runner, path)
+        if TG.has_gain(self.runner, path):
+            return ""
+        return f"ReplayGain did not reach this file: {why or 'beets gave no reason'}"
 
     def with_art(self, path: str) -> str:
         """Beets embeds art only as it fetches it, so a song joining an album that

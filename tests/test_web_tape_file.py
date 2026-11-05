@@ -65,6 +65,8 @@ class Beet:
         self.pictured: set[str] = set()
         self.embed_fails = False
         self.embed_lies = False
+        self.gained: set[str] = set()
+        self.gain_fails = False
         self.ls_fails = False
 
     def __getattr__(self, name: str) -> object:
@@ -92,6 +94,8 @@ class Beet:
         if args[0] == "metaflac":
             if "--list" in args and args[-1] in self.pictured:
                 return Result(args, 0, b"METADATA block #2\n", b"")
+            if "--show-tag=REPLAYGAIN_TRACK_GAIN" in args and args[-1] in self.gained:
+                return Result(args, 0, b"REPLAYGAIN_TRACK_GAIN=1.00 dB\n", b"")
             for arg in args[1:-1]:
                 if arg.startswith("--set-tag="):
                     key, _, value = arg.removeprefix("--set-tag=").partition("=")
@@ -104,6 +108,8 @@ class Beet:
             return Result(args, 0, f"{self.art or 'None'}\n".encode(), b"")
         if "embedart" in args:
             return self._embed(args)
+        if "replaygain" in args:
+            return self._gain(args)
         if "ls" in args:
             return self._ls(args)
         if "import" in args:
@@ -131,6 +137,14 @@ class Beet:
         where = Path(args[-1].removeprefix("path:"))
         if not self.embed_lies:
             self.pictured.add(str(where))
+        where.chmod(0o600)
+        return Result(args, 0, b"", b"")
+
+    def _gain(self, args: tuple[str, ...]) -> Result:
+        if self.gain_fails:
+            return Result(args, 1, b"", b"error: Fatal replay gain error\n")
+        where = Path(args[-1].removeprefix("path:"))
+        self.gained.add(str(where))
         where.chmod(0o600)
         return Result(args, 0, b"", b"")
 
@@ -190,6 +204,8 @@ class Beet:
             if key in self.loses:
                 continue
             self.rows.append(self._row(copy, target, key))
+            if key != self.LIST:
+                self.gained.add(str(target))
         if key in self.dies:
             raise Gone
         return Result(args, 0, b"", b"")
@@ -1097,6 +1113,76 @@ def test_an_owned_song_s_art_is_left_alone(service: Service) -> None:
     runner.art = "/lib/cover.jpg"
     file_it(app, tape, service)
     assert f"path:{where}" not in [c[-1] for c in embeds_of(service)]
+
+
+def gains_of(service: Service) -> list[tuple[str, ...]]:
+    return [c for c in beet_of(service).calls if "replaygain" in c]
+
+
+def test_from_list_songs_get_their_gain_one_file_at_a_time_with_modes_restored(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    assert not file_it(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    override = str(Path(service.state_dir) / IMP.OVERRIDE_FILE)
+    assert gains_of(service) == [
+        ("beet", "--config", override, "replaygain", "-f", f"path:{s.path}")
+        for s in (one, two)
+    ]
+    assert (one.filing_note, two.filing_note) == ("", "")
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == service.settings.file_mode
+
+
+def test_a_song_whose_import_wrote_its_gain_is_not_measured_again(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    assert gains_of(service) == []
+
+
+def test_a_from_list_song_with_no_gain_plugin_says_so(service: Service) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    beet_of(service).loaded = "fetchart"
+    assert not file_it(app, tape, service)["error"]
+    assert gains_of(service) == []
+    for song in songs(service, tape):
+        assert song.filing == F.FILED
+        assert "no ReplayGain" in song.filing_note
+
+
+def test_a_pinned_song_is_not_told_off_for_a_plugin_nobody_loaded(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.loaded = "fetchart"
+    original = runner._import
+
+    def ungained(args: tuple[str, ...]) -> Result:
+        answer = original(args)
+        runner.gained.clear()
+        return answer
+
+    runner._import = ungained  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing_note for s in songs(service, tape)] == ["", ""]
+
+
+def test_a_gain_that_failed_stays_filed_and_says_so(service: Service) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    beet_of(service).gain_fails = True
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "ReplayGain did not reach this file" in one.filing_note
+    assert "Fatal replay gain error" in one.filing_note
 
 
 # ------------------------------------------------------------------------- the gate

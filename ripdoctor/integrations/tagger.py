@@ -24,6 +24,7 @@ TAG_ALBUMARTIST = "ALBUMARTIST"
 TAG_TRACK = "TRACKNUMBER"
 TAG_TOTAL = "TRACKTOTAL"
 TAG_DATE = "DATE"
+TAG_GAIN = "REPLAYGAIN_TRACK_GAIN"
 
 # Cover art block: type 3 is the front cover, and the description is empty on
 # purpose - some players show it as a caption.
@@ -148,6 +149,11 @@ def has_art(runner: Runner, path: str) -> bool:
     result = runner.run(
         ["metaflac", "--list", "--block-type=PICTURE", path], timeout=60
     )
+    return bool(result.text.strip())
+
+
+def has_gain(runner: Runner, path: str) -> bool:
+    result = runner.run(["metaflac", f"--show-tag={TAG_GAIN}", path], timeout=60)
     return bool(result.text.strip())
 
 

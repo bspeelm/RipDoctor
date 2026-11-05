@@ -578,6 +578,14 @@ class Beets:
         )
         return "" if result.ok else TapeRun(result.returncode, result.err).why()
 
+    def replaygain(self, runner: Runner, path: str) -> str:
+        """This one file's gain. `-f` because a lookup-off import leaves a gain in the
+        row and not in the file, and without it beets sees that row and skips."""
+        result = runner.run(
+            self._argv(["replaygain", "-f", f"path:{path}"]), timeout=3600
+        )
+        return "" if result.ok else TapeRun(result.returncode, result.err).why()
+
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]:
