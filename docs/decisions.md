@@ -2069,3 +2069,101 @@ intake and said the next move should be smaller, with something retired to fit
 it. This is the second intake and it retires nothing, which is the weaker
 position. What it does instead is add no fourth concept: a zip, a directory,
 and the import stage that already existed.
+
+## ADR-063 — a tape is to a mixtape what a record is to an album
+
+**Status:** proposed, awaiting the author's acceptance.
+
+**The argument against, first, is cost.** The ceiling moves 7700 → 9000,
+a working limit, and at 1,300 lines it is the largest move yet. ADR-036 said
+the next move should be smaller and retire something, and ADR-062 repeated
+that while falling short of it. This breaks it again, by more, and retires
+nothing. The trim ADR-036 promised is still owed. Per-song filing and resume
+are also more moving parts than the album flow has. What survives that is that
+the author wants this, and that gap finding, cutting, the beets stage and the
+archive copy already exist. The number is a limit rather than an estimate,
+and it is lowered to the real size plus a small margin once this is built. The
+comment ratio does not move.
+
+**What a tape is.** One uncut lossless recording and an ordered list, whose
+songs each belong to different albums. The five verbs hold; only tagging and
+filing work per song. The result is the songs, filed under their own albums,
+and a playlist that binds them in order.
+
+**It is not a record.** It has its own store, document and page, and never
+appears in the record picker. `Spec` and `Plan` are not extended, and the album
+flow does not branch on it. The one contact is a single call after a finished
+import, which rebuilds playlists. The test in `docs/north-star.md` refuses an
+intake with its own notion of a side, which a tape has, so that document names
+this as an exception rather than this record claiming to pass the test.
+
+**A list comes from a CSV or is built by hand** on the tape's page. Both produce
+the same document.
+
+**Vinyl thresholds do not apply.** The band lane's threshold is a margin
+above the measured floor, and digital zero pins that floor at the bottom of the
+scale. On the one tape measured, the shipped band lane found fewer gaps than the
+list needed. A fixed -60 dBFS on the full lane found all of them, and the result
+held steady from -30 to -80 dBFS. One tape is what this rests on.
+
+**Gaps set the boundaries when their count equals songs minus one.** Otherwise
+the boundaries are placed by ear. Either way, a boundary a person set is never
+moved.
+
+**Spans are cross-checked against list lengths, in list order.** The fit cannot
+detect wrong order on its own: a list out of order passed the shipped fit
+without refusal, with a cut inside the music. A mismatch stops the tape and is
+shown for the person to resolve. Nothing is ever reordered silently.
+
+**The library is checked, and an ownership column in a list is ignored.** The
+playlist has to resolve against the library, so that is what gets asked: by
+recording id, then by title, artist and length, because not every row has an id.
+An owned song is not filed again, and the playlist points at the existing copy.
+
+**The match rule.** The list supplies album and length. An official edition
+with the exact or remaster-stripped title, and the nearest length within 3 s, is
+accepted, with the earliest date winning a tie. Everything else goes to review,
+and nothing files until review is settled. The false-accept rate of this rule
+has not been measured.
+
+**A song with no release** takes the ADR-049 route: tagged from the list,
+flagged, with no automatic art. That was about 15% of the one list measured.
+
+**Filing is a pinned import, one run per album.** Title and track number are
+written first, then `import --search-id` runs with the answers apply, merge,
+apply. Joining an album already filed takes all three, and with only the first
+two the run stopped safely at end of input. Replace is never sent, because
+ADR-060 makes it delete the filed audio. Each result is recorded as it arrives,
+so a retry picks up only what is unfinished. Songs on disk use their own numeric
+order, since a two-digit number under a text sort puts song 100 before song 11.
+
+Filing with lookup off was rejected: when tried, it made two album rows for
+one album. The check for an owned song is required, not an optimisation: one
+experiment reported a merged copy of an owned song silently filed as another
+track. That report has not been repeated. In a simulation, merging into an
+album whose library rows hold relative paths crashed, so such rows are converted
+first, in a one-off step on a backed-up library that the owner runs.
+
+**The playlist is an `.m3u8` file with paths relative to it**, written into
+the library directory, which stays within the standing refusal of library
+management. On the one music server tested it imported in about 10 s, kept its
+order and non-ASCII paths, and followed edits. Deleting the file left the host's
+playlist behind, so removing a file does not remove a playlist.
+
+**It is rebuilt from recording ids after any import, in either flow,** because
+replacing an album changes its paths. An entry that no longer resolves is named,
+never dropped.
+
+**The raw file is archived only after every entry resolves**, the same order as
+ADR-062: nothing is cleared until the record is proved to be somewhere else.
+
+**Long files need less measuring.** Restricting astats to the measures actually
+used left the envelope byte-identical, and took peak memory from about 2.1 GB to
+about 320 MB at nearly seven hours. The change reaches records too, which is why
+the byte comparison matters. The 2 GB upload limit is raised, since a hundred
+lossless songs is roughly 3 GB by estimate, and the existing disk-space check
+still applies.
+
+**Not included.** Recording a physical cassette through capture. The document
+does not assume a tape's audio came from an upload, so this stays possible, but
+no capture work is part of this.
