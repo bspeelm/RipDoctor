@@ -60,6 +60,11 @@ class Beet:
         self.unmoved: set[str] = set()
         self.elsewhere: set[str] = set()
         self.remove_fails = False
+        self.loaded = "embedart, replaygain"
+        self.art = ""
+        self.pictured: set[str] = set()
+        self.embed_fails = False
+        self.embed_lies = False
         self.ls_fails = False
 
     def __getattr__(self, name: str) -> object:
@@ -83,15 +88,22 @@ class Beet:
 
     def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
         args = tuple(str(a) for a in argv)
+        answer = self.inner.run(argv, stdin=stdin, timeout=timeout)
         if args[0] == "metaflac":
-            told = self.tags.setdefault(args[-1], {})
+            if "--list" in args and args[-1] in self.pictured:
+                return Result(args, 0, b"METADATA block #2\n", b"")
             for arg in args[1:-1]:
                 if arg.startswith("--set-tag="):
                     key, _, value = arg.removeprefix("--set-tag=").partition("=")
-                    told[key] = value
-        answer = self.inner.run(argv, stdin=stdin, timeout=timeout)
+                    self.tags.setdefault(args[-1], {})[key] = value
         if args[0] != "beet":
             return answer
+        if "version" in args:
+            return Result(args, 0, f"plugins: {self.loaded}\n".encode(), b"")
+        if "$artpath" in args:
+            return Result(args, 0, f"{self.art or 'None'}\n".encode(), b"")
+        if "embedart" in args:
+            return self._embed(args)
         if "ls" in args:
             return self._ls(args)
         if "import" in args:
@@ -112,6 +124,15 @@ class Beet:
             "mb_trackid": self.recordings.get(told[TG_TITLE], ""),
             "mb_albumid": "" if key == self.LIST else key,
         }
+
+    def _embed(self, args: tuple[str, ...]) -> Result:
+        if self.embed_fails:
+            return Result(args, 1, b"", b"error: the art would not take\n")
+        where = Path(args[-1].removeprefix("path:"))
+        if not self.embed_lies:
+            self.pictured.add(str(where))
+        where.chmod(0o600)
+        return Result(args, 0, b"", b"")
 
     def _remove(self, args: tuple[str, ...]) -> Result:
         if self.remove_fails:
@@ -945,6 +966,137 @@ def test_an_owned_album_s_modes_are_left_alone(service: Service) -> None:
     where.chmod(0o600)
     file_it(app, tape, service)
     assert stat.S_IMODE(where.stat().st_mode) == 0o600
+
+
+# ---------------------------------------------------------------- what beets left out
+
+
+def embeds_of(service: Service) -> list[tuple[str, ...]]:
+    return [c for c in beet_of(service).calls if "embedart" in c]
+
+
+def test_a_song_joining_an_album_with_art_gets_it_embedded_alone_with_modes_restored(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.art = "/lib/rel-1/cover.jpg"
+    assert not file_it(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    override = str(Path(service.state_dir) / IMP.OVERRIDE_FILE)
+    assert embeds_of(service) == [
+        (
+            "beet",
+            "--config",
+            override,
+            "embedart",
+            "-y",
+            "-f",
+            runner.art,
+            f"path:{s.path}",
+        )
+        for s in (one, two)
+    ]
+    assert one.filing_note == ""
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == service.settings.file_mode
+
+
+def test_a_song_with_art_already_is_not_rewritten(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.art = "/lib/cover.jpg"
+    original = runner._import
+
+    def fetched_it(args: tuple[str, ...]) -> Result:
+        answer = original(args)
+        runner.pictured |= {r["path"] for r in runner.rows}
+        return answer
+
+    runner._import = fetched_it  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    assert embeds_of(service) == []
+
+
+def test_an_album_with_no_art_has_nothing_to_embed_and_nothing_to_say(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    assert embeds_of(service) == []
+    assert [s.filing_note for s in songs(service, tape)] == ["", ""]
+
+
+def test_without_the_embedart_plugin_a_joining_song_is_left_as_the_first_was(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.art, runner.loaded = "/lib/cover.jpg", "fetchart"
+    assert not file_it(app, tape, service)["error"]
+    assert embeds_of(service) == []
+
+
+@pytest.mark.parametrize("how", ["embed_fails", "embed_lies"])
+def test_art_that_did_not_embed_stays_filed_and_says_so(
+    service: Service, how: str
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.art = "/lib/cover.jpg"
+    setattr(runner, how, True)
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "art did not embed" in one.filing_note
+
+
+def test_a_library_that_cannot_say_what_art_it_has_is_a_note_not_a_failure(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    original = beet_of(service).run
+
+    def locked(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if "$artpath" in argv:
+            return Result(tuple(argv), 1, b"", b"database is locked\n")
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    beet_of(service).run = locked  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "database is locked" in one.filing_note
+
+
+def test_a_recovered_song_gets_the_art_a_restart_kept_from_it(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    runner.dies.clear()
+    runner.art = "/lib/rel-1/cover.jpg"
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.ALREADY
+    assert f"path:{songs(service, tape)[0].path}" in [c[-1] for c in embeds_of(service)]
+
+
+def test_an_owned_song_s_art_is_left_alone(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    where = runner.owns("One", mb_trackid="rec-One")
+    runner.art = "/lib/cover.jpg"
+    file_it(app, tape, service)
+    assert f"path:{where}" not in [c[-1] for c in embeds_of(service)]
 
 
 # ------------------------------------------------------------------------- the gate

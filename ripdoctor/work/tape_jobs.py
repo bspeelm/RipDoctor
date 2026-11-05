@@ -153,6 +153,7 @@ class _Filing:
     file_mode: int
     dir_mode: int
     unanswered: set[int] = field(default_factory=set)
+    plugins: tuple[str, ...] | None = None
 
     def tell(self, song: TP.Song, state: str, path: str = "", note: str = "") -> None:
         self.tape = F.recorded(self.tape, song.number, state, path, note)
@@ -213,9 +214,36 @@ class _Filing:
 
     def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
         """A song the library holds. Beets rewrites what it files at the writer's
-        umask, so the modes come back before the outcome is recorded. ADR-056."""
+        umask, so the modes come back last, before the outcome is recorded. ADR-056."""
+        said = (*notes, *self.repaired(path))
         TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
-        self.tell(song, state, path, "; ".join(n for n in notes if n))
+        self.tell(song, state, path, "; ".join(n for n in said if n))
+
+    def repaired(self, path: str) -> list[str]:
+        """What an import can leave out of a file it filed. The song is in the library
+        whatever happens here, so a failure is a note on it and not its outcome."""
+        if self.plugins is None:
+            self.plugins = self.beets.plugins(self.runner)
+        said = []
+        try:
+            if "embedart" in self.plugins:
+                said.append(self.with_art(path))
+        except ImportFailed as e:
+            said.append(str(e))
+        return said
+
+    def with_art(self, path: str) -> str:
+        """Beets embeds art only as it fetches it, so a song joining an album that
+        already has some arrives without."""
+        if TG.has_art(self.runner, path):
+            return ""
+        art = self.beets.art_of(self.runner, self.library, path)
+        if not art:
+            return ""
+        why = self.beets.embed_art(self.runner, path, art)
+        if TG.has_art(self.runner, path):
+            return ""
+        return f"its album's art did not embed: {why or 'beets gave no reason'}"
 
     def imported(
         self,

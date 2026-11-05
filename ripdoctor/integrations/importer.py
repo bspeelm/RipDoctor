@@ -559,6 +559,25 @@ class Beets:
             why = TapeRun(result.returncode, result.err).why()
             raise ImportFailed(f"beets could not clear its row for {path}: {why}")
 
+    def art_of(self, runner: Runner, root: str, path: str) -> str:
+        """The art beets holds for the album of this file, or nothing."""
+        result = runner.run(
+            self._argv(["ls", "-f", "$artpath", f"path:{path}"]), timeout=300
+        )
+        if not result.ok:
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not say what art this has: {why}")
+        said = _plain(result.text).strip()
+        return "" if said in ("", "None") else str(_rooted(root, said))
+
+    def embed_art(self, runner: Runner, path: str, art: str) -> str:
+        """Into this one file: `-f` takes items, where the form without it rewrites
+        every track of a whole album. What beets said, when it did not exit clean."""
+        result = runner.run(
+            self._argv(["embedart", "-y", "-f", art, f"path:{path}"]), timeout=600
+        )
+        return "" if result.ok else TapeRun(result.returncode, result.err).why()
+
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]:
