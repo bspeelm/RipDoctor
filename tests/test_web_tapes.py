@@ -541,8 +541,11 @@ def test_a_tape_is_removed_only_when_asked(service: Service) -> None:
     tape = a_ready_tape(app, service)
     process(app, tape, service)
     assert T.dir_for(service.layout, tape).is_dir()
-    assert post(app, f"/api/tapes/{tape}/remove", service).status == 200
+    removed = post(app, f"/api/tapes/{tape}/remove", service)
+    assert removed.status == 200
     assert not T.dir_for(service.layout, tape).exists()
+    moved = service.layout.root / removed.json()["moved_to"]
+    assert (moved / T.AUDIO).read_bytes() == b"fLaC-normalised"
     assert get(app, "/api/tapes", service).json()["tapes"] == []
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +27,7 @@ from ripdoctor.store.files import Layout, write_json
 from ripdoctor.store.safety import under
 
 WHERE = "tapes"
+REMOVED = "tapes-removed"
 DOCUMENT = "tape.json"
 AUDIO = "tape.flac"
 ENVELOPE = "tape.env"
@@ -129,10 +130,22 @@ def measure(runner: Runner, layout: Layout, tape: str, duration: float) -> Envel
     return decode(target.read_bytes()).full.rescaled(duration)
 
 
-def remove(layout: Layout, tape: str) -> None:
-    """Only ever asked for by a person. The upload goes with it."""
-    shutil.rmtree(dir_for(layout, tape))
+def remove(layout: Layout, tape: str, now: float) -> Path:
+    """Only ever asked for by a person, and returns where the tape went.
+
+    It holds the only audio and any boundaries set by ear, so it moves aside.
+    An upload not yet taken in still exists wherever it was sent from, and goes.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+    aside = under(layout.work, REMOVED)
+    aside.mkdir(parents=True, exist_ok=True)
+    target, suffix = aside / f"{tape}-{stamp}", 1
+    while target.exists():
+        suffix += 1
+        target = aside / f"{tape}-{stamp}-{suffix}"
+    dir_for(layout, tape).rename(target)
     IN.clear(layout, key_of(tape))
+    return target
 
 
 def sweep(layout: Layout) -> list[str]:

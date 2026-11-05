@@ -102,11 +102,34 @@ def test_removing_takes_the_tape_and_its_upload(tmp_path: Path) -> None:
     layout = a_layout(tmp_path)
     tape = a_tape(layout)
     IN.begin(layout, T.key_of(tape.id), name="mix.wav", size=4, now=1.0)
-    T.remove(layout, tape.id)
+    T.remove(layout, tape.id, 2000.0)
     assert not T.dir_for(layout, tape.id).exists()
     assert IN.state(layout, T.key_of(tape.id)) is None
     with pytest.raises(FileNotFoundError):
         T.read(layout, tape.id)
+
+
+def test_removing_destroyed_the_only_audio_and_now_moves_it_aside(
+    tmp_path: Path,
+) -> None:
+    layout = a_layout(tmp_path)
+    tape = a_tape(layout)
+    T.audio_file(layout, tape.id).write_bytes(b"fLaC")
+    moved = T.remove(layout, tape.id, 0.0)
+    assert moved.name == f"{tape.id}-19700101T000000Z"
+    assert moved.parent == (layout.work / T.REMOVED).resolve()
+    assert (moved / T.AUDIO).read_bytes() == b"fLaC"
+    assert json.loads((moved / T.DOCUMENT).read_text())["name"] == tape.name
+    assert T.listed(layout).tapes == ()
+
+
+def test_a_tape_removed_twice_in_one_second_keeps_both(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    first = T.remove(layout, a_tape(layout).id, 0.0)
+    second = T.remove(layout, a_tape(layout).id, 0.0)
+    assert first != second
+    assert first.is_dir()
+    assert second.is_dir()
 
 
 def test_a_tape_id_that_escapes_the_store_is_refused(tmp_path: Path) -> None:

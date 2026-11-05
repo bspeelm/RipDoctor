@@ -248,5 +248,6 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/tapes/([^/]+)/remove")
     def remove(r: H.Request) -> H.Response:
         tape = settled(r)
-        T.remove(layout, tape.id)
-        return H.ok({"removed": tape.id})
+        moved = T.remove(layout, tape.id, service.now())
+        where = moved.relative_to(layout.root.resolve())
+        return H.ok({"removed": tape.id, "moved_to": str(where)})

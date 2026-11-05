@@ -1400,11 +1400,12 @@ async function watchTape() {
 }
 
 async function removeTape() {
-  if (!confirm(`Remove ${tape.name}, its audio and its list? This cannot be undone.`)) return;
+  if (!confirm(`Remove ${tape.name}? Its audio and list are moved aside, not deleted. An upload still arriving is dropped.`)) return;
   try {
-    await postJSON(`/api/tapes/${tape.id}/remove`, {});
+    const gone = await postJSON(`/api/tapes/${tape.id}/remove`, {});
     tape = null;
     await loadTapes();
+    status(`moved to ${gone.moved_to}`);
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
