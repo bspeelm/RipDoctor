@@ -249,6 +249,17 @@ def test_one_metadata_writer_per_pass() -> None:
         assert af.count("ametadata=print") == 1, af
 
 
+def test_a_long_file_produces_no_output_for_measures_nobody_reads() -> None:
+    fake = build_fake()
+    astats.lanes(fake, "a.flac")
+    chains = [a[a.index("-af") + 1] for a in measured(fake)]
+    wide = next(c for c in chains if "highpass" not in c)
+    band = next(c for c in chains if "highpass" in c)
+    base = "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall="
+    assert base + "RMS_level+Peak_level" in wide.split(","), wide
+    assert base + "RMS_level" in band.split(","), band
+
+
 def test_the_rate_is_measured_once_and_shared() -> None:
     """Two passes measuring separately could disagree about the grid."""
     fake = build_fake()

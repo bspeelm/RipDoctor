@@ -80,14 +80,15 @@ def parse(text: str, keys: tuple[str, ...]) -> dict[str, list[float]]:
     return out
 
 
-def _chain(window_samples: int, prefix: list[str]) -> str:
+def _chain(window_samples: int, prefix: list[str], keys: tuple[str, ...]) -> str:
     return ",".join(
         [
             *prefix,
             f"asetnsamples=n={window_samples}",
-            # measure_perchannel=none keeps only the Overall keys, a third of
-            # the output and a third of the parsing.
-            "astats=metadata=1:reset=1:measure_perchannel=none",
+            # Overall keys only, and only the measures this pass reads: every other
+            # one is output to hold and parse, hundreds of megabytes on a long file.
+            "astats=metadata=1:reset=1:measure_perchannel=none"
+            f":measure_overall={'+'.join(keys)}",
             "ametadata=print:file=-",
         ]
     )
@@ -110,7 +111,7 @@ def _measure(
             "-i",
             path,
             "-af",
-            _chain(n, prefix),
+            _chain(n, prefix, keys),
             "-f",
             "null",
             "-",
