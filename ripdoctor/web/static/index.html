@@ -27,6 +27,7 @@
       <button data-mode="punch">Punch</button>
       <button data-mode="upload">Upload</button>
       <button data-mode="precut">Pre-cut</button>
+      <button data-mode="tapes">Tapes</button>
     </span>
     <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
            title="narrows the list beside it; every record is in there, archived ones included">
@@ -85,6 +86,62 @@
         <input type="file" id="up-file" accept="audio/*,video/*" hidden>
         <p class="err" id="up-err"></p>
       </div>
+    </div>
+
+    <div class="ripform" id="tapeform" hidden>
+      <h2>Tapes</h2>
+      <p class="dim">One uncut recording and the ordered list of songs in it. The
+        list is laid over the silences in list order, and whatever does not fit is
+        flagged for you rather than reordered. Nothing is cut or filed here.</p>
+      <div class="fields">
+        <label class="wide">Tape <select id="tp-pick"></select></label>
+        <label class="wide">New tape <input id="tp-name" placeholder="name" autocomplete="off"></label>
+      </div>
+      <div class="row btns">
+        <button type="button" id="tp-create">Create</button>
+        <button type="button" id="tp-remove" class="ghost" disabled>Remove</button>
+      </div>
+      <h2>Recording</h2>
+      <p class="dim mono" id="tp-audio"></p>
+      <p class="dim mono" id="tp-picked"></p>
+      <div class="row btns">
+        <button type="button" id="tp-file-pick" disabled>Choose a file&hellip;</button>
+        <button type="button" id="tp-go" disabled>Upload</button>
+        <button type="button" id="tp-cancel" class="ghost" hidden>Cancel</button>
+      </div>
+      <input type="file" id="tp-file" accept="audio/*,video/*" hidden>
+      <h2>Song list</h2>
+      <p class="dim">A CSV with the columns playlist, owned, position, title,
+        artist, album, duration, or add the songs by hand. Either way they stay
+        editable.</p>
+      <div class="row btns">
+        <button type="button" id="tp-csv-pick" disabled>Load a CSV&hellip;</button>
+        <button type="button" id="tp-add" class="ghost" disabled>Add a song</button>
+        <button type="button" id="tp-save" class="ghost" disabled>Save list</button>
+      </div>
+      <input type="file" id="tp-csv" accept=".csv,text/csv" hidden>
+      <div class="row btns">
+        <button type="button" id="tp-process" disabled>Find boundaries</button>
+      </div>
+      <p class="err" id="tp-err"></p>
+    </div>
+
+    <div class="ripmeter" id="tapepane" hidden>
+      <h2 id="tp-what">No tape chosen</h2>
+      <div class="row"><div class="bar" id="tp-bar"><i></i></div></div>
+      <p class="dim" id="tp-state"></p>
+      <p class="warn" id="tp-mismatch" hidden></p>
+      <div class="tp-scroll">
+        <table class="songs">
+          <thead><tr>
+            <th>#</th><th>Title</th><th>Artist</th><th>Album</th><th>Length</th>
+            <th>Span</th><th>Off by</th><th>Check</th><th></th>
+          </tr></thead>
+          <tbody id="tp-rows"></tbody>
+        </table>
+      </div>
+      <h2 id="tp-inside-title" hidden>Silences inside a song</h2>
+      <ul class="dim mono" id="tp-inside"></ul>
     </div>
 
     <div class="ripform" id="precutform" hidden>

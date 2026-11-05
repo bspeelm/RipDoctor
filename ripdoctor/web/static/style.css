@@ -124,6 +124,20 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
   border-top:1px solid var(--line);font:11px/1.4 ui-monospace,monospace;color:var(--dim)}
 #logwrap.collapsed #log{display:none}
 
+/* ---- tapes ---- */
+.warn{color:var(--warn);margin:0}
+.tp-scroll{overflow:auto;min-height:0;flex:1}
+table.songs{border-collapse:collapse;width:100%;font-size:12px}
+table.songs th{text-align:left;color:var(--dim);font-weight:500;padding:.2rem .35rem;
+  position:sticky;top:0;background:var(--bg)}
+table.songs td{padding:.15rem .35rem;border-top:1px solid var(--line);white-space:nowrap}
+table.songs input{width:100%;min-width:6rem;padding:.2rem .35rem}
+table.songs input[data-field=length]{min-width:3.5rem;width:3.5rem}
+table.songs .num{color:var(--dim);text-align:right}
+table.songs tr.doubt .mark{color:var(--warn);font-weight:600}
+table.songs tr.doubt td{background:rgba(232,196,104,.08)}
+table.songs .moves button{padding:.1rem .35rem}
+
 /* ---- rip view ---- */
 #captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
 .ripform{width:30rem;flex:none;display:flex;flex-direction:column;gap:.55rem;min-width:0}
