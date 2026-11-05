@@ -232,3 +232,18 @@ def test_a_refusal_is_said_once_where_it_can_be_acted_on() -> None:
     js = (STATIC / "app.js").read_text()
     assert '"waits for the cut, above"' in js
     assert '"waits until the songs are filed"' in js
+
+
+def test_a_job_lost_to_a_restart_is_said_plainly_and_a_blip_is_waited_out() -> None:
+    """It said "no job" and left the last progress on the page."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (e.status || ++missed >= TRIES) throw e" in body
+    assert "e.status === 404" in body and "start it again" in body
+    assert "if (tapeWatching) for (const b of TAPE_JOB_BUTTONS)" in js
+
+
+def test_a_pasted_release_keeps_its_place_in_the_edition_picker() -> None:
+    """A release from no candidate list left the picker blank, and Use then sent ''."""
+    js = (STATIC / "app.js").read_text()
+    assert "[current, ...others]" in js

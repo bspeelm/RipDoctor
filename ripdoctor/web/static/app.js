@@ -1260,6 +1260,8 @@ function showTape(t) {
   showEar(t);
   showFiling(t);
   showPlaylist(t);
+  // Opening the tape again during a job would otherwise offer what it would refuse.
+  if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1323,7 +1325,12 @@ function reviewRow(song) {
   row.append(listed, proposedCell(song), el("td", "mark", whyText(song)));
 
   const change = el("td");
-  const offered = song.proposal?.candidates ?? [];
+  // A pasted release is on no list of candidates, and a select left without its
+  // own value shows blank.
+  const current = song.proposal?.choice;
+  const others = song.proposal?.candidates ?? [];
+  const offered = current?.release && !others.some((c) => c.release === current.release)
+    ? [current, ...others] : others;
   if (offered.length) {
     const pick = el("div", "pick");
     const editions = el("select");
@@ -1382,6 +1389,7 @@ function showEar(t) {
     skipped.length ? `not cut, by your choice: ${skipped.join(", ")}` : "",
   ].filter(Boolean).join(". ");
   $("#tp-cut-why").textContent = said;
+  $("#tp-cut-why").className = t.cut_refusal ? "warn" : "dim";
   $("#tp-cut-why").hidden = !said;
   $("#tp-ear").replaceChildren(...t.ear.map((row) => earRow(row, t)));
 }
@@ -1427,6 +1435,7 @@ function showFiling(t) {
     : t.cut_refusal ? "waits for the cut, above"
     : t.file_refusal || (t.all_filed ? "every song is in the library" : "");
   $("#tp-file-why").textContent = why;
+  $("#tp-file-why").className = t?.all_filed ? "dim" : "warn";
   $("#tp-file-why").hidden = !why;
   $("#tp-filing-wrap").hidden = !started;
   $("#tp-filing").replaceChildren(...(started ? t.filing.map(filingRow) : []));
@@ -1718,9 +1727,19 @@ async function watchTape() {
   tapeWatching = true;
   const { id, key } = tape;
   for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  let missed = 0;
   try {
     for (;;) {
-      const j = await api(`/api/job/${key}`);
+      let j;
+      try {
+        j = await api(`/api/job/${key}`);
+        missed = 0;
+      } catch (e) {
+        // A server restarting does not answer for a moment, and a job is not lost by it.
+        if (e.status || ++missed >= TRIES) throw e;
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
       if (j.total) setBar(j.finished / j.total, "#tp-bar");
       const doing = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
       $("#tp-state").textContent = doing;
@@ -1734,7 +1753,11 @@ async function watchTape() {
       await new Promise((r) => setTimeout(r, 800));
     }
   } catch (e) {
-    $("#tp-err").textContent = e.message;
+    $("#tp-state").textContent = "";
+    status("");
+    $("#tp-err").textContent = e.status === 404
+      ? "that job is no longer running, so the server has restarted - what it finished is kept, so start it again"
+      : e.message;
   } finally {
     tapeWatching = false;
     setBar(0, "#tp-bar");
