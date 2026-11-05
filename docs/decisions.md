@@ -2186,6 +2186,33 @@ tapes, and the person is told where: it holds the only audio and any boundaries
 set by ear. An upload not yet taken in is dropped, since its source is still
 wherever it was sent from.
 
+**The ear check.** Flagged means a song's own doubt verdict, or any song on a tape
+whose mismatch stands, since a length that happens to fit proves nothing on a list
+that disagrees with its audio. That can ask for every song to be judged, which is
+heavy on a long list and is accepted: the gate is the point of the flow. Clips are
+built for flagged boundaries unless another is named, and are named by the instant,
+so a boundary that moves can never play an old clip. The preview is built only when
+asked, as a job. The timeline is not reused, because it is built around a record's
+sides and plan, so a tape has one row per song and does not use its envelope here.
+
+**A person's judgement.** Setting a song's edges lays every song not set by ear
+around them again, the same way `place` always has, so a found neighbour may move.
+Ear-set songs must stay in list order against each other, adjacent or not. Heard
+keeps the origin and the measured verdict and answers the doubt in its own flag. It
+is about particular edges, so a later fit that moves them takes it away, and a new
+list clears it along with the boundaries. Skip survives a new list that keeps the
+song, is excused from both the ear and the release, and is named wherever the tape
+is reported.
+
+**The cut.** It is refused, naming every song, while any song not skipped is in
+doubt, has no settled release or has no room between its edges. A song is written
+and tested in the tape's `partial` directory and only then takes its name in `cuts`,
+and the record it gets holds the edges it was made from, so a moved boundary makes
+it out of date with nothing to keep in step. A failure is about that song: it is
+marked, the rest carry on, and the job ends carrying the names. A recut that fails
+leaves the earlier file under its name, marked failed so nothing can take it for
+current. What a recut replaces, and any cut no song claims, goes to `superseded`.
+
 **Unresolved.** A song with no recording id cannot be rebuilt from an id: it
 resolves by title, artist and length, and is named if that is ambiguous. The
 too-many check (ADR-057) and the archive gate do not apply to tapes as written, so
