@@ -207,6 +207,7 @@ def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None
     assert narrow, "nothing changes on a narrow screen"
     assert "#captureview{flex-direction:column" in narrow.group(1)
     assert ".ripform{width:100%}" in narrow.group(1)
+    assert css.index(".ripform{width:30rem") < narrow.start(), "the wide rule wins"
     scroll = re.search(r"\.tp-scroll\{([^}]*)\}", css)
     assert scroll and "flex:none" in scroll.group(1)
     assert "white-space:normal" in re.search(r"table\.ear td\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]

@@ -159,19 +159,6 @@ table.ear audio{height:1.9rem;width:9rem;display:block}
 table.review select{min-width:0;flex:1;max-width:22rem}
 table.review input{min-width:7rem;flex:1}
 table.review input[data-field=track]{flex:none;min-width:0;width:3.5rem}
-/* A phone: the columns stack, and a row of a table becomes a block of its own. */
-@media (max-width:48rem){
-  #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
-  .ripform{width:100%}
-  .ripmeter{flex:none}
-  table.review thead,table.ear thead{display:none}
-  table.review tr,table.ear tr{display:block;padding:.4rem 0;border-top:1px solid var(--line)}
-  table.review td,table.ear td{display:block;border:0;min-width:0;text-align:left}
-  table.ear td:empty{display:none}
-  table.ear .edge{display:inline-block;width:50%}
-  table.ear audio,table.ear .edge input{width:100%}
-  table.review select{max-width:none}
-}
 
 /* ---- rip view ---- */
 #captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
@@ -344,4 +331,18 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
 @keyframes sweep{from{background-position:-45% 0}to{background-position:145% 0}}
 @media (prefers-reduced-motion:reduce){
   #rip-state.working::after{animation:none;background-position:50% 0}
+}
+
+/* A phone: the columns stack, and a row of a table becomes a block of its own. */
+@media (max-width:48rem){
+  #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
+  .ripform{width:100%}
+  .ripmeter{flex:none}
+  table.review thead,table.ear thead{display:none}
+  table.review tr,table.ear tr{display:block;padding:.4rem 0;border-top:1px solid var(--line)}
+  table.review td,table.ear td{display:block;border:0;min-width:0;text-align:left}
+  table.ear td:empty{display:none}
+  table.ear .edge{display:inline-block;width:50%}
+  table.ear audio,table.ear .edge input{width:100%}
+  table.review select{max-width:none}
 }
