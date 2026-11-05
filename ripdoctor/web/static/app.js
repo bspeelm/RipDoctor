@@ -1223,7 +1223,7 @@ async function createTape() {
 function showTape(t) {
   tape = t; tapeEdited = false;
   const has = !!t;
-  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-remove"])
+  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-remove", "#tp-match", "#tp-rematch"])
     $(id).disabled = !has;
   $("#tp-what").textContent = has ? t.name : "No tape chosen";
   $("#tp-mismatch").textContent = has ? t.mismatch : "";
@@ -1244,6 +1244,105 @@ function showTape(t) {
   const doubts = has ? t.songs.filter((s) => s.reason) : [];
   $("#tp-reasons").replaceChildren(...doubts.map((s) => el("li", null, `song ${s.number}: ${s.reason}`)));
   $("#tp-reasons-title").hidden = !doubts.length;
+  showReview(t);
+}
+
+// Doubts first, then what nobody has asked about, then what is already settled.
+function reviewRank(song) {
+  if (song.settled_by) return song.settled_by === "person" ? 5 : 4;
+  return { failed: 0, review: 1, none: 2 }[song.proposal?.status] ?? 3;
+}
+
+function showReview(t) {
+  const asked = !!t && t.songs.some((s) => s.proposal);
+  $("#tp-review-wrap").hidden = !asked;
+  if (!asked) { $("#tp-review").replaceChildren(); return; }
+  const done = t.songs.filter((s) => s.settled_by).length;
+  const failed = t.songs.filter((s) => s.proposal?.status === "failed").length;
+  $("#tp-settled").textContent = (t.all_settled ? "every song is settled"
+    : `${done} of ${t.songs.length} settled`)
+    + (failed ? `; ${failed} could not be looked up - press Look again` : "");
+  const ordered = [...t.songs].sort((a, b) => reviewRank(a) - reviewRank(b) || a.number - b.number);
+  $("#tp-review").replaceChildren(...ordered.map(reviewRow));
+}
+
+const editionText = (c) => `${c.release_title}, ${c.album_artist} (${c.date || "no date"})`
+  + `${c.note ? ` ${c.note}` : ""}${c.status ? ` ${c.status}` : ""}`;
+const trackText = (c) => c.number
+  ? `${c.disc}-${c.number} ${c.track_title}${c.length ? ` ${mss(c.length)}` : ", no length"}`
+  : "no track like this title";
+
+function proposedCell(song) {
+  const td = el("td");
+  const choice = song.proposal?.choice;
+  if (choice) {
+    td.append(el("div", null, editionText(choice)), el("div", "dim", trackText(choice)));
+  } else {
+    td.append(el("div", null, song.album || "no album"),
+              el("div", "dim", song.proposal ? "from your list, no release" : "not asked yet"));
+  }
+  return td;
+}
+
+function whyText(song) {
+  const by = { catalogue: "accepted from the catalogue", person: "your choice" }[song.settled_by];
+  return by || song.proposal?.reason || "";
+}
+
+// Answers replace the page's rows, which would lose list edits nobody saved, and
+// a save can renumber the song an answer is for.
+async function settleSong(send) {
+  $("#tp-err").textContent = "";
+  if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
+  try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
+}
+
+function reviewRow(song) {
+  const row = el("tr", song.settled_by ? null : "doubt");
+  const release = `/api/tapes/${tape.id}/songs/${song.number}/release`;
+  const fromList = `/api/tapes/${tape.id}/songs/${song.number}/from-list`;
+  row.append(el("td", "num", song.number));
+  const listed = el("td");
+  listed.append(el("div", null, `${song.title}, ${song.artist}`),
+                el("div", "dim", `${song.album || "no album"}, ${mss(song.length)}`));
+  row.append(listed, proposedCell(song), el("td", "mark", whyText(song)));
+
+  const change = el("td");
+  const offered = song.proposal?.candidates ?? [];
+  if (offered.length) {
+    const pick = el("div", "pick");
+    const editions = el("select");
+    editions.setAttribute("aria-label", "edition");
+    editions.append(...offered.map((c) => {
+      const o = el("option", null, `${editionText(c)}: ${trackText(c)}`);
+      o.value = c.release;
+      return o;
+    }));
+    if (song.proposal.choice) editions.value = song.proposal.choice.release;
+    const use = el("button", "ghost tiny", "Use");
+    use.type = "button";
+    use.onclick = () => settleSong(() => postJSON(release, { release: editions.value }));
+    pick.append(editions, use);
+    change.append(pick);
+  }
+  const paste = el("div", "pick");
+  const id = el("input");
+  id.placeholder = "release id or link";
+  id.setAttribute("aria-label", "release id or link");
+  const track = el("input");
+  track.dataset.field = "track";
+  track.placeholder = "track";
+  track.setAttribute("aria-label", "track number, if the title is not found");
+  const set = el("button", "ghost tiny", "Set");
+  set.type = "button";
+  set.onclick = () => settleSong(() => postJSON(release, { release: id.value, track: track.value }));
+  paste.append(id, track, set);
+  const listButton = el("button", "ghost tiny", "File from my list");
+  listButton.type = "button";
+  listButton.onclick = () => settleSong(() => postJSON(fromList, {}));
+  change.append(paste, listButton);
+  row.append(change);
+  return row;
 }
 
 function songInput(field, value, label) {
@@ -1371,12 +1470,21 @@ async function processTape() {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
+async function matchTape(again) {
+  $("#tp-err").textContent = "";
+  try {
+    if (tapeEdited) await saveSongs();
+    await postJSON(`/api/tapes/${tape.id}/match`, { again });
+    watchTape();
+  } catch (e) { $("#tp-err").textContent = e.message; }
+}
+
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
   if (tapeWatching) return;
   tapeWatching = true;
   const { id, key } = tape;
-  $("#tp-process").disabled = true;
+  for (const b of ["#tp-process", "#tp-match", "#tp-rematch"]) $(b).disabled = true;
   try {
     for (;;) {
       const j = await api(`/api/job/${key}`);
@@ -1394,7 +1502,7 @@ async function watchTape() {
   } finally {
     tapeWatching = false;
     setBar(0, "#tp-bar");
-    $("#tp-process").disabled = false;
+    for (const b of ["#tp-process", "#tp-match", "#tp-rematch"]) $(b).disabled = false;
   }
   await loadTapes(id);
 }
@@ -2472,6 +2580,8 @@ function wire() {
   };
   $("#tp-save").onclick = saveSongsPressed;
   $("#tp-process").onclick = processTape;
+  $("#tp-match").onclick = () => matchTape(false);
+  $("#tp-rematch").onclick = () => matchTape(true);
   $("#tp-remove").onclick = removeTape;
   $("#pc-pick").onclick = () => $("#pc-file").click();
   $("#pc-file").onchange = (e) => {

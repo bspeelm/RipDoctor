@@ -123,6 +123,14 @@
       <div class="row btns">
         <button type="button" id="tp-process" disabled>Find boundaries</button>
       </div>
+      <h2>Albums</h2>
+      <p class="dim">Find the release each song belongs to. Doubts are listed
+        first and wait for you. Accepted matches are shown too, and you can change
+        any of them.</p>
+      <div class="row btns">
+        <button type="button" id="tp-match" disabled>Match songs</button>
+        <button type="button" id="tp-rematch" class="ghost" disabled>Look again</button>
+      </div>
       <p class="err" id="tp-err"></p>
     </div>
 
@@ -144,6 +152,16 @@
       <ul class="dim" id="tp-reasons"></ul>
       <h2 id="tp-inside-title" hidden>Silences inside a song</h2>
       <ul class="dim mono" id="tp-inside"></ul>
+      <div class="tp-scroll" id="tp-review-wrap" hidden>
+        <h2>Albums</h2>
+        <p class="dim" id="tp-settled"></p>
+        <table class="songs review">
+          <thead><tr>
+            <th>#</th><th>On the list</th><th>Proposed</th><th>Why</th><th>Change it</th>
+          </tr></thead>
+          <tbody id="tp-review"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="ripform" id="precutform" hidden>
