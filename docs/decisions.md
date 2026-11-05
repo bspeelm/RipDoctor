@@ -2074,17 +2074,18 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 10,000,
-a working limit, and at 2,300 lines it is the largest move yet. It took two
-moves for this one feature: the first limit, 9000, proved too low with ear
-checking, cutting and filing still to build. ADR-036 said the next move should
-be smaller and retire something, and ADR-062 repeated that while falling short
-of it. This breaks it again, by more, and retires nothing. The trim ADR-036
-promised is still owed. Per-song filing and resume are also more moving parts
-than the album flow has. What survives that is that the author wants this, and
-that gap finding, cutting, the beets stage and the archive copy already exist.
-The number is a limit rather than an estimate, for the same reason as the first,
-and it is lowered to the real size plus a small margin once this is built. The
+**The argument against, first, is cost.** The ceiling moves 7700 → 10,500,
+a working limit, and at 2,800 lines it is the largest move yet. It took three
+moves for this one feature: 9000 proved too low with ear checking, cutting and
+filing still to build, and 10,000 too low with the playlist still to build.
+ADR-036 said the next move should be smaller and retire something, and ADR-062
+repeated that while falling short of it. This breaks it again, by more, and
+retires nothing. The trim ADR-036 promised is still owed. Per-song filing and
+resume are also more moving parts than the album flow has. What survives that is
+that the author wants this, and that gap finding, cutting, the beets stage and the
+archive copy already exist. The number is a limit rather than an estimate, for the
+same reason each time: the feature is not finished, and an estimate would be a
+guess. It is lowered to the real size plus a small margin once this is built. The
 comment ratio does not move.
 
 **What a tape is.** One uncut lossless recording and an ordered list, whose
@@ -2153,7 +2154,8 @@ Everything else goes to review, and nothing files until review is settled. The
 false-accept rate of this rule has not been measured.
 
 **A song with no release** takes the ADR-049 route: tagged from the list,
-flagged, with no automatic art. That was about 15% of the one list measured.
+flagged, with no automatic art or date. It still gets its ReplayGain, or a note
+saying why not. That was about 15% of the one list measured.
 
 **Filing is a pinned import, one run per album.** Title and track number are
 written first, then `import --search-id` runs with the answers apply, merge,
@@ -2200,10 +2202,16 @@ wherever it was sent from.
 
 **The ear check.** Flagged means a song's own doubt verdict, or any song on a tape
 whose mismatch stands, since a length that happens to fit proves nothing on a list
-that disagrees with its audio. That can ask for every song to be judged, which is
-heavy on a long list and is accepted: the gate is the point of the flow. Clips are
-built for flagged boundaries unless another is named, and are named by the instant,
-so a boundary that moves can never play an old clip. The preview is built only when
+that disagrees with its audio. The document keeps that flag against each song, and
+only that song's own hearing, setting or skip answers it, because setting its
+neighbours can end the mismatch and says nothing about a song nobody heard. A new
+list clears it. That can ask for every song to be judged, which is heavy on a long
+list and is accepted: the gate is the point of the flow. Clips are built for flagged
+boundaries unless another is named, and are named by the instant, so a boundary that
+moves can never play an old clip. A clip stops 0.25 s short of the end of the audio,
+so a boundary nearer the end than that and the tick's own length gets no tick, and
+the page says so: the instant is the question, and is never moved to fit. The
+preview is built only when
 asked, as a job. The timeline is not reused, because it is built around a record's
 sides and plan, so a tape has one row per song and does not use its envelope here.
 
@@ -2224,6 +2232,8 @@ it out of date with nothing to keep in step. A failure is about that song: it is
 marked, the rest carry on, and the job ends carrying the names. A recut that fails
 leaves the earlier file under its name, marked failed so nothing can take it for
 current. What a recut replaces, and any cut no song claims, goes to `superseded`.
+A cut that worked clears the song's record before replacing the file and writes the
+new one after, so a crash at any point leaves a song that needs cutting.
 
 **The filing job.** It is refused until the tape is cut and every song not skipped
 is settled. A song owned by recording id, or by cleaned title, artist and length
@@ -2231,14 +2241,37 @@ within 3 s, is not imported: a row with no length is a failure that names the ro
 not an assumption, and a row whose file is gone is a stale-row failure. A library
 that could not be asked is a failure too, never a miss. Filing works on a copy of
 the cut, not a hard link, since tags written through a link could change the cut
-that stands as proof, and the copies are dropped once each album is done. Each
+that stands as proof, and a copy stays until the library has proved its song. Each
 attempt uses a new directory, because beets asks about resuming a path it was
 interrupted on. That was not tried against real beets.
 
-The library decides the outcome. A song filed is one with a row and a file on disk
-and no copy left behind, whatever the exit status said, and with an exit of 1 and
-the song verifiably there it counts as filed. A crash on a relative path says what
-to do rather than leaving a traceback. A from-list song is numbered by its place
+The library decides the outcome. A song is `already` or `filed` only when beets' row
+names a path that exists, is under the library's root and is outside the tape's own
+directories, in the pre-check and the read-back alike, whatever beets exited with.
+beets writes its row against the path it was given before it moves the file, so a
+row on this tape's filing copies is an import that never finished. It is forgotten
+by its exact path, with `beet remove` and no `-d`, before each run and after each
+import, and the song is filed afresh. Any other row outside the library is a failure
+that names it, and nothing is imported over it.
+
+An exit of 1 with the song in the library is filed with a note carrying beets' last
+useful line, shown on the page: a retry would file it twice, and what stopped beets,
+such as a locked database, may have cost the album its art. An exit of 1 that leaves
+the file behind fails with what beets said, and the next step is to put that right
+and file again.
+
+An import can leave things out of a file it filed. A song merged into an album that
+has art gets none, since beets embeds only as it fetches, so it is embedded with
+`embedart -y -f`, whose `-f` takes one file where the plain form rewrites the album.
+A lookup-off import computes a gain for the row and never writes it, so a file with
+no gain gets `replaygain -f`, scoped to that file. Either failing is a note on a song
+that stays filed. The modes are restored after both, as ADR-056 requires. The
+document says which songs were handed to beets, so one found in the library after a
+restart is finished the same way, and a song the tape merely already owned is left
+alone.
+
+A crash on a relative path says what to do rather than leaving a traceback, and a
+crash on any other missing path names it. A from-list song is numbered by its place
 among its album's songs on this tape, and takes no date, which a list does not
 carry. One with no album fails rather than being given one. A second album row is
 said on the song's outcome, not refused. A boundary moved after a song is filed
