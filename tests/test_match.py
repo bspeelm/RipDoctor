@@ -581,6 +581,39 @@ def test_the_track_nearest_in_length_is_taken_when_a_release_repeats_a_title() -
     assert (got.choice.number, got.choice.disc) == (7, 2)
 
 
+def on_one_release(*tracks: tuple[str, float | None]) -> M.Edition:
+    made = tuple(
+        M.CatalogueTrack(title, at, 1, length)
+        for at, (title, length) in enumerate(tracks, 1)
+    )
+    return M.Edition("r", "g", "A Record", "A Band", "1990", "Official", made)
+
+
+@pytest.mark.parametrize(("first", "second"), [(198.0, 201.0), (198.0, 202.0)])
+def test_two_tracks_a_list_cannot_tell_apart_go_to_review(
+    first: float, second: float
+) -> None:
+    got = M.propose(
+        wanted("Intro"), [on_one_release(("Intro", first), ("Intro", second))]
+    )
+    assert got.status == M.REVIEW
+    assert "2 tracks" in got.reason
+
+
+def test_a_repeated_title_whose_lengths_separate_it_is_not_a_doubt() -> None:
+    got = M.propose(
+        wanted("Intro"), [on_one_release(("Intro", 215.0), ("Intro", 200.0))]
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.number == 2
+
+
+def test_a_near_title_with_the_length_does_not_count_as_a_repeat() -> None:
+    got = M.propose(wanted(), [on_one_release(("A Song", 200.0), ("A Song 2", 200.0))])
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.number == 1
+
+
 def test_what_to_ask_the_catalogue_for_drops_guests_then_tries_the_lead() -> None:
     assert M.search_artists("A Band") == ("A Band",)
     assert M.search_artists("A Band feat. A Guest") == ("A Band",)

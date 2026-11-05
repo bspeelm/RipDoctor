@@ -301,6 +301,7 @@ class _Fit:
     credited: bool
     album: int
     kinds: tuple[str, ...]
+    repeats: int
 
 
 def _fit(wanted: Wanted, edition: Edition) -> _Fit:
@@ -317,6 +318,10 @@ def _fit(wanted: Wanted, edition: Edition) -> _Fit:
         credited=agrees(wanted.artist, edition.artist),
         album=album,
         kinds=() if album == NAMED else (edition.primary, *edition.secondary),
+        repeats=sum(
+            _grade(wanted.title, t.title) == EXACT and _off(t, wanted.length) <= WITHIN
+            for t in edition.tracks
+        ),
     )
 
 
@@ -369,6 +374,11 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
         return (
             f"the title matches, but the nearest length is {c.release_title}'s, "
             f"off by {fit.off:.0f} s"
+        )
+    if fit.repeats > 1:
+        return (
+            f"{c.release_title} has {fit.repeats} tracks called {c.track_title!r} "
+            "of about this length - name the track"
         )
     return ""
 
