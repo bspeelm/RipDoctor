@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +12,11 @@ from ripdoctor.audio.runner import Runner
 from ripdoctor.core import filing as F
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import tagger as TG
-from ripdoctor.integrations.importer import Beets
+from ripdoctor.integrations.importer import Beets, ImportFailed
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
+from ripdoctor.store.safety import contains
 from ripdoctor.work.jobs import Job
 
 
@@ -159,6 +160,29 @@ class _Filing:
         self.unanswered.discard(song.number)
         self.job.finished += 1
 
+    def sited(self, rows: tuple[F.Row, ...]) -> tuple[F.Row, ...]:
+        """Whether each row is in the library. Rows carrying a tape's own paths are
+        an import that never finished, and nothing has reached the library."""
+        ours = T.dir_for(self.layout, self.tape.id)
+        return tuple(
+            replace(
+                r, home=contains(self.library, r.path) and not contains(ours, r.path)
+            )
+            for r in rows
+        )
+
+    def clear_leftovers(self) -> set[str]:
+        """Forget rows beets made for this tape's copies and never moved on, which
+        would otherwise read as owned. Their paths, and nothing else, are cleared."""
+        filing = T.filing_dir(self.layout, self.tape.id)
+        cleared = set()
+        query = [f"path:{filing}"]
+        for row in self.beets.library_rows(self.runner, self.library, query):
+            if contains(filing, row.path):
+                self.beets.forget_row(self.runner, self.library, row.path)
+                cleared.add(row.path)
+        return cleared
+
     def checked(self, run: F.Run) -> list[tuple[F.Track, tuple[F.Row, ...]]]:
         """The songs still to import, with the rows beside them before the import."""
         waiting = []
@@ -168,14 +192,14 @@ class _Filing:
             by_id, by_name = self.beets.owned(
                 self.runner, self.library, F.recording_of(song), F.lead(song.artist)
             )
-            said = F.precheck(song, by_id, by_name)
+            said = F.precheck(song, self.sited(by_id), self.sited(by_name))
             if said.action == F.FILE:
                 waiting.append((track, by_name))
             else:
                 self.tell(song, said.action, said.path, said.note)
         return waiting
 
-    def read_back(self, run: F.Run, song: TP.Song, before: tuple[F.Row, ...]) -> str:
+    def read_back(self, run: F.Run, song: TP.Song) -> tuple[F.Row, ...]:
         recording = F.recording_of(song)
         if recording:
             query = [f"mb_trackid:{recording}"]
@@ -183,8 +207,13 @@ class _Filing:
             query = [f"mb_albumid:{run.release}"]
         else:
             query = [f"artist:{F.lead(song.artist)}", f"album:{song.album}"]
-        rows = self.beets.library_rows(self.runner, self.library, query)
-        return F.arrived(song, rows, {r.path for r in before})
+        return self.sited(self.beets.library_rows(self.runner, self.library, query))
+
+    def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
+        """A song the library holds. Beets rewrites what it files at the writer's
+        umask, so the modes come back before the outcome is recorded. ADR-056."""
+        TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
+        self.tell(song, state, path, "; ".join(n for n in notes if n))
 
     def imported(
         self,
@@ -192,7 +221,9 @@ class _Filing:
         waiting: list[tuple[F.Track, tuple[F.Row, ...]]],
         directory: str,
     ) -> None:
-        """Copy, tag, import, and believe only what the library says afterward."""
+        """Copy, tag, import, and believe only what the library says afterward: a
+        song is filed by a row in the library and a file there, whatever beets
+        exited with, and any other row it left in this tape's copies is cleared."""
         count = len(self.tape.songs)
         where = T.fresh_filing(self.layout, self.tape.id, directory)
         copies = {}
@@ -218,19 +249,35 @@ class _Filing:
         self.job.step(run.album, "importing with beets")
         took = self.beets.file_tape_run(self.runner, str(where), run.release)
 
-        found = []
+        cleared, unclear = set(), ""
+        try:
+            cleared = self.clear_leftovers()
+        except ImportFailed as e:  # the next attempt clears them; say why not this one
+            unclear = str(e)
         for track, before in waiting:
             song = track.song
-            left = copies[song.number].exists()
-            path = "" if left else self.read_back(run, song, before)
-            found.append((song, left, path))
-        for parent in {Path(path).parent for _, _, path in found if path}:
-            TG.set_modes(parent, self.file_mode, self.dir_mode)
-        for song, left, path in found:
+            rows = self.read_back(run, song)
+            had = {r.path for r in before}
+            path, stray = F.arrived(song, rows, had), F.astray(song, rows, had)
+            copy = copies[song.number]
             if path:
-                self.tell(song, F.FILED, path, doubled)
-            elif left:
-                self.tell(song, F.FAILED, note=f"beets did not take it: {took.why()}")
+                self.complete(song, F.FILED, path, doubled, unclear)
+            elif copy.exists():
+                note = f"beets did not take it: {took.why()}"
+                if str(copy) in cleared:
+                    note += (
+                        " - the row it left was cleared and nothing of this song is "
+                        "in the library, so put that right and file again"
+                    )
+                self.tell(
+                    song, F.FAILED, note=" - ".join(filter(None, (note, unclear)))
+                )
+            elif stray:
+                note = (
+                    f"beets filed this at {stray}, outside the library at "
+                    f"{self.library} - move it in with beet move, then file again"
+                )
+                self.tell(song, F.FAILED, note=note)
             else:
                 self.tell(
                     song,
@@ -243,6 +290,7 @@ class _Filing:
         """One album, whose failure is about that album and stops no other."""
         self.unanswered = {t.song.number for t in run.tracks}
         try:
+            self.clear_leftovers()
             waiting = self.checked(run)
             if waiting:
                 self.imported(run, waiting, directory)
@@ -295,9 +343,14 @@ def file_songs(
     filing = _Filing(runner, beets, layout, tape, job, library, file_mode, dir_mode)
     for index, run in enumerate(F.runs(tape), 1):
         filing.run(run, f"{round(now)}-{index:03d}")
-    T.clear_filing(layout, tape_id)
-
     done = filing.tape
+    count = len(done.songs)
+    T.clear_copies(
+        layout,
+        tape_id,
+        {TP.cut_name(s, count) for s in done.songs if s.filing in F.FINISHED},
+    )
+
     failed = [TP.label(s) for s in done.songs if F.status(s) == F.FAILED]
     if failed:
         raise ValueError(

@@ -37,6 +37,10 @@ class Beet:
     `fails`, by release (`LIST` for lookup-off): stderr, rc 1 and the files left.
     `loses`: rc 0, files taken, no row. `keeps`: rc 0, files left, no row.
     `dies`: the files taken and the rows written, then the machine goes away.
+    `strands`: rows written against the copies, then the machine goes away.
+    `refuses`: rows written against the copies, the files left, stderr and rc 1.
+    `unmoved`: rows written against the copies, the files gone, rc 0.
+    `elsewhere`: rows and files written outside the library, rc 0.
     """
 
     LIST = "from-list"
@@ -51,6 +55,11 @@ class Beet:
         self.loses: set[str] = set()
         self.keeps: set[str] = set()
         self.dies: set[str] = set()
+        self.strands: set[str] = set()
+        self.refuses: dict[str, bytes] = {}
+        self.unmoved: set[str] = set()
+        self.elsewhere: set[str] = set()
+        self.remove_fails = False
         self.ls_fails = False
 
     def __getattr__(self, name: str) -> object:
@@ -87,7 +96,29 @@ class Beet:
             return self._ls(args)
         if "import" in args:
             return self._import(args)
+        if "remove" in args:
+            return self._remove(args)
         return answer
+
+    def _row(self, copy: Path, where: Path, key: str) -> dict[str, str]:
+        told = self.tags[str(copy)]
+        return {
+            "title": told[TG_TITLE],
+            "artist": told.get("ARTIST", "A Band"),
+            "albumartist": told.get("ALBUMARTIST", "A Band"),
+            "album": told.get("ALBUM", key),
+            "length": "0:05",
+            "path": str(where),
+            "mb_trackid": self.recordings.get(told[TG_TITLE], ""),
+            "mb_albumid": "" if key == self.LIST else key,
+        }
+
+    def _remove(self, args: tuple[str, ...]) -> Result:
+        if self.remove_fails:
+            return Result(args, 1, b"", b"database is locked\n")
+        wanted = args[-1].removeprefix("path:")
+        self.rows = [r for r in self.rows if r["path"] != wanted]
+        return Result(args, 0, b"", b"")
 
     def _ls(self, args: tuple[str, ...]) -> Result:
         if self.ls_fails:
@@ -112,7 +143,21 @@ class Beet:
             return Result(args, 1, b"", self.fails[key])
         if key in self.keeps:
             return Result(args, 0, b"Skipping.\n", b"")
-        into = self.library / key
+        if key in self.strands or key in self.refuses or key in self.unmoved:
+            for copy in sorted(where.iterdir()):
+                self.rows.append(self._row(copy, copy, key))
+            if key in self.strands:
+                raise Gone
+            if key in self.unmoved:
+                for copy in sorted(where.iterdir()):
+                    copy.unlink()
+                return Result(args, 0, b"", b"")
+            return Result(args, 1, b"", self.refuses[key])
+        into = (
+            self.library.parent / "outside" / key
+            if key in self.elsewhere
+            else self.library / key
+        )
         into.mkdir(parents=True, exist_ok=True)
         cover = into / "cover.jpg"
         cover.write_bytes(b"art")
@@ -123,19 +168,7 @@ class Beet:
             target.chmod(0o600)
             if key in self.loses:
                 continue
-            told = self.tags[str(copy)]
-            self.rows.append(
-                {
-                    "title": told[TG_TITLE],
-                    "artist": told.get("ARTIST", "A Band"),
-                    "albumartist": told.get("ALBUMARTIST", "A Band"),
-                    "album": told.get("ALBUM", key),
-                    "length": "0:05",
-                    "path": str(target),
-                    "mb_trackid": self.recordings.get(told[TG_TITLE], ""),
-                    "mb_albumid": "" if key == self.LIST else key,
-                }
-            )
+            self.rows.append(self._row(copy, target, key))
         if key in self.dies:
             raise Gone
         return Result(args, 0, b"", b"")
@@ -526,6 +559,209 @@ def test_a_bogus_release_says_what_beets_said_about_it_and_not_only_the_prompt()
     ).why()
     assert "No matching release found for 2 tracks." in why
     assert "check the release" in why
+
+
+# ------------------------------------------------------- rows that are not the library
+
+
+def killed_midway(service: Service, tape: str) -> None:
+    settings = service.settings
+    with pytest.raises(Gone):
+        TJ.file_songs(
+            beet_of(service),  # type: ignore[arg-type]
+            IMP.Beets(config=str(Path(service.state_dir) / IMP.OVERRIDE_FILE)),
+            service.layout,
+            tape,
+            a_job(),
+            2000.0,
+            library=settings.library,
+            file_mode=settings.file_mode,
+            dir_mode=settings.dir_mode,
+        )
+
+
+def removes_of(service: Service) -> list[tuple[str, ...]]:
+    return [c for c in beet_of(service).calls if c[0] == "beet" and "remove" in c]
+
+
+def test_an_import_killed_with_its_row_on_our_copy_is_filed_by_the_retry(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, "rel-1", "rel-1")
+    runner = beet_of(service)
+    runner.strands.add("rel-1")
+    killed_midway(service, tape)
+    held = [r["path"] for r in runner.rows]
+    assert len(held) == 2
+    assert all(f"/{T.FILING}/" in p for p in held)
+
+    runner.strands.clear()
+    runner.imports.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert [n for _, n in runner.imports] == [["01 One.flac", "02 Two.flac"]]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+    for song in songs(service, tape):
+        assert Path(song.path).is_file()
+        assert Path(song.path).is_relative_to(tmp_path / "lib")
+    assert not [r for r in runner.rows if f"/{T.FILING}/" in r["path"]]
+
+
+def test_clearing_our_row_is_by_its_exact_path_and_never_deletes(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    kept = runner.owns("Other", mb_trackid="rec-Other")
+    runner.strands.add("rel-1")
+    killed_midway(service, tape)
+    stranded = next(r["path"] for r in runner.rows if f"/{T.FILING}/" in r["path"])
+    runner.strands.clear()
+    file_it(app, tape, service)
+
+    override = str(Path(service.state_dir) / IMP.OVERRIDE_FILE)
+    assert removes_of(service) == [
+        ("beet", "--config", override, "remove", "-f", f"path:{stranded}")
+    ]
+    assert kept.is_file()
+    assert str(kept) in [r["path"] for r in runner.rows]
+
+
+def test_a_row_merely_beside_our_copies_is_not_cleared(service: Service) -> None:
+    """They come from another program, and this forgets what they name."""
+    app = build(service)
+    tape = pinned(app, service)
+    beside = str(T.filing_dir(service.layout, tape)) + "-kept/Other.flac"
+    beet_of(service).owns("Other", mb_trackid="rec-Other", file=beside)
+    file_it(app, tape, service)
+    assert removes_of(service) == []
+
+
+def test_a_from_list_song_s_row_on_our_copy_is_not_taken_for_owned_by_its_title(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    runner.strands.add(runner.LIST)
+    killed_midway(service, tape)
+    runner.strands.clear()
+    runner.imports.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert len(runner.imports) == 1
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+
+
+def test_a_row_outside_the_library_is_not_already_there_and_nothing_is_imported(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    outside = tmp_path / "outside" / "One.flac"
+    runner.owns("One", mb_trackid="rec-One", file=str(outside))
+    assert file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FAILED
+    assert str(outside) in one.filing_note
+    assert ["01 One.flac"] not in [n for _, n in runner.imports]
+    assert removes_of(service) == []
+    assert outside.is_file()
+
+
+def test_a_row_in_the_tape_s_own_directory_is_not_owned_and_not_ours_to_clear(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    service.settings = Settings(library=str(tmp_path), importer="beets")
+    runner = beet_of(service)
+    cut_of_it = directory(service, tape) / "01 One.flac"
+    runner.owns("One", mb_trackid="rec-One", file=str(cut_of_it))
+    assert file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.FAILED
+    assert removes_of(service) == []
+
+
+def test_rc_0_that_leaves_the_row_on_a_copy_now_gone_is_a_failure_and_clears_it(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.unmoved.add("rel-1")
+    assert file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FAILED
+    assert not [r for r in runner.rows if f"/{T.FILING}/" in r["path"]]
+
+
+def test_a_song_beets_filed_outside_the_library_is_a_failure_that_says_where(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    beet_of(service).elsewhere.add("rel-1")
+    assert file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FAILED
+    assert str(tmp_path / "outside" / "rel-1" / "01 One.flac") in one.filing_note
+    assert "outside the library" in one.filing_note
+
+
+def test_an_unwritable_target_says_what_to_do_and_the_retry_needs_no_clearing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.refuses["rel-1"] = b"PermissionError: [Errno 13] Permission denied: 'x'\n"
+    assert file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FAILED
+    assert "Permission denied" in one.filing_note
+    assert "file again" in one.filing_note
+    assert not [r for r in runner.rows if f"/{T.FILING}/" in r["path"]]
+
+    runner.refuses.clear()
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert (one.filing, one.filing_note) == (F.FILED, "")
+
+
+def test_a_row_that_cannot_be_cleared_yet_is_said_and_the_retry_clears_it(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.refuses["rel-1"] = b"error: the disk is unhappy\n"
+    runner.remove_fails = True
+    assert file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert "could not clear" in one.filing_note
+    assert "the disk is unhappy" in one.filing_note
+
+    runner.refuses.clear()
+    runner.remove_fails = False
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.FILED
+    assert not [r for r in runner.rows if f"/{T.FILING}/" in r["path"]]
+
+
+def test_a_copy_stays_until_its_own_song_is_verified(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service, "rel-1", "rel-2")
+    runner = beet_of(service)
+    runner.keeps.add("rel-1")
+    assert file_it(app, tape, service)["error"]
+    filing = T.filing_dir(service.layout, tape)
+    assert [p.name for p in filing.rglob("*.flac")] == ["01 One.flac"]
+
+    runner.keeps.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert not filing.exists()
 
 
 # ---------------------------------------------------------------- retry and restart

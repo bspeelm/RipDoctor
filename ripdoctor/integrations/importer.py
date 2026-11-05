@@ -551,6 +551,14 @@ class Beets:
         )
         return by_id, self.library_rows(runner, root, [f"artist:{artist}"])
 
+    def forget_row(self, runner: Runner, root: str, path: str) -> None:
+        """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
+        query = [f"path:{path}"]
+        result = runner.run(self._argv(["remove", "-f", *query]), timeout=600)
+        if not result.ok or self.library_rows(runner, root, query):
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not clear its row for {path}: {why}")
+
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]:

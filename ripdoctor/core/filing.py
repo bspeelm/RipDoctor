@@ -28,7 +28,8 @@ _SHOWN = {FAILED: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 @dataclass(frozen=True, slots=True)
 class Row:
-    """One library row. `present` is whether its file is on disk."""
+    """One library row. `present` is whether its file is on disk, and `home` whether
+    that path is under the library's root and outside the tape's own directories."""
 
     title: str
     artist: str
@@ -36,6 +37,7 @@ class Row:
     length: float | None
     path: str
     present: bool = True
+    home: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,11 +133,17 @@ def _same_artist(listed: str, row: str) -> bool:
     return bool(names(fold(listed), loosely=True) & names(fold(row), loosely=True))
 
 
-def _stale(row: Row) -> Verdict:
+def _unusable(row: Row) -> Verdict:
+    if not row.present:
+        return Verdict(
+            FAILED,
+            note=f"beets has a row for this song at {row.path}, and the file is not "
+            "there - clear the stale row, then file again",
+        )
     return Verdict(
         FAILED,
-        note=f"beets has a row for this song at {row.path}, and the file is not there "
-        "- clear the stale row, then file again",
+        note=f"beets has a row for this song at {row.path}, which is not in the "
+        "library - move it in with beet move, then file again, or skip this song",
     )
 
 
@@ -145,12 +153,13 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
 
     A recording id is enough. Without one a cleaned title also hits a live album,
     so the length must agree, and a row with no length to compare is said aloud.
+    Only a file that is there and in the library counts as owning it.
     """
     for row in by_id:
-        if row.present:
+        if row.present and row.home:
             return Verdict(ALREADY, row.path)
     if by_id:
-        return _stale(by_id[0])
+        return _unusable(by_id[0])
 
     titles = _titles(song)
     alike = [
@@ -164,10 +173,10 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
         if r.length is not None and abs(r.length - song.length) <= LENGTH_TOLERANCE
     ]
     for row in agreeing:
-        if row.present:
+        if row.present and row.home:
             return Verdict(ALREADY, row.path, "matched by title, artist and length")
     if agreeing:
-        return _stale(agreeing[0])
+        return _unusable(agreeing[0])
     for row in alike:
         if row.length is None:
             return Verdict(
@@ -185,22 +194,34 @@ def precheck(song: Song, by_id: Sequence[Row], by_name: Sequence[Row]) -> Verdic
     return Verdict(FILE)
 
 
-def arrived(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str:
-    """Where the song is now, or nothing: a row that was already there is not it,
-    and neither is a row whose file is missing."""
-    recording = recording_of(song)
-    titles = _titles(song)
+def _is_the_song(song: Song, row: Row) -> bool:
+    if recording_of(song):
+        return True
+    from_list = choice_of(song) is None
+    return _cleaned(row.title) in _titles(song) and (
+        not from_list or fold(row.album) == fold(song.album)
+    )
+
+
+def _row_of(
+    song: Song, rows: Sequence[Row], before: Collection[str], *, home: bool
+) -> str:
     for row in rows:
-        if not row.present or row.path in before:
-            continue
-        if recording:
-            return row.path
-        from_list = choice_of(song) is None
-        if _cleaned(row.title) in titles and (
-            not from_list or fold(row.album) == fold(song.album)
-        ):
+        fresh = row.present and row.path not in before
+        if fresh and row.home == home and _is_the_song(song, row):
             return row.path
     return ""
+
+
+def arrived(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str:
+    """Where the song is now, or nothing: a row that was already there is not it,
+    and neither is one whose file is missing or is not in the library."""
+    return _row_of(song, rows, before, home=True)
+
+
+def astray(song: Song, rows: Sequence[Row], before: Collection[str] = ()) -> str:
+    """Where an import put the song if that is not in the library, or nothing."""
+    return _row_of(song, rows, before, home=False)
 
 
 def second_row(run: Run, rows: Sequence[Row]) -> str:

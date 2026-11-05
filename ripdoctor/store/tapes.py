@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import time
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,22 +136,39 @@ def promote(part: Path, target: Path) -> None:
     os.replace(part, target)
 
 
-def fresh_filing(layout: Layout, tape: str, name: str) -> Path:
-    """An empty directory for one album run, and nothing left of any other.
+def filing_dir(layout: Layout, tape: str) -> Path:
+    return dir_for(layout, tape) / FILING
 
-    What beets did not take is a copy, so it was never the only one. The name is
-    new for each attempt, because beets offers to resume a path it was interrupted
-    on, and nothing here would answer that.
+
+def fresh_filing(layout: Layout, tape: str, name: str) -> Path:
+    """An empty directory for one album run.
+
+    The name is new for each attempt, because beets offers to resume a path it was
+    interrupted on, and nothing here would answer that.
     """
-    clear_filing(layout, tape)
-    where = dir_for(layout, tape) / FILING / name
-    where.mkdir(parents=True)
+    filing_dir(layout, tape).mkdir(exist_ok=True)
+    where, suffix = filing_dir(layout, tape) / name, 1
+    while where.exists():
+        suffix += 1
+        where = filing_dir(layout, tape) / f"{name}-{suffix}"
+    where.mkdir()
     return where
 
 
-def clear_filing(layout: Layout, tape: str) -> None:
-    # Only copies are here; one a filesystem will not give up costs a little room.
-    shutil.rmtree(dir_for(layout, tape) / FILING, ignore_errors=True)
+def clear_copies(layout: Layout, tape: str, names: Collection[str]) -> None:
+    """Drop the copies of these cuts from every attempt, and whatever that empties.
+
+    Asked only for songs the library has proved it holds. A failed song's copies
+    stay until it succeeds, which costs a little room and only until then.
+    """
+    filing = filing_dir(layout, tape)
+    for attempt in filing.iterdir() if filing.is_dir() else ():
+        for name in names:
+            (attempt / name).unlink(missing_ok=True)
+        if not any(attempt.iterdir()):
+            attempt.rmdir()
+    if filing.is_dir() and not any(filing.iterdir()):
+        filing.rmdir()
 
 
 def copy_cut(layout: Layout, tape: str, name: str, into: Path) -> Path:

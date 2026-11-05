@@ -232,3 +232,28 @@ def test_new_audio_takes_the_old_measurements_with_it(tmp_path: Path) -> None:
     assert T.take_audio(layout, tape.id).read_bytes() == b"fLaC"
     assert not (T.dir_for(layout, tape.id) / T.ENVELOPE).exists()
     assert not done.exists()
+
+
+def test_an_attempt_at_filing_never_reuses_a_directory(tmp_path: Path) -> None:
+    layout = Layout(tmp_path)
+    tape = T.create(layout, "Mix", 0.0)
+    first = T.fresh_filing(layout, tape.id, "attempt")
+    second = T.fresh_filing(layout, tape.id, "attempt")
+    assert first != second
+    assert first.is_dir()
+    assert second.is_dir()
+
+
+def test_clearing_copies_leaves_every_other_song_s(tmp_path: Path) -> None:
+    layout = Layout(tmp_path)
+    tape = T.create(layout, "Mix", 0.0)
+    for name in ("one", "two"):
+        where = T.fresh_filing(layout, tape.id, name)
+        (where / "01 One.flac").write_bytes(b"a")
+    (where / "02 Two.flac").write_bytes(b"b")
+    T.clear_copies(layout, tape.id, {"01 One.flac"})
+    assert [p.name for p in T.filing_dir(layout, tape.id).rglob("*.flac")] == [
+        "02 Two.flac"
+    ]
+    T.clear_copies(layout, tape.id, {"02 Two.flac"})
+    assert not T.filing_dir(layout, tape.id).exists()

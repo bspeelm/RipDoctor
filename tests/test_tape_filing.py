@@ -158,6 +158,16 @@ def test_a_row_whose_file_is_gone_is_stale_not_owned() -> None:
         assert "stale" in said.note
 
 
+def test_a_row_not_in_the_library_is_not_owned_though_its_file_is_there() -> None:
+    astray = a_row(home=False)
+    for said in (
+        F.precheck(a_song(1, "One"), [astray], []),
+        F.precheck(a_song(1, "One"), [], [astray]),
+    ):
+        assert said.action == F.FAILED
+        assert "not in the library" in said.note
+
+
 def test_one_present_row_among_stale_ones_is_owned() -> None:
     gone, here = a_row(present=False, path="/gone"), a_row(path="/here")
     assert F.precheck(a_song(1, "One"), [gone, here], []).path == "/here"
@@ -203,6 +213,15 @@ def test_a_pinned_song_arrives_by_its_recording_id_alone() -> None:
 def test_a_row_without_its_file_is_not_an_arrival() -> None:
     song = a_song(1, "One", proposal=from_a_release("r1", 1, "One"))
     assert F.arrived(song, [a_row(present=False)]) == ""
+
+
+def test_a_row_not_in_the_library_is_not_an_arrival_and_says_where_it_went() -> None:
+    song = a_song(1, "One", proposal=from_a_release("r1", 1, "One"))
+    row = a_row(home=False, path="/elsewhere/one.flac")
+    assert F.arrived(song, [row]) == ""
+    assert F.astray(song, [row]) == "/elsewhere/one.flac"
+    assert F.astray(song, [row], before={row.path}) == ""
+    assert F.astray(song, [a_row()]) == ""
 
 
 def test_a_release_with_no_recording_id_is_read_back_by_title() -> None:
