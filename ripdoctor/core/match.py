@@ -60,6 +60,7 @@ _EDITION = re.compile(
 _LIVE = re.compile(r"\blive\b", re.I)
 _LEAD = re.compile(r"\s*[,;&]\s*")
 _NAMES = re.compile(rf"\s*(?:[,;&]|\band\b|\b{_GUEST})\s*", re.I)
+_ANY_NAMES = re.compile(r"\s*(?:[,;&/()]|\band\b|\bfeat\b\.?|\bft\b\.?)\s*")
 _PROSE_LIST = re.compile(r"&|\band\b", re.I)
 _RELEASE_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
 
@@ -251,8 +252,10 @@ def _off(track: CatalogueTrack, length: float) -> float:
     return math.inf if track.length is None else abs(track.length - length)
 
 
-def _names(credit: str) -> set[str]:
-    return {name for name in _NAMES.split(credit) if name}
+def names(credit: str, *, loosely: bool = False) -> set[str]:
+    """The names in a credit. `loosely`, for folded text, also splits on what a
+    library's credit may use where a list's does not."""
+    return {name for name in (_ANY_NAMES if loosely else _NAMES).split(credit) if name}
 
 
 def agrees(listed: str, credited: str) -> bool:
@@ -263,8 +266,8 @@ def agrees(listed: str, credited: str) -> bool:
     ours, theirs = _exact(listed), _exact(credited)
     if theirs == VARIOUS:
         return False
-    names = _names(theirs)
-    return bool(names) and names in (_names(ours), _names(_lead(ours)))
+    said = names(theirs)
+    return bool(said) and said in (names(ours), names(_lead(ours)))
 
 
 def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:

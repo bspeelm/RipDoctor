@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ripdoctor.core.match import Choice, fold, search_album, search_artists
+from ripdoctor.core.match import Choice, fold, names, search_album, search_artists
 from ripdoctor.core.tape import (
     CUT,
     LENGTH_TOLERANCE,
@@ -25,7 +24,6 @@ ALREADY, FILED, FAILED = "already", "filed", "failed"
 FILE = "file"
 FINISHED = frozenset((ALREADY, FILED))
 _SHOWN = {FAILED: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
-_CREDITED = re.compile(r"\s*(?:[,;&/()]|\band\b|\bfeat\b\.?|\bft\b\.?)\s*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,8 +128,7 @@ def _titles(song: Song) -> set[str]:
 
 def _same_artist(listed: str, row: str) -> bool:
     """Any shared name: a list and a library credit one song's guests differently."""
-    ours, theirs = _CREDITED.split(fold(listed)), _CREDITED.split(fold(row))
-    return bool((set(ours) & set(theirs)) - {""})
+    return bool(names(fold(listed), loosely=True) & names(fold(row), loosely=True))
 
 
 def _stale(row: Row) -> Verdict:
