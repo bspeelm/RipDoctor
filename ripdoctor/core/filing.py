@@ -131,7 +131,7 @@ def _titles(song: Song) -> set[str]:
 def _same_artist(listed: str, row: str) -> bool:
     """Any shared name: a list and a library credit one song's guests differently."""
     ours, theirs = _CREDITED.split(fold(listed)), _CREDITED.split(fold(row))
-    return bool(set(ours) & set(theirs))
+    return bool((set(ours) & set(theirs)) - {""})
 
 
 def _stale(row: Row) -> Verdict:

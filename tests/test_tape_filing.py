@@ -135,6 +135,12 @@ def test_a_title_by_another_artist_is_not_owned() -> None:
     assert said.action == F.FILE
 
 
+def test_two_credits_that_each_end_in_a_bracket_are_not_the_same_artist() -> None:
+    row = a_row("One", artist="Someone Else (Live Band)")
+    said = F.precheck(a_song(1, "One", artist="A Band (Trio)"), [], [row])
+    assert said.action == F.FILE
+
+
 def test_a_title_match_with_no_length_to_check_is_flagged_not_assumed() -> None:
     said = F.precheck(a_song(1, "One"), [], [a_row("One", None)])
     assert said.action == F.FAILED
