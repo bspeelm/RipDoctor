@@ -862,6 +862,15 @@ def test_a_row_edited_between_identical_ones_leaves_each_of_them_its_own() -> No
     assert [s.skip for s in got] == [False, False, True]
 
 
+def test_a_row_changed_to_match_its_neighbours_leaves_them_their_places() -> None:
+    tape = TP.settle(identical_rows(3), 3, None)
+    between = TP.Song(2, "Different", "A Band", "A Record", 90.0)
+    tape = replace(tape, songs=(tape.songs[0], between, tape.songs[2]))
+    rows = fresh(TP.settle(identical_rows(3), 3, None))
+    got = TP.relist(tape, rows).songs
+    assert [s.settled_by for s in got] == ["", "", M.PERSON]
+
+
 def test_a_choice_outranks_a_row_that_only_kept_its_place() -> None:
     tape = TP.settle(identical_rows(2), 2, None)
     rows = (fresh(tape)[0], TP.Song(2, "Changed", "A Band", "A Record", 90.0))
