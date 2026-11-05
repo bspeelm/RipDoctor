@@ -230,9 +230,41 @@ def test_two_rows_nothing_can_tell_apart_are_ambiguous_and_both_named() -> None:
     assert "/l/x.flac" in found.why and "/l/y.flac" in found.why
 
 
-def test_a_song_owned_by_name_is_found_at_its_path_under_a_row_of_another_id() -> None:
+def test_a_recorded_path_is_not_believed_once_its_row_is_another_recording() -> None:
     song = filed_song(filing=F.ALREADY, path="/l/owned.flac")
-    assert P.resolve(song, [held("/l/owned.flac", "rec-Else")]).path == "/l/owned.flac"
+    assert P.resolve(song, [held("/l/owned.flac", "rec-Else")]).state == P.MISSING
+
+
+def test_a_recorded_path_is_found_first_when_its_row_is_still_that_recording() -> None:
+    song = filed_song(path="/l/old.flac")
+    rows = [held("/l/a.flac", "rec-One", "rel"), held("/l/old.flac", "rec-One", "x")]
+    assert P.resolve(song, rows).path == "/l/old.flac"
+
+
+def test_a_recorded_path_with_no_file_falls_through_to_the_row_with_the_id() -> None:
+    rows = [
+        held("/l/old.flac", "rec-One", present=False),
+        held("/l/new.flac", "rec-One"),
+    ]
+    assert P.resolve(filed_song(), rows).path == "/l/new.flac"
+
+
+def test_a_song_found_already_owned_is_found_again_on_the_album_that_holds_it() -> None:
+    song = listed_song(filing=F.ALREADY, path="/l/hits.flac")
+    row = held("/l/hits.flac", album="Greatest Hits")
+    assert P.resolve(song, [row]).path == "/l/hits.flac"
+
+
+def test_a_song_owned_elsewhere_follows_its_row_by_name_and_length() -> None:
+    song = listed_song(filing=F.ALREADY, path="/l/gone.flac")
+    row = held("/l/moved.flac", album="Greatest Hits")
+    assert P.resolve(song, [row]).path == "/l/moved.flac"
+
+
+def test_a_row_that_only_shares_a_name_is_named_as_not_proved() -> None:
+    found = P.resolve(listed_song(), [held("/l/x.flac", album="A Record", length=9.0)])
+    assert found.state == P.MISSING
+    assert "/l/x.flac" in found.why and "no row is proved" in found.why
 
 
 def listed_song(**kw: object) -> TP.Song:

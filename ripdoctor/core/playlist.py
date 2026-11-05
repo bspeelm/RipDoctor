@@ -167,37 +167,31 @@ def to_ask(tape: TP.Tape) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _matching(song: TP.Song, rows: Sequence[F.Row]) -> list[F.Row]:
+def _still_the_song(song: TP.Song, row: F.Row) -> bool:
     recording = F.recording_of(song)
-    if recording:
-        same = [r for r in rows if r.recording == recording]
-        return same or [r for r in rows if r.path == song.path]
-    if song.filing not in F.FINISHED:
-        return []
-    choice = F.choice_of(song)
-    albums = {fold(song.album), *([fold(choice.release_title)] if choice else [])}
-    return [
-        r
-        for r in rows
-        if F.alike(song, r) and fold(r.album) in albums and F.same_length(song, r)
-    ]
+    if recording and row.recording:
+        return row.recording == recording
+    return F.alike(song, row)
 
 
-def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
-    """The one file that is this song, or why not. More than one candidate narrows
-    to the chosen release, then to the path filing proved, and is never guessed."""
-    if song.skip:
-        return Entry(song.number, state=TP.SKIPPED, why="skipped")
-    same = _matching(song, rows)
+def _at_recorded_path(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+    """Where filing proved it is, while the file is there and its row is the song."""
+    if song.filing in F.FINISHED:
+        for row in rows:
+            if row.path == song.path and row.present and _still_the_song(song, row):
+                return Entry(song.number, row.path)
+    return None
+
+
+def _one_of(song: TP.Song, same: Sequence[F.Row]) -> Entry | None:
+    """More than one candidate narrows to the chosen release, then to the path filing
+    proved, and is never guessed."""
+    if not same:
+        return None
     here = [r for r in same if r.present]
     if not here:
-        if same:
-            why = f"beets has a row at {same[0].path}, and the file is not there"
-            return Entry(song.number, state=MISSING, why=why)
-        unfiled = _not_filed(song)
-        return unfiled or Entry(
-            song.number, state=MISSING, why="the library has no row for this song"
-        )
+        why = f"beets has a row at {same[0].path}, and the file is not there"
+        return Entry(song.number, state=MISSING, why=why)
     choice = F.choice_of(song)
     release = [r for r in here if choice and r.release == choice.release]
     for pool in (here, release, [r for r in here if r.path == song.path]):
@@ -206,6 +200,49 @@ def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
     named = ", ".join(r.path for r in here)
     why = f"{len(here)} rows could be this song: {named}"
     return Entry(song.number, state=AMBIGUOUS, why=why)
+
+
+def _by_recording(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+    recording = F.recording_of(song)
+    return _one_of(song, [r for r in rows if recording and r.recording == recording])
+
+
+def _by_name(song: TP.Song, rows: Sequence[F.Row]) -> Entry | None:
+    """For a song with no id, once filing finished: a name alone is any song of that
+    name. A song filed here is on its own album too; one found already owned is on
+    whatever album held it."""
+    if F.recording_of(song) or song.filing not in F.FINISHED:
+        return None
+    same = [r for r in rows if F.alike(song, r) and F.same_length(song, r)]
+    if song.filing == F.FILED:
+        choice = F.choice_of(song)
+        albums = {fold(song.album), *([fold(choice.release_title)] if choice else [])}
+        same = [r for r in same if fold(r.album) in albums]
+    return _one_of(song, same)
+
+
+def _no_answer(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
+    unfiled = _not_filed(song)
+    if unfiled:
+        return unfiled
+    named = ", ".join(r.path for r in rows if F.alike(song, r))
+    why = (
+        f"no row is proved to be this song: {named} only share its name"
+        if named
+        else "the library has no row for this song"
+    )
+    return Entry(song.number, state=MISSING, why=why)
+
+
+def resolve(song: TP.Song, rows: Sequence[F.Row]) -> Entry:
+    """The one file that is this song, or why not."""
+    if song.skip:
+        return Entry(song.number, state=TP.SKIPPED, why="skipped")
+    for step in (_at_recorded_path, _by_recording, _by_name):
+        found = step(song, rows)
+        if found:
+            return found
+    return _no_answer(song, rows)
 
 
 def with_paths(tape: TP.Tape, entries: Iterable[Entry]) -> TP.Tape:

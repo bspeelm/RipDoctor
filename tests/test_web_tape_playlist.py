@@ -134,6 +134,10 @@ def filed(app, service: Service) -> str:  # type: ignore[no-untyped-def]
     return tape
 
 
+def songs_of(service: Service, tape: str) -> tuple[TP.Song, ...]:
+    return T.read(service.layout, tape).songs
+
+
 def path_of_song(service: Service, tape: str, number: int) -> str:
     return T.read(service.layout, tape).songs[number - 1].path
 
@@ -397,6 +401,24 @@ def test_a_song_with_no_id_is_found_by_title_artist_and_album(
     rebuild(app, tape, service)
     assert lines_of(service, tape)[2] == "../Elsewhere/1.flac"
     assert runner.asked[-1][-1] == "artist:A Band"
+
+
+def test_a_song_owned_on_another_album_keeps_its_line_through_a_rebuild(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    where = runner.owns("One", album="Greatest Hits")
+    assert not file_it(app, tape, service)["error"]
+    assert songs_of(service, tape)[0].filing == F.ALREADY
+    before = lines_of(service, tape)
+    assert not rebuild(app, tape, service)["error"]
+    assert lines_of(service, tape) == before
+    assert path_of_song(service, tape, 1) == str(where)
+    assert state_of(service, tape).left_out == ()
+    assert archive(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
 
 
 def test_a_beets_failure_is_unknown_never_missing_and_leaves_the_file_alone(
