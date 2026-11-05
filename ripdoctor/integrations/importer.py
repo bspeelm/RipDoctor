@@ -79,25 +79,12 @@ class TapeRun:
     output: str
     root: str = ""
 
-    def _relative_row(self, missing: str) -> bool:
-        """beets resolves a relative row against where it runs, so the path it names
-        is usually absolute: the row was relative if that tail is under the root."""
-        where = Path(missing)
-        if not where.is_absolute():
-            return True
-        here = Path.cwd()
-        return (
-            bool(self.root)
-            and where.is_relative_to(here)
-            and (Path(self.root) / where.relative_to(here)).is_file()
-        )
-
     def why(self) -> str:
         """The one thing to tell a person, in place of a traceback in a log."""
         lines = [line.strip() for line in self.output.splitlines() if line.strip()]
         said = lines[-1] if lines else f"beets exited {self.returncode}, saying nothing"
         missing = _MISSING.search(self.output)
-        if missing and self._relative_row(missing[2]):
+        if missing and _relative_row(self.root, missing[2]):
             return (
                 "beets crashed with FileNotFoundError, which merging into an album "
                 "does when a library row holds a relative path. Nothing was lost. "
@@ -608,8 +595,8 @@ class Beets:
             return None, 0
         return paths[0].parent, len(paths)
 
-    def _paths(self, runner: Runner, query: list[str], root: str = "") -> list[Path]:
-        """Every file beets registered, absolute, in its own order. ADR-059."""
+    def _said_paths(self, runner: Runner, query: list[str]) -> list[str]:
+        """Every file beets registered, as it says them, in its own order."""
         try:
             result = runner.run(
                 self._argv(["ls", "-f", _SEP.join(("$album", "$path")), *query]),
@@ -618,10 +605,14 @@ class Beets:
         except ToolMissing:
             return []
         return [
-            _rooted(root, line.split(_SEP)[-1])
+            line.split(_SEP)[-1]
             for line in _plain(result.text).splitlines()
             if _SEP in line
         ]
+
+    def _paths(self, runner: Runner, query: list[str], root: str = "") -> list[Path]:
+        """Every file beets registered, absolute. ADR-059."""
+        return [_rooted(root, said) for said in self._said_paths(runner, query)]
 
     def stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -675,6 +666,11 @@ class Beets:
         """How many registered files are missing, of how many registered."""
         paths = self._paths(runner, [], library)
         return sum(1 for p in paths if not p.exists()), len(paths)
+
+    def relative_rows(self, runner: Runner, library: str = "") -> tuple[int, int]:
+        """How many rows hold a relative path, of how many registered."""
+        said = self._said_paths(runner, [])
+        return sum(1 for path in said if _relative_row(library, path)), len(said)
 
     def clear_stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -763,6 +759,21 @@ def _rooted(root: str, said: str) -> Path:
     """What beets said, as something that can be stat'd. ADR-059."""
     where = Path(said)
     return where if where.is_absolute() or not root else Path(root) / where
+
+
+def _relative_row(root: str, said: str) -> bool:
+    """beets may resolve a relative row against where it runs, so the path it names
+    can be absolute and missing: the row was relative if that tail is under the root."""
+    where = Path(said)
+    if not where.is_absolute():
+        return True
+    here = Path.cwd()
+    return (
+        bool(root)
+        and where.is_relative_to(here)
+        and not where.exists()
+        and (Path(root) / where.relative_to(here)).is_file()
+    )
 
 
 def _query(album: str, mbid: str) -> list[str]:
