@@ -16,6 +16,7 @@ from typing import Any
 WITHIN = 3.0
 CLOSE_RATIO = 0.8
 OFFICIAL = "official"
+VARIOUS = "various artists"
 
 MATCHED, REVIEW, NONE, FAILED = "matched", "review", "none", "failed"
 CATALOGUE, PERSON = "catalogue", "person"
@@ -58,7 +59,8 @@ _EDITION = re.compile(
 )
 _LIVE = re.compile(r"\blive\b", re.I)
 _LEAD = re.compile(r"\s*[,;&]\s*")
-_NAMES = re.compile(r"\s*(?:[,;&/]|\band\b|\bx\b)\s*", re.I)
+_NAMES = re.compile(rf"\s*(?:[,;&]|\band\b|\b{_GUEST})\s*", re.I)
+_PROSE_LIST = re.compile(r"&|\band\b", re.I)
 _RELEASE_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
 
 
@@ -182,9 +184,19 @@ def search_album(album: str) -> str:
     return _bare(album.translate(_VARIANTS))
 
 
+def _lead(listed: str) -> str:
+    """The credit before any guests and, in a comma list, its first name.
+
+    An ampersand makes the commas part of one name, as in a band called
+    "Earth, Wind & Fire", whose first word is not who is credited.
+    """
+    credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", listed)).strip()
+    return credit if _PROSE_LIST.search(credit) else credit.split(",")[0].strip()
+
+
 def lookup_key(wanted: Wanted) -> tuple[str, str]:
     """Songs with the same key are answered by the same requests."""
-    return fold(search_artists(wanted.artist)[-1]), fold(search_album(wanted.album))
+    return fold(_lead(wanted.artist)), fold(search_album(wanted.album))
 
 
 def release_id(text: str) -> str:
@@ -233,12 +245,20 @@ def _off(track: CatalogueTrack, length: float) -> float:
     return math.inf if track.length is None else abs(track.length - length)
 
 
-def _agrees(listed: str, credited: str) -> bool:
-    credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", listed))
-    ours, theirs = fold(credit), fold(credited)
-    if theirs == "various artists" or ours == theirs:
-        return True
-    return bool(set(_NAMES.split(ours)) & set(_NAMES.split(theirs)))
+def _names(credit: str) -> set[str]:
+    return {name for name in _NAMES.split(credit) if name}
+
+
+def agrees(listed: str, credited: str) -> bool:
+    """The same names, or the list's lead credit alone being who is credited.
+
+    A shared word is no agreement, and Various Artists names nobody.
+    """
+    ours, theirs = _exact(listed), _exact(credited)
+    if theirs == VARIOUS:
+        return False
+    names = _names(theirs)
+    return bool(names) and names in (_names(ours), _names(_lead(ours)))
 
 
 def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:
@@ -294,7 +314,7 @@ def _fit(wanted: Wanted, edition: Edition) -> _Fit:
         off=math.inf if track is None else _off(track, wanted.length),
         official=fold(edition.status) == OFFICIAL,
         live=live and not asked_live,
-        credited=_agrees(wanted.artist, edition.artist),
+        credited=agrees(wanted.artist, edition.artist),
         album=album,
         kinds=() if album == NAMED else (edition.primary, *edition.secondary),
     )

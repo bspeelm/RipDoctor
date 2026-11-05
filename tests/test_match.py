@@ -352,9 +352,58 @@ def test_an_artist_nobody_listed_goes_to_review_and_names_them() -> None:
     assert "Somebody Else" in got.reason
 
 
-def test_a_compilation_does_not_have_to_credit_the_lists_artist() -> None:
-    got = M.propose(wanted(), [edition(artist="Various Artists")])
+@pytest.mark.parametrize("listed", ["A Band", "Various Artists", "various artists"])
+def test_various_artists_never_agrees_with_anyone(listed: str) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist="Various Artists")])
+    assert got.status == M.REVIEW
+    assert "Various Artists" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "credited"),
+    [
+        ("Earth, Wind & Fire", "Earth"),
+        ("Mr. X", "Planet X"),
+        ("X", "Malcolm X"),
+        ("Bob and the Hats", "The Hats"),
+        ("A Band", "A Band & Another Band"),
+        ("Another Band, A Band", "A Band"),
+        ("A Band", ""),
+        ("", "A Band"),
+        ("", ""),
+        (",", ";"),
+        ("AC/DC", "AC"),
+        ("Foo", "Foo Fighters"),
+        ("Ma\u00df", "Mass"),
+    ],
+)
+def test_a_shared_word_or_an_empty_name_is_no_agreement(
+    listed: str, credited: str
+) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist=credited)])
+    assert got.status == M.REVIEW
+    assert "credits" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("listed", "credited"),
+    [
+        ("A BAND", "a band"),
+        ("Hall and Oates", "Hall & Oates"),
+        ("A Band (feat. A Guest)", "A Band"),
+        ("A Band feat. A Guest", "A Band feat. A Guest"),
+        ("A Band, A Guest", "A Band feat. A Guest"),
+        ("AC/DC", "AC/DC"),
+    ],
+)
+def test_the_same_names_or_a_listed_lead_agree(listed: str, credited: str) -> None:
+    got = M.propose(wanted(artist=listed), [edition(artist=credited)])
     assert got.status == M.MATCHED
+
+
+def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> None:
+    whole = M.lookup_key(wanted(artist="Earth, Wind & Fire"))
+    assert whole != M.lookup_key(wanted(artist="Earth"))
 
 
 @pytest.mark.parametrize(
