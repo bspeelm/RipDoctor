@@ -1,0 +1,135 @@
+"""One directory per tape under `work/tapes/`, out of sight of the record picker.
+
+A tape's upload and job are keyed by `key_of`. Slugs never start with an
+underscore, so a key cannot meet a record's scratch file or job. ADR-063.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+
+from ripdoctor.audio import astats
+from ripdoctor.audio.ffprobe import sample_rate
+from ripdoctor.audio.runner import Runner
+from ripdoctor.core.envelope import (
+    Envelope,
+    decode,
+    encode,
+    window_count_is_plausible,
+)
+from ripdoctor.core.tape import Tape, named, tape_id
+from ripdoctor.store import incoming as IN
+from ripdoctor.store.files import Layout, write_json
+from ripdoctor.store.safety import under
+
+WHERE = "tapes"
+DOCUMENT = "tape.json"
+AUDIO = "tape.flac"
+ENVELOPE = "tape.env"
+
+# Nearly seven hours of audio has to fit, at a pace no faster than a slow disk.
+LONG_RUN = 3 * 3600.0
+
+
+@dataclass(frozen=True, slots=True)
+class Listing:
+    tapes: tuple[Tape, ...]
+    unreadable: tuple[str, ...]
+
+
+def key_of(tape: str) -> str:
+    return f"_tape-{tape}"
+
+
+def dir_for(layout: Layout, tape: str) -> Path:
+    return under(layout.work, WHERE, tape)
+
+
+def audio_file(layout: Layout, tape: str) -> Path:
+    return dir_for(layout, tape) / AUDIO
+
+
+def _document(layout: Layout, tape: str) -> Path:
+    return dir_for(layout, tape) / DOCUMENT
+
+
+def _envelope(layout: Layout, tape: str) -> Path:
+    return dir_for(layout, tape) / ENVELOPE
+
+
+def save(layout: Layout, tape: Tape) -> None:
+    write_json(_document(layout, tape.id), tape.to_dict())
+
+
+def read(layout: Layout, tape: str) -> Tape:
+    """Raises FileNotFoundError for a tape that is not there."""
+    return Tape.from_dict(json.loads(_document(layout, tape).read_text()))
+
+
+def create(layout: Layout, name: str, now: float) -> Tape:
+    """Two names can sanitise alike, so the directory is claimed, not assumed."""
+    base = tape_id(name)
+    where = under(layout.work, WHERE)
+    where.mkdir(parents=True, exist_ok=True)
+    wanted, suffix = base, 1
+    while True:
+        try:
+            dir_for(layout, wanted).mkdir()
+        except FileExistsError:
+            suffix += 1
+            wanted = f"{base}-{suffix}"
+            continue
+        tape = named(wanted, name, now)
+        save(layout, tape)
+        return tape
+
+
+def listed(layout: Layout) -> Listing:
+    where = layout.work / WHERE
+    tapes: list[Tape] = []
+    unreadable: list[str] = []
+    for found in sorted(where.iterdir()) if where.is_dir() else ():
+        if not found.is_dir():
+            continue
+        try:
+            tapes.append(read(layout, found.name))
+        except (OSError, ValueError, KeyError, TypeError):
+            unreadable.append(found.name)
+    return Listing(tuple(tapes), tuple(unreadable))
+
+
+def take_audio(layout: Layout, tape: str) -> Path:
+    """Move a verified encode into the tape, with no stale measurements behind it."""
+    target = audio_file(layout, tape)
+    _envelope(layout, tape).unlink(missing_ok=True)
+    os.replace(IN.done_file(layout, key_of(tape)), target)
+    return target
+
+
+def measure(runner: Runner, layout: Layout, tape: str, duration: float) -> Envelope:
+    """The full lane on the recording's real length, measured once per recording."""
+    source = audio_file(layout, tape)
+    target = _envelope(layout, tape)
+    if not target.is_file():
+        rate = sample_rate(runner, str(source))
+        lanes = astats.lanes(runner, str(source), rate=rate, timeout=LONG_RUN)
+        count = len(lanes.full)
+        if not window_count_is_plausible(count, duration, lanes.window):
+            raise RuntimeError(
+                f"{count} windows for {duration:.1f}s - measuring gave an envelope "
+                "that would not line up with the audio; try processing again"
+            )
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_bytes(encode(lanes))
+        tmp.replace(target)
+    return decode(target.read_bytes()).full.rescaled(duration)
+
+
+def remove(layout: Layout, tape: str) -> None:
+    """Only ever asked for by a person. The upload goes with it."""
+    shutil.rmtree(dir_for(layout, tape))
+    IN.clear(layout, key_of(tape))
