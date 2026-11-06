@@ -1578,3 +1578,13 @@ def test_no_dialog_sets_a_floor_wider_than_a_phone() -> None:
         assert "min-width" not in rule, rule
     phone = css[css.index("@media (max-width:48rem)") :]
     assert ".dlg-search{grid-template-columns:minmax(0,1fr)}" in phone
+
+
+def test_ci_has_to_parse_the_pages_scripts_and_make_check_tries_to() -> None:
+    """Passing with no node is fine as long as one job cannot. Issue #55."""
+    root = STATIC.parent.parent.parent
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "python scripts/check_js.py --require" in ci
+    assert "--require=needs_node" in ci
+    make = (root / "Makefile").read_text()
+    assert re.search(r"^check:.*\bjs\b", make, re.M)

@@ -5,13 +5,14 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help venv lint types test cov budgets check wheel release clean
+.PHONY: help venv lint types js test cov budgets check wheel release clean
 
 help:
-	@echo "make check     lint, types, tests, budgets - the gate"
+	@echo "make check     lint, types, scripts, tests, budgets - the gate"
 	@echo "make venv      create .venv and install the package editable"
 	@echo "make lint      ruff format --check and ruff check"
 	@echo "make types     mypy (strict on core/)"
+	@echo "make js        parse the page's scripts, where node is installed"
 	@echo "make test      pytest"
 	@echo "make cov       pytest with coverage, gated on core/ only"
 	@echo "make budgets   size budgets; failing one means retire, not raise"
@@ -30,6 +31,11 @@ lint:
 types:
 	$(PY) -m mypy
 
+# Steps aside with a line saying so where there is no node. CI's with-tools job
+# runs it with --require, so somewhere it always has to have run.
+js:
+	$(PY) scripts/check_js.py
+
 test:
 	$(PY) -m pytest
 
@@ -42,7 +48,7 @@ cov:
 budgets:
 	$(PY) scripts/budgets.py
 
-check: lint types test budgets
+check: lint types js test budgets
 
 wheel:
 	$(PY) -m pip install --quiet build
