@@ -1437,6 +1437,8 @@ function notHeld(released = []) {
 
 async function fpRun(rel) {
   $("#fp-err").textContent = "";
+  // The server holds what is saved, so a boundary moved a moment ago would be fitted over.
+  if (S.dirty && !(await save())) return;
   $("#fp-report").hidden = true;
   $("#fp-results").innerHTML = "<p class=\"dim\">fitting…</p>";
   try {

@@ -1511,3 +1511,11 @@ def test_a_track_placed_by_length_does_not_stop_cut() -> None:
     js = (STATIC / "app.js").read_text()
     cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "placedByLength" not in cut and "length" not in cut.replace(".length", "")
+
+
+def test_a_first_pass_saves_first_so_it_cannot_fit_over_an_unsaved_boundary() -> None:
+    """The server holds what the saved plan marks, and a boundary moved since was not
+    in it: Run again took it, and reloading the page took the proof."""
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert run.index("if (S.dirty && !(await save())) return;") < run.index("runJob(")
