@@ -72,10 +72,8 @@ function markDirty(d = true) {
 
 // ------------------------------------------------------------ envelope I/O
 
-async function fetchEnvelope(slug, side, v, expectWindows) {
-  // ?v= is the capture's fingerprint: same audio -> cache hit, re-rip -> miss
-  const r = await fetch(`/api/env/${slug}/${side}${v ? `?v=${v}` : ""}`,
-                        { credentials: "same-origin" });
+async function fetchEnvelope(url, expectWindows) {
+  const r = await fetch(url, { credentials: "same-origin" });
   if (!r.ok) throw new Error("envelope not ready");
   const buf = await r.arrayBuffer();
   const dv = new DataView(buf);
@@ -382,7 +380,9 @@ async function openSide(letter) {
   if (!S.sideData[letter]) {
     const v = S.meta.ready[letter]?.v || "";
     const [env, gaps] = await Promise.all([
-      fetchEnvelope(S.slug, letter, v, S.meta.ready[letter]?.windows),
+      // ?v= is the capture's fingerprint: same audio -> cache hit, re-rip -> miss
+      fetchEnvelope(`/api/env/${S.slug}/${letter}${v ? `?v=${v}` : ""}`,
+                    S.meta.ready[letter]?.windows),
       api(`/api/gaps/${S.slug}/${letter}`),
     ]);
     S.sideData[letter] = { ...env, gaps, duration: S.meta.ready[letter].duration };
@@ -563,15 +563,17 @@ function updateReadout() {
     (t.forced ? "  — forced, placed from the catalogue; check it by ear"
      : d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
 
-  // the nudge2 question: is this cut still inside a real silence?
-  const gs = S.sideData[S.side].gaps.band.gaps;
+  sayGap($("#ro-gap"), v, S.sideData[S.side].gaps.band.gaps);
+}
+
+// the nudge2 question: is this cut still inside a real silence?
+function sayGap(ro, v, gs) {
   let inside = null, nearest = null, nd = 1e9;
   for (const g of gs) {
     if (g.lo <= v && v <= g.hi) { inside = g; break; }
     const dd = Math.min(Math.abs(v - g.lo), Math.abs(v - g.hi));
     if (dd < nd) { nd = dd; nearest = g; }
   }
-  const ro = $("#ro-gap");
   if (inside) {
     ro.className = "good";
     ro.textContent = `in gap ${inside.lo.toFixed(2)}–${inside.hi.toFixed(2)} (margin ${Math.min(v - inside.lo, inside.hi - v).toFixed(2)}s)`;

@@ -16,8 +16,21 @@ export const fmt = (t) => {
   return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 };
 
+const gridLabel = (t) => {
+  if (t < 3600) return fmt(t);
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s.toFixed(0).padStart(2, "0")}`;
+};
+
 export class Editor {
-  constructor(canvas, onChange, onSelect, onSeek) {
+  // `opts` is for a timeline far longer than a side, where a marker is easy to grab
+  // by accident and hard to place. With none of it this is a side's editor.
+  //   onDrop(track, edge, landed)  a moved marker was let go, or the drag was lost
+  //   dragFrom     pixels a pointer must travel before a press on a marker is a move
+  //   coarse       seconds per pixel beyond which no marker can be grabbed
+  //   touchReach   how near a finger has to land to grab a marker
+  //   titles       name each stretch, and leave out a tag that would overlap another
+  constructor(canvas, onChange, onSelect, onSeek, opts = {}) {
     this.cv = canvas;
     this.ctx = canvas.getContext("2d");
     this.onChange = onChange;         // (track, edge, seconds) -> void
@@ -29,6 +42,8 @@ export class Editor {
     this.playhead = 0;
     this.sel = null;                  // {track, edge}
     this.drag = null;
+    this.opts = opts;
+    this.frozen = false;              // drawn and played, but no marker can be moved
     this._bind();
   }
 
@@ -69,6 +84,11 @@ export class Editor {
     };
   }
 
+  /** Too many seconds to a pixel to place a boundary by hand. */
+  get tooCoarse() {
+    return (this.t1 - this.t0) / this.cv.clientWidth > (this.opts.coarse ?? Infinity);
+  }
+
   xOf(t) { return (t - this.t0) / (this.t1 - this.t0) * this.cv.clientWidth; }
   tOf(x) { return this.t0 + x / this.cv.clientWidth * (this.t1 - this.t0); }
   dbY(db, lane) {
@@ -95,6 +115,7 @@ export class Editor {
     if (!this.side) return;
 
     this._gaps(c, L);
+    this._flagged(c, L);
     this._wave(c, L.wave);
     this._band(c, L.band);
     this._grid(c, L);
@@ -116,6 +137,18 @@ export class Editor {
       const x0 = this.xOf(gp.lo), x1 = this.xOf(gp.hi);
       if (x1 < 0 || x0 > L.w) continue;
       c.fillRect(x0, 0, Math.max(1, x1 - x0), L.over.top);
+    }
+  }
+
+  // A stretch that asks for attention, in the lanes and on the overview, so it can
+  // be found on a timeline too long to read at a glance.
+  _flagged(c, L) {
+    c.fillStyle = "rgba(232,196,104,0.14)";
+    for (const t of this.tracks) {
+      if (!t.flag) continue;
+      const x0 = this.xOf(t.start), x1 = this.xOf(t.end);
+      if (x1 < 0 || x0 > L.w) continue;
+      c.fillRect(x0, 0, Math.max(2, x1 - x0), L.over.top);
     }
   }
 
@@ -166,13 +199,13 @@ export class Editor {
 
   _grid(c, L) {
     const span = this.t1 - this.t0;
-    const step = span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
+    const step = span > 14400 ? 3600 : span > 7200 ? 1800 : span > 3600 ? 600 : span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
     c.strokeStyle = "#20242b"; c.fillStyle = "#5a626c";
     c.font = "10px ui-monospace,monospace"; c.lineWidth = 1;
     for (let t = Math.ceil(this.t0 / step) * step; t < this.t1; t += step) {
       const x = Math.round(this.xOf(t)) + 0.5;
       c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-      c.fillText(fmt(t), x + 3, L.over.top - 4);
+      c.fillText(gridLabel(t), x + 3, L.over.top - 4);
     }
   }
 
@@ -192,6 +225,7 @@ export class Editor {
   }
 
   _markers(c, L) {
+    let clear = -Infinity;            // where the last tag drawn ends, when it matters
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const x = this.xOf(t[edge]);
@@ -201,15 +235,35 @@ export class Editor {
         c.lineWidth = on ? 2.5 : 1.4;
         c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
         c.fillStyle = c.strokeStyle;
-        const label = `${t.number}${edge === "start" ? "▶" : "■"}`;
+        const label = `${t.number}${edge === "start" ? "▶" : "■"}${t.mark ?? ""}`;
         c.font = on ? "bold 11px ui-monospace,monospace" : "11px ui-monospace,monospace";
         const tw = c.measureText(label).width;
         const lx = edge === "start" ? x + 3 : x - tw - 3;
+        if (this.opts.titles && lx - 2 < clear && !on) continue;
+        clear = lx + tw + 2;
         c.fillRect(lx - 2, L.wave.top + 2, tw + 4, 14);
         c.fillStyle = "#0b0d10";
         c.fillText(label, lx, L.wave.top + 13);
+        if (this.opts.titles && edge === "start") this._title(c, L, t, x);
       }
     }
+    if (this.tooCoarse && this.side) {
+      c.fillStyle = "#8b9199"; c.font = "11px ui-sans-serif,system-ui";
+      const say = "zoom in to move a boundary";
+      c.fillText(say, L.w - c.measureText(say).width - 6, L.wave.top + 30);
+    }
+  }
+
+  // Under its tag, and only as much as fits in the stretch it names.
+  _title(c, L, t, x) {
+    const room = this.xOf(t.end) - x - 8;
+    if (room < 40 || !t.title) return;
+    c.font = "11px ui-sans-serif,system-ui";
+    let text = t.title;
+    while (text.length > 1 && c.measureText(text).width > room) text = text.slice(0, -1);
+    if (text !== t.title) text = `${text.slice(0, -1)}…`;
+    c.fillStyle = "#e6e8ea";
+    c.fillText(text, x + 3, L.wave.top + 30);
   }
 
   _playhead(c, L) {
@@ -232,6 +286,8 @@ export class Editor {
     }
     c.stroke();
     const d = this.side.duration;
+    c.fillStyle = "#e8c468";
+    for (const t of this.tracks) if (t.flag) c.fillRect(t.start / d * w, lane.top, 2, lane.h);
     const x0 = this.t0 / d * w, x1 = this.t1 / d * w;
     c.strokeStyle = "#5aa9e6"; c.lineWidth = 1;
     c.strokeRect(x0 + 0.5, lane.top + 0.5, Math.max(2, x1 - x0), lane.h - 1);
@@ -241,14 +297,14 @@ export class Editor {
 
   // ---------------------------------------------------------- interaction
 
-  hit(x, y) {
+  hit(x, y, reach = HIT_PX) {
     const L = this.layout();
-    if (y >= L.over.top) return null;
+    if (y >= L.over.top || this.frozen || this.tooCoarse) return null;
     let best = null;
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const d = Math.abs(this.xOf(t[edge]) - x);
-        if (d <= HIT_PX && (!best || d < best.d)) best = { track: t.number, edge, d };
+        if (d <= reach && (!best || d < best.d)) best = { track: t.number, edge, d };
       }
     }
     return best;
@@ -303,11 +359,12 @@ export class Editor {
         this.drag = { mode: "overview" };
         return;
       }
-      const h = this.hit(x, y);
+      const touch = e.pointerType === "touch" && this.opts.touchReach;
+      const h = touch ? this.hit(x, y, touch) : this.hit(x, y);
       if (h) {
         this.sel = { track: h.track, edge: h.edge };
         this.onSelect?.(h.track, h.edge);
-        this.drag = { mode: "marker", ...h, moved: false };
+        this.drag = { mode: "marker", ...h, x, moved: false };
       } else {
         this.drag = { mode: "pan", x, t0: this.t0, moved: false };
       }
@@ -324,6 +381,7 @@ export class Editor {
       if (this.drag.mode === "overview") {
         this.centerOn(x / this.cv.clientWidth * this.side.duration);
       } else if (this.drag.mode === "marker") {
+        if (!this.drag.moved && Math.abs(x - this.drag.x) < (this.opts.dragFrom ?? 0)) return;
         this.drag.moved = true;
         this.onChange(this.drag.track, this.drag.edge, this.tOf(x));
       } else {
@@ -346,10 +404,16 @@ export class Editor {
         this.onSeek?.(this.playhead);
         this.render();
       }
+      const was = this.drag;
       this.drag = null;
+      if (was?.mode === "marker" && was.moved) this.opts.onDrop?.(was.track, was.edge, true);
     };
     cv.addEventListener("pointerup", up);
-    cv.addEventListener("pointercancel", () => { this.drag = null; });
+    cv.addEventListener("pointercancel", () => {
+      const was = this.drag;
+      this.drag = null;
+      if (was?.mode === "marker" && was.moved) this.opts.onDrop?.(was.track, was.edge, false);
+    });
     window.addEventListener("resize", () => this.render());
   }
 }
