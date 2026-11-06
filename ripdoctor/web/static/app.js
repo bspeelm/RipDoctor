@@ -175,6 +175,7 @@ function clearAlbum(message) {
   $("#ro-time").textContent = "—";
   $("#ro-track").textContent = "";
   $("#ro-gap").textContent = ""; $("#ro-gap").className = "";
+  if (ed) showCutTools();
   // per-album, and loadRipSides only runs from openAlbum - so without this it
   // keeps listing captures for a record that is no longer loaded
   $("#ripsides").hidden = true;
@@ -585,6 +586,44 @@ function renderTracks() {
     tb.appendChild(tr);
   }
   showSideMeta();
+  showCutTools();
+}
+
+// ------------------------------------------------------------------ toolbar
+//
+// The buttons and the keys are two ways to one set of actions.
+
+const selectedTrack = () => (ed.sel ? trackByNum(ed.sel.track) ?? null : null);
+
+function playOrPause() {
+  const t = selectedTrack();
+  player.toggle(player.playing ? null : (t ? t[ed.sel.edge] - 3 : ed.playhead));
+}
+
+function auditionSelected() {
+  const t = selectedTrack();
+  if (t) player.audition(t[ed.sel.edge]);
+}
+
+function nudgeSelected(step) {
+  const t = selectedTrack();
+  if (!t) return;
+  if (ed.sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
+  else t.end = Math.max(t.end + step, t.start + 0.2);
+  t.forced = false;
+  markDirty(); ed.render(); updateReadout(); renderTracks();
+}
+
+function zoomToSelected() {
+  const t = selectedTrack();
+  if (t) ed.fitRange(t.start, t.end);
+}
+
+function showCutTools() {
+  const none = !selectedTrack();
+  for (const id of ["#cut-minus", "#cut-plus", "#cut-audition", "#cut-zoom-track"]) $(id).disabled = none;
+  for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side"]) $(id).disabled = !ed.side;
+  $("#cut-play").querySelector("span").textContent = player.playing ? "Pause" : "Play";
 }
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -4269,6 +4308,15 @@ function wire() {
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
   new ResizeObserver(() => ed.render()).observe($("#cv"));
+  for (const type of ["play", "pause", "ended"]) player.el.addEventListener(type, showCutTools);
+  $("#cut-minus").onclick = (e) => nudgeSelected(e.shiftKey ? -0.5 : -0.05);
+  $("#cut-plus").onclick = (e) => nudgeSelected(e.shiftKey ? 0.5 : 0.05);
+  $("#cut-play").onclick = playOrPause;
+  $("#cut-audition").onclick = auditionSelected;
+  $("#cut-split").onclick = splitAtPlayhead;
+  $("#cut-zoom-track").onclick = zoomToSelected;
+  $("#cut-zoom-side").onclick = () => ed.fit();
+  showCutTools();
   wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();
@@ -4530,25 +4578,21 @@ function wire() {
     // First-pass dialog had focus
     if (document.querySelector("dialog[open]")) return;
     if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }
-    const sel = ed.sel, t = sel && trackByNum(sel.track);
+    const t = selectedTrack();
     if (e.code === "Space") {
       e.preventDefault();
-      player.toggle(player.playing ? null : (t ? t[sel.edge] - 3 : ed.playhead));
+      playOrPause();
     } else if (e.key === "a" || e.key === "A") {
-      if (t) { e.preventDefault(); player.audition(t[sel.edge]); }
+      if (t) { e.preventDefault(); auditionSelected(); }
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
       e.preventDefault();
-      const step = (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1);
-      if (sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
-      else t.end = Math.max(t.end + step, t.start + 0.2);
-      t.forced = false;
-      markDirty(); ed.render(); updateReadout(); renderTracks();
+      nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
     } else if (e.key === "s" || e.key === "S") {
       e.preventDefault(); splitAtPlayhead();
     } else if (e.key === "f" || e.key === "F" || e.key === "0") {
       e.preventDefault(); ed.fit();
     } else if (e.key === "z" || e.key === "Z") {
-      if (t) { e.preventDefault(); ed.fitRange(t.start, t.end); }
+      if (t) { e.preventDefault(); zoomToSelected(); }
     } else if (e.key === "?") {
       e.preventDefault(); $("#helpdlg").showModal();
     } else if (e.key === "Escape") { player.stop(); }

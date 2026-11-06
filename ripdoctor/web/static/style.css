@@ -234,7 +234,7 @@ button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font
 #tp-ro-len{color:var(--dim)}
 #tp-ro-gap.bad{color:var(--warn)}
 #tp-ro-gap.good{color:var(--start)}
-#tp-tools{display:flex;flex-wrap:wrap;gap:.3rem .35rem;align-items:center}
+#tp-tools,#cut-tools{display:flex;flex-wrap:wrap;gap:.3rem .35rem;align-items:center;flex:none}
 .tool-group{display:flex;flex-wrap:wrap;gap:2px;padding:2px;border-radius:7px;
   background:var(--panel);border:1px solid var(--line)}
 .tool-group button{display:flex;align-items:center;gap:.25rem;padding:.2rem .35rem;background:none;

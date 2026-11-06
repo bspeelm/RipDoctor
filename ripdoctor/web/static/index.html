@@ -515,6 +515,24 @@
         <button id="helpbtn" class="ghost tiny" title="keyboard shortcuts">?</button>
       </div>
 
+      <div id="cut-tools">
+        <div class="tool-group">
+          <button type="button" id="cut-minus" title="move the selected marker back 0.05 s (shift for 0.5 s)"><span>&minus;</span><kbd>&larr;</kbd></button>
+          <button type="button" id="cut-plus" title="move the selected marker on 0.05 s (shift for 0.5 s)"><span>+</span><kbd>&rarr;</kbd></button>
+        </div>
+        <div class="tool-group">
+          <button type="button" id="cut-play" title="play or pause, from 3 s before the selected marker or else from the playhead"><span>Play</span><kbd>Space</kbd></button>
+          <button type="button" id="cut-audition" title="across the selected marker, with a tick landing exactly on it"><span>Audition</span><kbd>A</kbd></button>
+        </div>
+        <div class="tool-group">
+          <button type="button" id="cut-split" title="split the track under the playhead, on the gap's edges if it is inside a silence"><span>Split</span><kbd>S</kbd></button>
+        </div>
+        <div class="tool-group">
+          <button type="button" id="cut-zoom-track" title="zoom to the selected track"><span>Track</span><kbd>Z</kbd></button>
+          <button type="button" id="cut-zoom-side" title="zoom to the whole side"><span>Side</span><kbd>F</kbd></button>
+        </div>
+      </div>
+
       <div id="cut-msg"><span id="status"></span></div>
 
       <div id="cut-scroll">

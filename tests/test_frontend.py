@@ -1183,3 +1183,30 @@ def test_the_waveform_stays_in_view_while_the_tables_scroll() -> None:
     assert "height:clamp(" in canvas and "flex:1" not in canvas
     js = (STATIC / "app.js").read_text()
     assert 'new ResizeObserver(() => ed.render()).observe($("#cv"))' in js
+
+
+def test_the_record_s_toolbar_names_the_key_each_button_answers_to() -> None:
+    page = cut_markup()
+    for button, key in (
+        ("cut-minus", "&larr;"),
+        ("cut-plus", "&rarr;"),
+        ("cut-play", "Space"),
+        ("cut-audition", "A"),
+        ("cut-split", "S"),
+        ("cut-zoom-track", "Z"),
+        ("cut-zoom-side", "F"),
+    ):
+        found = re.search(rf'id="{button}"[^>]*>.*?<kbd>(.*?)</kbd>', page)
+        assert found and found.group(1) == key, button
+
+
+def test_the_keys_and_the_toolbar_do_one_thing_each() -> None:
+    js = (STATIC / "app.js").read_text()
+    for action in ("playOrPause();", "auditionSelected();", "nudgeSelected(("):
+        assert action in js.split('addEventListener("keydown"', 1)[1]
+    assert '$("#cut-audition").onclick = auditionSelected' in js
+    assert '$("#cut-play").onclick = playOrPause' in js
+    assert '$("#cut-split").onclick = splitAtPlayhead' in js
+    assert "player.audition(" in re.search(  # type: ignore[union-attr]
+        r"function auditionSelected\(.*?\n\}", js, re.S
+    ).group(0)
