@@ -67,21 +67,25 @@ header .tabs,header strong{flex:none}
 /* Cut: the rail beside one column, in the same proportions as a tape's page. */
 #cutview{flex:1;min-height:0;display:grid;font-size:14px;
   grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
+/* Everything down to the status line stays in view, so a boundary is judged with the
+   waveform on screen however long the table below it runs. */
 #cut-main{min-width:0;min-height:0;display:flex;flex-direction:column;gap:.5rem;
-  padding:.65rem 1rem .75rem}
+  padding:.65rem 1rem .75rem;overflow-y:auto}
 #cut-top{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;flex:none}
-#cut-top > div:first-child{display:flex;align-items:baseline;flex-wrap:wrap;gap:.1rem .75rem;min-width:0}
+#cut-top > div:first-child{flex:1 1 20rem;display:flex;align-items:baseline;flex-wrap:wrap;
+  gap:.1rem .75rem;min-width:0}
 #cut-what{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em;overflow-wrap:anywhere}
 #sp-meta{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
 #sides{padding:2px;gap:2px;border-radius:7px;background:var(--panel);border:1px solid var(--line)}
 #sides:empty{display:none}
 #sides button{border:0;padding:.2rem .8rem;color:var(--fg)}
 #sides button.on{color:#0b0d10}
-#cut-scroll{flex:1;min-height:0;overflow-y:auto}
+#cut-wave{flex:none;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0f1114}
+#cut-scroll{flex:1 1 auto;min-height:11rem;overflow-y:auto}
 #cut-msg{flex:none;min-height:1.4em;font-size:13px}
 #cut-msg #status{display:block;white-space:normal;color:#b9bec5;font-size:13px}
 
-#cv{display:block;width:100%;flex:1;min-height:0;cursor:crosshair;touch-action:none}
+#cv{display:block;width:100%;height:clamp(13rem,30vh,26rem);cursor:crosshair;touch-action:none}
 
 #readout,#tp-readout{display:flex;align-items:center;gap:1rem;padding:.35rem .75rem;flex:none;
   border-top:1px solid var(--line);border-bottom:1px solid var(--line);
@@ -89,6 +93,9 @@ header .tabs,header strong{flex:none}
 #ro-time,#tp-ro-time{color:var(--accent);font-weight:600;min-width:7rem}
 #ro-gap.bad,#tp-ro-gap.bad{color:var(--warn)}
 #ro-gap.good,#tp-ro-gap.good{color:var(--start)}
+#readout{gap:0 1.1rem;padding:0;white-space:nowrap;font-size:12.5px}
+#readout > *{flex:none}
+#readout > #ro-track{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hint{margin:0;color:var(--ghost);font-size:11px;line-height:1.45;max-width:44rem}
 kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 .25rem}
 

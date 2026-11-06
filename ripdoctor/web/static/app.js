@@ -4268,6 +4268,7 @@ function wire() {
     (t) => { if (player.playing) player.seek(t); });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
+  new ResizeObserver(() => ed.render()).observe($("#cv"));
   wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();

@@ -1169,3 +1169,17 @@ def test_every_page_keeps_the_status_line_and_the_console() -> None:
     assert '$("#tp-head").before($("#status"))' in place
     assert '$("#app").append($("#logwrap"))' in place
     assert "placeShared(mode);" in js
+
+
+def test_the_waveform_stays_in_view_while_the_tables_scroll() -> None:
+    page = cut_markup()
+    assert page.index('id="cv"') < page.index('id="cut-scroll"')
+    assert page.index('id="status"') < page.index('id="cut-scroll"')
+    assert page.index('id="cut-scroll"') < page.index('id="tracks"')
+    css = (STATIC / "style.css").read_text()
+    scroller = re.search(r"#cut-scroll\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "overflow-y:auto" in scroller
+    canvas = re.search(r"#cv\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "height:clamp(" in canvas and "flex:1" not in canvas
+    js = (STATIC / "app.js").read_text()
+    assert 'new ResizeObserver(() => ed.render()).observe($("#cv"))' in js
