@@ -233,6 +233,15 @@ def test_nothing_about_recording_reads_the_history() -> None:
     assert "ripTimer = setInterval(tick, 500);" in js
 
 
+def test_a_replaced_punch_reports_what_the_replacing_said() -> None:
+    """It answers at once, so waiting on a job found the locate before it, and the line
+    read `was NaN, now NaN` and said the old take was kept at undefined."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function punchApply\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "postJSON(`/api/punch/${punchSlug()}/apply`" in body
+    assert "runJob" not in body
+
+
 def test_the_capture_controls_invent_no_rate_or_depth() -> None:
     """A busy device cannot be asked what it accepts, and busy is the ordinary
     case: a capture is running. A hardcoded fallback then offers a list the

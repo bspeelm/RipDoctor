@@ -4433,10 +4433,10 @@ async function punchApply() {
   $("#punch-err").textContent = "";
   $("#punch-apply").disabled = true;
   try {
-    const r = await runJob(punchSlug(), `/api/punch/${punchSlug()}/apply`,
-                           { number: t.number, start: a, end: b }, "replacing");
+    const r = await postJSON(`/api/punch/${punchSlug()}/apply`,
+                             { number: t.number, start: a, end: b });
     $("#punch-done").textContent =
-      `replaced ${r.number}. ${r.title} — was ${fmt(r.was_seconds)}, now ${fmt(r.now_seconds)}`
+      `replaced ${t.number}. ${t.title} — was ${fmt(r.was_seconds)}, now ${fmt(r.now_seconds)}`
       + (r.art_carried ? ", art carried" : ", NO ART on the old file")
       + `   ·   old take kept at ${r.backup}`;
     if (punchAudio) punchPlay();
