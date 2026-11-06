@@ -542,6 +542,18 @@ function showSideMeta() {
 function tracks() { return S.bySide[S.side] || []; }
 function trackByNum(n) { return tracks().find((t) => t.number === n); }
 
+// Absent, the fit settled it, or the catalogue if the track is forced. ADR-064.
+const BOUNDARY_WORDS = { hand: ["Set by you", "good"], ear: ["Checked by ear", "good"] };
+function trackBoundary(t) {
+  return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : ["Fitted to gap", "good"]);
+}
+
+// A boundary moved is the person's, and nothing later moves it.
+function setByHand(t) {
+  t.forced = false;
+  t.settled = "hand";
+}
+
 function renderTracks() {
   const tb = $("#tracks tbody"); tb.innerHTML = "";
   for (const t of tracks()) {
@@ -577,7 +589,7 @@ function renderTracks() {
       if (Math.abs(d) > 10) dr.className = "drift big";
     } else dr.textContent = "—";
     tr.appendChild(dr);
-    const bnd = statusCell(t.forced ? ["From catalogue · check", "warn"] : ["Not flagged", "mute"]);
+    const bnd = statusCell(trackBoundary(t));
     bnd.classList.add("c-bnd-cell");
     if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
     tr.appendChild(bnd);
@@ -618,7 +630,7 @@ function nudgeSelected(step) {
   if (!t) return;
   if (ed.sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
   else t.end = Math.max(t.end + step, t.start + 0.2);
-  t.forced = false;
+  setByHand(t);
   markDirty(); ed.render(); updateReadout(); renderTracks();
 }
 
@@ -711,9 +723,9 @@ function splitAtPlayhead() {
   const newNum = t.number + 1;
   for (const x of Object.values(S.bySide).flat()) if (x.number >= newNum) x.number += 1;
 
-  list.push({ number: newNum, title: "Untitled", start: round2(nextStart), end: t.end });
+  list.push({ number: newNum, title: "Untitled", start: round2(nextStart), end: t.end, settled: "hand" });
   t.end = round2(prevEnd);
-  t.forced = false;
+  setByHand(t);
   list.sort((a, b) => a.start - b.start);
   markDirty(); renderTracks(); ed.setTracks(list);
   select(newNum, "start");
@@ -1168,8 +1180,8 @@ let fpReleases = [];
 function openFirstPass() {
   const existing = Object.values(S.bySide).flat().length;
   if (existing && !confirm(
-      `This replaces the plan for all ${S.meta.sides.length} sides — ${existing} tracks, `
-      + `including any boundaries you have already corrected. Continue?`)) return;
+      `This fits all ${S.meta.sides.length} sides again — ${existing} tracks. `
+      + `Boundaries you set or checked stay where they are. Continue?`)) return;
   const g = guessFromSlug(S.slug);
   $("#fp-artist").value = S.meta.artist || g.artist;
   $("#fp-album").value = S.meta.album || g.album;
@@ -1242,9 +1254,10 @@ async function fpRun(rel) {
     S.sideData = {};
     await openAlbum(S.slug);
     const forced = (r.forced || []).join(", ");
+    const kept = r.kept ? `, ${counted(r.kept, "track", "tracks")} you settled left where ${r.kept === 1 ? "it was" : "they were"}` : "";
     status(forced
-      ? `first pass applied — side ${forced} placed from the catalogue alone, check it by ear`
-      : "first pass applied — read the delta column, then check by ear");
+      ? `first pass applied${kept} — side ${forced} placed from the catalogue alone, check it by ear`
+      : `first pass applied${kept} — read the delta column, then check by ear`);
   } catch (e) {
     // keep the release list up so another one can be tried straight away
     renderReleases();
@@ -4308,7 +4321,7 @@ function wire() {
       t = Math.max(0, Math.min(d, t));
       if (edge === "start") tr.start = Math.min(t, tr.end - 0.2);
       else tr.end = Math.max(t, tr.start + 0.2);
-      tr.forced = false;
+      setByHand(tr);
       markDirty(); ed.render(); updateReadout(); renderTracks();
     },
     (num, edge) => { ed.sel = num == null ? null : { track: num, edge }; renderTracks(); updateReadout(); },
@@ -4575,7 +4588,7 @@ function wire() {
     const list = tracks();
     const at = ed.playhead;
     const num = 1 + Math.max(0, ...Object.values(S.bySide).flat().map((t) => t.number));
-    list.push({ number: num, title: "Untitled", start: at, end: Math.min(at + 60, S.sideData[S.side].duration) });
+    list.push({ number: num, title: "Untitled", start: at, end: Math.min(at + 60, S.sideData[S.side].duration), settled: "hand" });
     list.sort((a, b) => a.start - b.start);
     markDirty(); renderTracks(); ed.setTracks(list);
   };

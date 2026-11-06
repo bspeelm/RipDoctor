@@ -1215,8 +1215,10 @@ def test_the_keys_and_the_toolbar_do_one_thing_each() -> None:
 def test_a_track_placed_from_the_catalogue_is_marked_on_its_row() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert '["From catalogue · check", "warn"]' in body
+    assert "trackBoundary(t)" in body
     assert "zero by" in body, "the delta on such a row says nothing, and says so"
+    word = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '["From catalogue · check", "warn"]' in word
 
 
 def test_the_album_panel_holds_the_finished_tracks_beside_the_table() -> None:
@@ -1247,3 +1249,30 @@ def test_the_record_s_page_fits_a_phone_the_way_a_tape_s_does() -> None:
         'railOpens($("#cut-rail"), $("#cut-rail-bar"))'
         in (STATIC / "app.js").read_text()
     )
+
+
+def test_the_boundary_column_says_who_settled_a_track() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "Not flagged" not in js
+    assert 'hand: ["Set by you", "good"], ear: ["Checked by ear", "good"]' in js
+    assert '["Fitted to gap", "good"]' in js
+
+
+def test_every_way_of_moving_a_boundary_marks_it_set_by_the_person() -> None:
+    js = (STATIC / "app.js").read_text()
+    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.forced = false" in helper and 't.settled = "hand"' in helper
+    for function in ("nudgeSelected", "splitAtPlayhead"):
+        body = re.search(rf"function {function}\(.*?\n\}}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert "setByHand(t)" in body, function
+    drag = js[js.index('ed = new Editor($("#cv")') :]
+    assert "setByHand(tr)" in drag[: drag.index("player = new Player")]
+    assert "t.forced = false" not in js.replace(helper, "")
+    assert "tr.forced = false" not in js
+
+
+def test_the_first_pass_no_longer_warns_it_replaces_what_a_person_corrected() -> None:
+    js = (STATIC / "app.js").read_text()
+    asked = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "already corrected" not in asked
+    assert "Boundaries you set or checked stay where they are" in asked
