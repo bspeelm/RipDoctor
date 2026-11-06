@@ -14,6 +14,7 @@ import pytest
 
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.plan import Plan
+from ripdoctor.core.xcorr import Transform
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations.importer import _SEP as I_SEP
 from ripdoctor.store import cache as C
@@ -1257,6 +1258,68 @@ def test_checked_on_a_row_from_an_earlier_capture_is_a_way_out(tmp_path: Path) -
     assert track_in(service, 1).settled == "ear"
     assert track_in(service, 1).placed == ""
     assert cut(service).status == 202
+
+
+# Everything in these six-second sides still lands inside one.
+MOVE = Transform(offset=0.25, scale=0.9)
+
+
+def align_with_an_offset(service: Service, monkeypatch) -> dict:  # type: ignore[no-untyped-def,type-arg]
+    from ripdoctor.web.routes import records as R
+
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True, exist_ok=True)
+    for letter in ("a", "b"):
+        (archived / f"side-{letter}.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    monkeypatch.setattr(R, "fit_side", lambda *a, **k: (MOVE, (), 0.01))
+    body = post(build(service), "/api/align/album", service).json()
+    assert not body["error"], body["error"]
+    return body["result"]  # type: ignore[no-any-return]
+
+
+def test_a_save_on_a_re_rip_does_not_close_the_way_out_through_align(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Align refused any side already stamped, so one press of Save, or of Cut or First
+    pass which save for themselves, left the refusal offering what would then refuse."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    before = track_in(service, 3)
+    page_saves(service)
+
+    result = align_with_an_offset(service, monkeypatch)
+    side = next(x for x in result["aligned"] if x["side"] == "b")
+    assert side["moved"] == 3
+    assert side["tracks"][1]["start"] == round(MOVE.apply(before.start), 2)
+    assert "placed" not in side["tracks"][1], "it is on this capture now"
+
+
+def test_align_moves_only_the_rows_still_on_the_old_capture(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A boundary a person set is never moved, and this one was set on the new audio."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    set_end = track_in(service, 2).end - 0.5
+    start_of_3 = track_in(service, 3).start
+    page_saves(service, {2: set_end})
+
+    result = align_with_an_offset(service, monkeypatch)
+    side = next(x for x in result["aligned"] if x["side"] == "b")
+    two, three, _four = side["tracks"]
+    assert (two["end"], two["settled"]) == (set_end, "hand")
+    assert two["start"] == track_in(service, 2).start
+    assert three["start"] == round(MOVE.apply(start_of_3), 2)
+    assert side["moved"] == 2
+
+
+def test_a_side_with_nothing_left_on_the_old_capture_still_has_nothing_to_carry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    result = align_with_an_offset(service, monkeypatch)
+    assert {x["side"] for x in result["problems"]} == {"a", "b"}
+    assert "nothing to carry" in result["problems"][0]["why"]
 
 
 def test_saving_on_the_same_audio_leaves_every_mark_alone(tmp_path: Path) -> None:

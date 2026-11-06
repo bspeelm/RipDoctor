@@ -4776,7 +4776,7 @@ function wire() {
         S.bySide[a.side] = a.tracks.map((t) => ({ ...t }));
         logline(`side ${a.side}: offset ${a.offset > 0 ? "+" : ""}${a.offset}s, `
           + `drift ${a.drift_ms_per_min} ms/min, worst check ${a.check_miss}s `
-          + `— ${a.tracks.length} boundaries moved`);
+          + `— ${a.moved} of ${a.tracks.length} tracks moved`);
       }
       for (const p of r.problems) logline(`side ${p.side}: ${p.why}`);
       // the audio genuinely changed, so nobody has listened to these yet
@@ -4784,9 +4784,9 @@ function wire() {
       renderTracks();
       ed.setTracks(tracks());
       updateReadout();
-      const n = r.aligned.reduce((a, x) => a + x.tracks.length, 0);
+      const n = r.aligned.reduce((a, x) => a + x.moved, 0);
       status(r.aligned.length
-        ? `aligned ${n} boundaries across ${r.aligned.length} side(s) — listen, then Save`
+        ? `aligned ${n} tracks across ${r.aligned.length} side(s) — listen, then Save`
         : "nothing could be aligned — see the log", !r.aligned.length);
     } catch (e) {
       status(`align failed: ${e.message}`, true); logline(e.message, true);

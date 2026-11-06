@@ -2722,9 +2722,15 @@ disk, so a time unchanged from the plan it replaces is marked `placed: earlier`,
 `settled`, and is named in the reply. A time that differs was set on what is there now,
 and is the person's. The page never says which capture a plan is on; the server does.
 
-**Aligning** carries times from the archived capture onto the new one, so it refuses a
-side already stamped with the new one. Such times would be moved by a transform that was
-never about them, a person's included, and running it twice used to do exactly that.
+**Aligning** carries times from the archived capture onto the new one, so what it moves is
+what is still on the old one: a whole side not yet saved over, or the rows still marked
+`earlier` on one that has been. A time already on the new capture would be moved by a
+transform that was never about it, a person's included, so those rows stay put, and a side
+with nothing left to carry is refused.
+
+A track keeps what is true of it through the move: `forced` and `placed: length` say what its
+place rests on, and a transform does not change that. A row marked `earlier` no longer knows
+what it first rested on, and comes across as plainly `Fitted`.
 
 ### The refusal
 
