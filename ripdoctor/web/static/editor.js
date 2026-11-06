@@ -561,6 +561,10 @@ export class Editor {
       this.drag = null;
       if (was?.mode === "marker" && was.moved) this.onDrop?.(was.track, was.edge, false);
     });
+    // A short touch drag is a tap to the browser, which then sends a click to wherever
+    // that spot is by now. Selecting a song scrolls the page, so that was another song's
+    // row. Everything here is pointer events, and nothing on the canvas needs the click.
+    cv.addEventListener("touchend", (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     window.addEventListener("resize", () => this.render());
   }
 }

@@ -904,6 +904,14 @@ def test_a_press_off_any_marker_chooses_its_song_and_arms_no_edge() -> None:
     assert 'onSong: (num) => tapeSelect(num, "start", false)' in page
 
 
+def test_a_short_touch_drag_sends_no_click_to_a_row_scrolled_under_it() -> None:
+    """#50, reproduced with touch events: a 10 px drag on song 60's marker saved, then
+    the tap's click landed on song 57's row, which Accept and Skip would then act on."""
+    js = (STATIC / "editor.js").read_text()
+    assert 'cv.addEventListener("touchend", (e) => {' in js
+    assert "if (e.cancelable) e.preventDefault();" in js
+
+
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
