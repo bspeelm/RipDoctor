@@ -708,13 +708,22 @@ def edited(tape: Tape, songs: tuple[Song, ...]) -> Tape:
     )
 
 
-def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
-    """Take a new list. What was found for the old one no longer means anything."""
+def relist(tape: Tape, songs: tuple[Song, ...], gone: Collection[str] = ()) -> Tape:
+    """Take a new list. What was found for the old one no longer means anything, but a
+    song the library holds or may hold keeps this tape from forgetting it. `gone` is the
+    paths the library was asked about and no longer has."""
     if tape.has_ear:
         raise EarSet(
             f"{tape.name} has boundaries set by ear, and moving, adding or removing a "
             "song would change which audio belongs to which song - to start again, "
             "remove the tape"
+        )
+    held = [s for s in tape.songs if edges_held(s) and s.path not in gone]
+    if held:
+        raise Locked(
+            f"{', '.join(label(s) for s in held)}: in the library, or may be, and a "
+            "new list would forget that - remove that copy with beets, then load the "
+            "list again; for a song not confirmed, press File again first"
         )
     return replace(
         tape,

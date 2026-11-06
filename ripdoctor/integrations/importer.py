@@ -578,6 +578,10 @@ class Beets:
             if len(fields) == _COPY.count(_SEP) + 1
         )
 
+    def holds_path(self, runner: Runner, root: str, path: str) -> bool:
+        """Whether a row names this file. A question it could not answer is raised."""
+        return bool(self.library_rows(runner, root, [_one_file(path)]))
+
     def forget_row(self, runner: Runner, root: str, path: str) -> None:
         """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
         query = [_one_file(path)]

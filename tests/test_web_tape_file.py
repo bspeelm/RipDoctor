@@ -34,7 +34,7 @@ from tests.test_web_tape_cut import (
     placed,
     settle_all,
 )
-from tests.test_web_tapes import a_tape_runner, seeing, send_csv
+from tests.test_web_tapes import a_tape_runner, save_list, seeing, send_csv
 
 TG_TITLE = "TITLE"
 
@@ -1935,24 +1935,78 @@ def test_a_boundary_on_a_filed_song_is_refused_and_it_is_never_filed_twice(
     assert len(beet_of(service).imports) == imports
 
 
-def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
+def test_a_new_list_after_beets_removes_the_copies_clears_filing_and_files_them_again(
     service: Service,
 ) -> None:
+    """The advice a refusal gives has to be true: with the copies removed with beets, a
+    new list goes through to filing them again."""
     app = build(service)
     tape = pinned(app, service)
     assert not file_it(app, tape, service)["error"]
     before = len(beet_of(service).imports)
     filed_at = songs(service, tape)[0].path
+    for song in songs(service, tape):
+        Path(song.path).unlink()
+        beet_of(service).run(("beet", "remove", "-f", f"path:{song.path}"))
     assert send_csv(app, tape, service, TWO, confirm=True).status == 200
     assert {s.filing for s in songs(service, tape)} == {TP.PENDING}
     assert post(app, f"/api/tapes/{tape}/process", service).status == 202
     assert not job_of(app, tape, service)["error"]
     assert cut(app, tape, service).status == 202
     assert not job_of(app, tape, service)["error"]
+    settle_all(app, tape, service)
     assert not file_it(app, tape, service)["error"]
     one = songs(service, tape)[0]
-    assert (one.filing, one.path) == (F.ALREADY, filed_at)
-    assert len(beet_of(service).imports) == before
+    assert one.filing == F.FILED
+    assert len(beet_of(service).imports) > before
+    assert Path(filed_at).name == Path(one.path).name
+
+
+@pytest.mark.parametrize("how", ["csv", "hand"])
+def test_a_confirmed_new_list_dropped_the_lock_on_a_filed_song_and_is_refused(
+    service: Service, how: str
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = songs(service, tape)
+    gone = before[0]
+    Path(gone.path).unlink()
+    beet_of(service).run(("beet", "remove", "-f", f"path:{gone.path}"))
+    rows = [{"title": "New", "artist": "A Band", "album": "A", "length": "0:05"}]
+    said = (
+        send_csv(app, tape, service, TWO, confirm=True)
+        if how == "csv"
+        else save_list(app, tape, service, rows, confirm=True)
+    )
+    assert said.status == 409
+    assert "song 2 (Two)" in said.json()["error"]
+    assert "song 1" not in said.json()["error"]
+    assert "remove that copy with beets" in said.json()["error"]
+    assert songs(service, tape) == before
+
+
+def test_a_new_list_is_refused_when_beets_cannot_say_a_copy_is_gone(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    beet_of(service).ls_fails = True
+    assert send_csv(app, tape, service, TWO, confirm=True).status == 409
+
+
+def test_a_new_list_cleared_not_confirmed_and_could_import_a_second_copy(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    current = T.read(service.layout, tape)
+    T.save(service.layout, F.recorded(current, 1, F.UNKNOWN, "", "could not ask"))
+    said = send_csv(app, tape, service, TWO, confirm=True)
+    assert said.status == 409
+    assert "press File again" in said.json()["error"]
+    assert songs(service, tape)[0].filing == F.UNKNOWN
 
 
 def test_a_release_held_by_a_lost_import_is_freed_by_filing_again(

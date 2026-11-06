@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ripdoctor.audio.runner import TimedOut, ToolFailed, ToolMissing
 from ripdoctor.core import filing as TF
 from ripdoctor.core import match as TM
 from ripdoctor.core import playlist as PL
@@ -216,6 +217,24 @@ def add(app: App, service: Service) -> None:
         T.save(layout, changed)
         return H.ok(view(changed))
 
+    def gone_from_library(tape: TP.Tape) -> set[str]:
+        """The filed paths beets has no row for now. Whatever cannot be asked is taken
+        to be still there, which is the side that refuses."""
+        library = service.settings.library
+        found = IMP.choose(service.runner, service.settings.importer, service.state_dir)
+        if not library or not isinstance(found, IMP.Beets):
+            return set()
+        gone = set()
+        for song in tape.songs:
+            if song.filing not in TF.FINISHED or not song.path:
+                continue
+            try:
+                if not found.holds_path(service.runner, library, song.path):
+                    gone.add(song.path)
+            except (IMP.ImportFailed, ToolMissing, ToolFailed, TimedOut):
+                continue  # refused below, on the side of the song still being there
+        return gone
+
     def with_list(
         tape: TP.Tape, songs: tuple[TP.Song, ...], confirmed: bool
     ) -> H.Response:
@@ -223,8 +242,8 @@ def add(app: App, service: Service) -> None:
         take minutes, and any that a person set are refused however often it is said."""
         not_archived(tape)
         try:
-            changed = TP.relist(tape, songs)
-        except TP.EarSet as e:
+            changed = TP.relist(tape, songs, gone_from_library(tape))
+        except (TP.EarSet, TP.Locked) as e:
             raise H.HttpError(409, str(e)) from e
         if any(s.start is not None for s in tape.songs) and not confirmed:
             return H.ok(
