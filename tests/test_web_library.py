@@ -693,6 +693,32 @@ def test_a_record_already_in_the_library_is_reported_before_the_import(
     assert body["existing"]["tracks"] == 1
 
 
+def test_a_blank_release_asks_about_the_names_and_not_the_specs_release(
+    tmp_path: Path,
+) -> None:
+    """The dialog sends `mbid=` for a from-plan import. Read as no answer, the panel
+    named the spec's edition while a Replace from the plan would refuse over both."""
+    service, _library = with_library(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    pinned(service, "aaa")
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    rows = [
+        I_SEP.join(
+            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", rel, "A Band")
+        )
+        for rel in ("aaa", "bbb")
+    ]
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout="\n".join(rows).encode()
+    )
+    app = build(service)
+    blank = get(app, "/api/library/existing/album?mbid=", service).json()["existing"]
+    assert blank["tracks"] == 2 and "2 different releases" in blank["refused"]
+    silent = get(app, "/api/library/existing/album", service).json()["existing"]
+    assert silent["tracks"] == 1 and not silent["refused"]
+
+
 def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     """They read as a copy already there and stop an import part-way, with a
     message from beets that does not say why."""

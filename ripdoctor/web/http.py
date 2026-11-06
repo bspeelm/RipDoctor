@@ -70,7 +70,9 @@ class Request:
         return cls(
             method=method.upper(),
             path=split.path or "/",
-            query=dict(parse_qsl(split.query)),
+            # An empty value is an answer: `mbid=` says no release is in use, and
+            # dropped here it would read as not saying.
+            query=dict(parse_qsl(split.query, keep_blank_values=True)),
             headers=_lower(headers or {}),
             body=body,
             ip=ip,
