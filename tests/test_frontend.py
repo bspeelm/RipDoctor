@@ -372,7 +372,7 @@ def test_a_nudge_says_whose_it_becomes_and_is_flushed_rather_than_dropped() -> N
     assert "tpNudge = { tape: tape.id, song: t.number, seen," in js
     assert 'addEventListener("pagehide", flushNudgeOnLeaving)' in js
     assert "keepalive: true" in js
-    for caller in ("async function openTape(", "async function startTapeJob("):
+    for caller in ("async function openTape(", "async function postTapeJob("):
         start = js.index(caller)
         assert "await flushNudge();" in js[start : js.index("\n}", start)]
     assert "if (tpNudge && tpNudge.song !== num) flushNudge();" in js
@@ -562,7 +562,6 @@ def test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in() -> None:
     assert "autoPrepare(t);" in shown
     body = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "t.prepare_needed" in body and "tapeWatching" in body
-    assert "t.job.error" in body
     assert "/prepare" in body
 
 
@@ -719,3 +718,31 @@ def test_a_field_that_was_sent_is_not_kept_as_typed_if_its_save_is_refused() -> 
     js = (STATIC / "app.js").read_text()
     field = re.search(r"function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "input.dataset.saved = value" in field
+
+
+def test_cut_pressed_after_an_edit_got_a_409_because_a_lookup_started_first() -> None:
+    js = (STATIC / "app.js").read_text()
+    auto = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (tpActing ||" in auto
+    assert "postTapeJob(" in auto and "startTapeJob(" not in auto
+    start = re.search(r"async function startTapeJob\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpActing += 1;" in start and "tpActing -= 1" in start
+    send = re.search(r"function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpActing += 1;" in send and "tpActing -= 1" in send
+
+
+def test_cut_waits_behind_an_automatic_lookup_instead_of_being_turned_off() -> None:
+    js = (STATIC / "app.js").read_text()
+    cut = re.search(r"function cutTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "cutWouldWait(tape)" in cut and "tpCutWaits = true" in cut
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'if (cutWouldWait(t)) $("#tp-cut").disabled = false;' in shown
+    watched = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert watched.index("await loadTapes(id)") < watched.index("cutAfterLookup(id)")
+    assert "Cuts as soon as the lookup finishes" in js
+
+
+def test_a_failed_run_is_said_after_a_restart_from_what_the_tape_keeps() -> None:
+    js = (STATIC / "app.js").read_text()
+    opened = re.search(r"async function openTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tape.prepare_failed" in opened

@@ -1236,7 +1236,7 @@ async function openTape(id) {
     if (tape?.id !== id) { tpOpen = null; tpDraft = null; tpLanded = null; tpListAsk = null; tpRows.clear(); }
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
-    else if (tape.job?.error && !$("#tp-err").textContent) $("#tp-err").textContent = tape.job.error;
+    else if (!$("#tp-err").textContent) $("#tp-err").textContent = tape.job?.error || tape.prepare_failed;
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
@@ -1284,6 +1284,7 @@ function showTape(t) {
   showSongs(t);
   // Opening the tape again during a job would otherwise offer what it would refuse.
   if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  if (cutWouldWait(t)) $("#tp-cut").disabled = false;
   if (t.playlist.done) archivedControls();
   autoPrepare(t);
   landOn(t);
@@ -1300,15 +1301,17 @@ function landOn(t) {
 }
 
 // With its audio and list both in, a tape needs no button to go on. A run that failed
-// has said why, so nothing starts it again until the page does. The server says what
-// is owed, which a job in progress or a song already answered is not.
+// has said why, so nothing starts it again until a person does: the server keeps that
+// and says what is owed, which a job in progress or a song already answered is not.
 let tpPrepareSoon = null, tpPrepareStarting = false;
+let tpActing = 0;                     // what a person pressed that has not been answered
+let tpCutWaits = false;               // Cut was pressed during an automatic lookup
 
 function autoPrepare(t) {
-  const failed = t.job?.op === "prepare" && t.job.error;
-  if (!t.prepare_needed || tapeWatching || failed || (t.job && !t.job.done)) return;
-  // The next field of a row would be refused while the job holds the tape.
-  if (document.activeElement?.closest?.("#tp-rows")) {
+  if (!t.prepare_needed || tapeWatching || (t.job && !t.job.done)) return;
+  // The next field of a row would be refused while the job holds the tape, and what a
+  // person just pressed would be too, so this waits for both.
+  if (tpActing || document.activeElement?.closest?.("#tp-rows")) {
     clearTimeout(tpPrepareSoon);
     tpPrepareSoon = setTimeout(() => { if (tape?.id === t.id) autoPrepare(tape); }, 1500);
     return;
@@ -1316,7 +1319,20 @@ function autoPrepare(t) {
   // A save draws the page twice, and the job's first answer takes longer than that.
   if (tpPrepareStarting) return;
   tpPrepareStarting = true;
-  startTapeJob(`/api/tapes/${t.id}/prepare`, {}).finally(() => { tpPrepareStarting = false; });
+  postTapeJob(`/api/tapes/${t.id}/prepare`, {}).finally(() => { tpPrepareStarting = false; });
+}
+
+// A cut needs nothing a lookup finds, and its songs' boundaries are settled, so what is
+// only an automatic lookup holding the tape for a moment has Cut waiting rather than off.
+const cutWouldWait = (t) => !!t && tapeWatching && t.job?.op === "prepare" && !t.job.done
+  && !t.cut_refusal && t.audio && !t.all_cut;
+
+// Run as soon as the job holding the tape ends, unless that left it refused.
+function cutAfterLookup(id) {
+  if (!tpCutWaits || tape?.id !== id) return;
+  tpCutWaits = false;
+  if (tape.cut_refusal) { $("#tp-err").textContent = tape.cut_refusal; return; }
+  cutTape();
 }
 
 // An archived tape stays as it is, so nothing here may offer to change it. Its
@@ -1455,6 +1471,7 @@ function stepCut(t) {
   const refused = !!t.cut_refusal || !t.audio;
   tpAction("#tp-cut", !t.playlist.done && !t.all_cut, !refused, refused);
   $("#tp-cut").textContent = failed.length || stale ? "Cut again" : "Cut";
+  if (tpCutWaits) return tpStep("cut", "ready", "Next", "Cuts as soon as the lookup finishes.");
   if (t.playlist.done) return tpStep("cut", "done", "Cleared", "The cuts were cleared once the songs were proved filed.");
   if (!t.songs.length) return tpStep("cut", "wait", "Waiting", "Needs the song list.");
   if (t.all_cut && !t.cut_refusal) return tpStep("cut", "done", "Cut", `${counted(live, "file", "files")} written.${left}`);
@@ -1665,8 +1682,9 @@ let tpListSaved = Promise.resolve();
 // One at a time, each built from the tape the last one left, since the route refuses a
 // list made from one it no longer holds. `seen` is for a list asked about earlier.
 function sendList(build, openAfter, sure = false, seen = null) {
+  tpActing += 1;
   const turn = tpListSaved.then(() => saveList(build(), openAfter, sure, seen ?? tape.list_seen));
-  tpListSaved = turn.catch(() => false);
+  tpListSaved = turn.catch(() => false).finally(() => { tpActing -= 1; });
   return turn;
 }
 
@@ -2657,7 +2675,14 @@ function wireTapeWave() {
 // ---- jobs and arrivals
 
 async function startTapeJob(path, body) {
-  await tpListSaved;
+  tpActing += 1;
+  try {
+    await tpListSaved;
+    await postTapeJob(path, body);
+  } finally { tpActing -= 1; }
+}
+
+async function postTapeJob(path, body) {
   $("#tp-err").textContent = "";
   await flushNudge();
   try {
@@ -2666,7 +2691,14 @@ async function startTapeJob(path, body) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const cutTape = () => startTapeJob(`/api/tapes/${tape.id}/cut`, {});
+function cutTape() {
+  if (tpPrepareStarting || cutWouldWait(tape)) {
+    tpCutWaits = true;
+    showRail(tape);
+    return undefined;
+  }
+  return startTapeJob(`/api/tapes/${tape.id}/cut`, {});
+}
 const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
 const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
 function archiveTape() {
@@ -2798,6 +2830,7 @@ async function watchTape() {
     stepIdle();
   }
   await loadTapes(id);
+  cutAfterLookup(id);
 }
 
 async function removeTape() {

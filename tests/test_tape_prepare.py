@@ -38,6 +38,15 @@ def service(tmp_path: Path, catalogue: Catalogue) -> Service:
     return made
 
 
+def a_service_as(service: Service) -> Service:
+    """The same library and tapes, as a process that has just started sees them."""
+    made = a_service(
+        service.layout.root.parent, runner=service.runner, layout=service.layout
+    )
+    made.fetcher, made.pace = service.fetcher, service.pace
+    return made
+
+
 def ready(app, service: Service) -> str:  # type: ignore[no-untyped-def]
     tape = a_new_tape(app, service)
     assert send_csv(app, tape, service, TWO).status == 200
@@ -157,7 +166,7 @@ def test_an_interrupted_job_run_again_does_only_what_is_left(
     assert "albums: the worker died" in prepared(app, service, tape)["error"]
     before = T.read(service.layout, tape)
     assert before.songs[0].proposal is not None and before.songs[1].proposal is None
-    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is True
+    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is False
 
     catalogue.broken = set()
     catalogue.calls.clear()
@@ -247,3 +256,52 @@ def test_find_again_and_look_again_are_still_each_their_own_job(
     assert not cuts_sent(service)
     assert post(app, f"/api/tapes/{tape}/match", service, {"again": True}).status == 202
     assert len(catalogue.calls) == 2
+
+
+def test_a_failed_run_waits_for_a_person_even_after_a_restart(
+    service: Service, catalogue: Catalogue
+) -> None:
+    """The page knew a run had failed only from a job a restart forgets, and started it
+    again on the next look."""
+    catalogue.broken = {"recording"}
+    app = build(service)
+    tape = ready(app, service)
+    assert "albums: the worker died" in prepared(app, service, tape)["error"]
+    saved = T.read(service.layout, tape)
+    assert "the worker died" in saved.prepare_failed
+    restarted = build(a_service_as(service))
+    view = get(restarted, f"/api/tapes/{tape}", service).json()
+    assert view["job"] is None
+    assert view["prepare_needed"] is False
+    assert "the worker died" in view["prepare_failed"]
+
+
+def test_what_a_person_presses_after_a_failed_run_clears_it(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.broken = {"recording"}
+    app = build(service)
+    tape = ready(app, service)
+    prepared(app, service, tape)
+    catalogue.broken = set()
+    assert post(app, f"/api/tapes/{tape}/match", service, {}).status == 202
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["prepare_failed"] == ""
+
+
+def test_an_edit_after_a_failed_run_lets_the_tape_go_on_by_itself(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.broken = {"recording"}
+    app = build(service)
+    tape = ready(app, service)
+    prepared(app, service, tape)
+    current = T.read(service.layout, tape)
+    assert current.prepare_failed
+    rows = [
+        {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
+        for s in current.songs
+    ]
+    rows[0]["title"] = "One Again"
+    assert save_list(app, tape, service, rows).status == 200
+    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is True

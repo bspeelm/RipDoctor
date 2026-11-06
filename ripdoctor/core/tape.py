@@ -530,6 +530,7 @@ class Tape:
     gaps: tuple[Gap, ...] = ()
     inside: tuple[tuple[int, float, float], ...] = ()
     mismatch: str = ""
+    prepare_failed: str = ""
 
     @property
     def has_ear(self) -> bool:
@@ -566,6 +567,7 @@ class Tape:
             ),
             inside=tuple((i["song"], i["lo"], i["hi"]) for i in data["inside"]),
             mismatch=str(data["mismatch"]),
+            prepare_failed=str(data.get("prepare_failed", "")),
         )
 
 
@@ -702,6 +704,7 @@ def edited(tape: Tape, songs: tuple[Song, ...]) -> Tape:
     """Rows changed where they stand. Every boundary stays, whoever set it."""
     return replace(
         tape,
+        prepare_failed="",
         songs=tuple(
             _edited(tape, old, new) for old, new in zip(tape.songs, songs, strict=True)
         ),
@@ -728,6 +731,7 @@ def relist(tape: Tape, songs: tuple[Song, ...], gone: Collection[str] = ()) -> T
     return replace(
         tape,
         songs=_keeping_matches(tape, songs),
+        prepare_failed="",
         gaps=(),
         inside=(),
         mismatch="",
@@ -927,8 +931,10 @@ def is_placed(tape: Tape) -> bool:
 
 
 def wants_preparing(tape: Tape, audio: bool) -> bool:
-    """With a list and audio both in, whether boundaries or a first lookup are owed."""
-    if not tape.songs or not audio:
+    """With a list and audio both in, whether boundaries or a first lookup are owed. A
+    run that failed has said why, and waits for a person, or every look at the page and
+    every restart would start it again."""
+    if not tape.songs or not audio or tape.prepare_failed:
         return False
     unplaced = not is_placed(tape) and not place_refusal(tape)
     return unplaced or any(s.proposal is None and not s.settled_by for s in tape.songs)

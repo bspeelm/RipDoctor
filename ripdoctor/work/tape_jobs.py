@@ -87,6 +87,7 @@ def find_boundaries(runner: Runner, layout: Layout, tape_id: str, job: Job) -> T
 
     job.step(current.name, "placing boundaries")
     current = TP.place(replace(current, duration=seconds), TP.gaps_of(lane))
+    current = replace(current, prepare_failed="")
     T.save(layout, current)
     job.finished = 4
     return current
@@ -193,6 +194,8 @@ def look_up(asking: Asking, tape_id: str, job: Job, *, again: bool = False) -> T
         tape = TP.with_proposals(tape, {song.number: made}, {song.number: maybe})
         T.save(asking.layout, tape)
         job.finished += 1
+    tape = replace(tape, prepare_failed="")
+    T.save(asking.layout, tape)
     return tape
 
 
@@ -212,9 +215,11 @@ def prepare(asking: Asking, tape_id: str, job: Job) -> dict[str, Any]:
     except Exception as e:  # as above, after the boundaries that are already saved
         said[ALBUMS] = str(e)
     job.result = said
-    failed = [f"{part}: {why}" for part, why in said.items() if why]
+    failed = "; ".join(f"{part}: {why}" for part, why in said.items() if why)
     if failed:
-        raise ValueError("; ".join(failed))
+        tape = T.read(asking.layout, tape_id)
+        T.save(asking.layout, replace(tape, prepare_failed=failed))
+        raise ValueError(failed)
     return said
 
 
