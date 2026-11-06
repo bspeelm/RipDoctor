@@ -1234,3 +1234,16 @@ def test_the_console_keeps_its_clear_button() -> None:
     page = cut_markup()
     log = page[page.index('id="logwrap"') :]
     assert 'id="logclear"' in log and 'id="logtoggle"' in log and 'id="log"' in log
+
+
+def test_the_record_s_page_fits_a_phone_the_way_a_tape_s_does() -> None:
+    css = (STATIC / "style.css").read_text()
+    narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
+    assert "#cutview{display:block;overflow-y:auto;overflow-x:hidden}" in narrow
+    assert "#lower{grid-template-columns:minmax(0,1fr)}" in narrow
+    assert "#tracks tbody tr{display:grid" in narrow
+    assert 'id="cut-rail-bar"' in cut_markup()
+    assert (
+        'railOpens($("#cut-rail"), $("#cut-rail-bar"))'
+        in (STATIC / "app.js").read_text()
+    )

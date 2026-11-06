@@ -555,6 +555,33 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   .ripform{width:100%}
   .ripmeter{flex:none}
   #tapeview{display:block;overflow-y:auto;overflow-x:hidden}
+  #cutview{display:block;overflow-y:auto;overflow-x:hidden}
+  #cut-main{padding:.75rem 1rem 1rem;overflow:visible}
+  #cut-top > div:first-child{flex-basis:100%}
+  #sides button{min-height:40px}
+  #cut-scroll{overflow:visible;min-height:0}
+  #readout{flex-wrap:wrap;white-space:normal}
+  #readout > *,#readout > #ro-track{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+  #lower{grid-template-columns:minmax(0,1fr)}
+  #cut-table{overflow-x:visible}
+  #cut-table-head{min-width:0}
+  #cut-table-head button,#album-panel .row button,#logbar button{min-height:40px}
+  #logbar #logwhat{display:none}
+  #tracks{display:block;min-width:0}
+  #tracks thead{display:none}
+  #tracks tbody{display:block}
+  #tracks tbody tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:center;
+    gap:.1rem .5rem;padding:.45rem .5rem;border-top:1px solid var(--line)}
+  #tracks tr.sel{background:#20262e}
+  #tracks td{display:block;width:auto;padding:0;border:0;background:none !important;box-shadow:none !important}
+  #tracks td.c-title{grid-column:span 4}
+  #tracks td.c-del{grid-column:6;grid-row:1;text-align:right}
+  #tracks .c-del button{min-height:40px;min-width:40px}
+  #tracks td.t{grid-column:span 2;min-height:32px;line-height:32px}
+  #tracks td.drift{grid-column:span 2}
+  #tracks td.c-bnd-cell{grid-column:span 4}
+  #record-pick{flex:1 1 100%}
+  #record-pick .pick{width:6rem}
   #tp-head{flex-wrap:wrap}
   #tp-head select{max-width:60vw}
   .rail{border-right:0;border-bottom:1px solid var(--line);overflow:visible;padding:.25rem 1rem}
