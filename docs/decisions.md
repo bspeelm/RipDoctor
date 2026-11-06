@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,574, and
-at 3,874 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,631, and
+at 3,931 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2130,6 +2130,14 @@ than digital zero. The tape's leading and trailing silence are treated the same
 way; a last song came out 3.5 s short at its -60 edge. Measured this way, every
 song on both tapes that spans no silence landed within 1.1 s of its list length,
 which is what the 3 s tolerance rests on.
+
+**Once its audio and list are both in, a tape goes on by itself.** The page starts one
+job that takes in the audio, finds boundaries and then looks up albums, saying which phase
+it is in. Neither of the last two needs the other, so one failing is said at the end and
+stops neither. Everything is saved as it is known and what is done is not done again, so
+running it after an interruption finishes it, and a lookup asks only about songs with no
+answer. A failed lookup is left for Look again, as is a run that failed, or every look at
+the page would start it again.
 
 **Spans are cross-checked against list lengths, in list order.** A fit cannot
 detect wrong order on its own: the album flow's fit passed a list out of order

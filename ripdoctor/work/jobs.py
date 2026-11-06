@@ -51,6 +51,7 @@ class Job:
     ended: float | None = None
     done: bool = False
     skipped: list[str] = field(default_factory=list)
+    phase: str = ""  # which part of a job of several, where it has parts
 
     def step(self, current: str = "", detail: str = "") -> None:
         self.current = current
@@ -68,6 +69,7 @@ class Job:
             "current": self.current,
             "detail": self.detail,
             "skipped": list(self.skipped),
+            "phase": self.phase,
             "started": round(self.started, 3),
             "ended": None if self.ended is None else round(self.ended, 3),
         }

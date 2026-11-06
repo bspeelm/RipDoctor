@@ -7,7 +7,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.audio import split
+from ripdoctor.audio import ffprobe, split
+from ripdoctor.audio import ingest as G
 from ripdoctor.audio.runner import Runner
 from ripdoctor.core import filing as F
 from ripdoctor.core import match as TM
@@ -15,10 +16,77 @@ from ripdoctor.core import tape as TP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as TG
 from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun
+from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains
 from ripdoctor.work.jobs import Job
+
+AUDIO, BOUNDARIES, ALBUMS = "audio", "boundaries", "albums"
+
+
+def arrived(layout: Layout, tape: TP.Tape) -> IN.Incoming | None:
+    """What has arrived for a tape, or why it cannot be taken in yet."""
+    came = IN.state(layout, T.key_of(tape.id))
+    if not T.audio_file(layout, tape.id).is_file():
+        if came is None:
+            raise ValueError("this tape has no audio yet - upload it first")
+        if came.have != came.total:
+            raise ValueError(
+                f"only {came.have} of {came.total} bytes arrived - send the rest"
+            )
+    return came
+
+
+def _take_in(runner: Runner, layout: Layout, tape_id: str, job: Job, name: str) -> None:
+    key = T.key_of(tape_id)
+    part, done = IN.part_file(layout, key), IN.done_file(layout, key)
+    job.step(name, "reading what arrived")
+    try:
+        G.probe(runner, str(part))
+    except G.NotAudio as e:
+        raise ValueError(str(e)) from e
+    job.finished = 1
+    job.step(name, "normalising")
+    G.normalise(runner, str(part), str(done), timeout=T.LONG_RUN)
+    job.finished = 2
+    job.step(name, "checking it decodes")
+    if not split.verify(runner, str(done), timeout=T.LONG_RUN):
+        done.unlink(missing_ok=True)
+        raise ValueError("the encoded tape would not decode - nothing placed")
+    T.take_audio(layout, tape_id)
+
+
+def find_boundaries(runner: Runner, layout: Layout, tape_id: str, job: Job) -> TP.Tape:
+    """Make the audio a tape's, measure it, and lay the list over it. Read again here:
+    only now does the job hold the tape against a change. Each stage leaves what the
+    next needs, so a restart carries on from wherever it stopped."""
+    job.total, job.finished, job.phase = 4, 0, AUDIO
+    current = T.read(layout, tape_id)
+    if not current.songs:
+        raise ValueError("this tape has no song list yet - add one first")
+    came = arrived(layout, current)
+    if not T.audio_file(layout, tape_id).is_file() and came is not None:
+        _take_in(runner, layout, tape_id, job, came.name)
+        current = replace(current, source=came.name)
+        T.save(layout, current)
+    if came is not None:
+        IN.clear(layout, T.key_of(tape_id))
+    job.finished = 3
+
+    job.phase = BOUNDARIES
+    audio = str(T.audio_file(layout, tape_id))
+    job.step(current.name, "measuring")
+    seconds = ffprobe.true_duration(runner, audio, timeout=T.LONG_RUN)
+    if seconds <= 0:
+        raise ValueError("the tape has no playable audio in it")
+    lane = T.measure(runner, layout, tape_id, seconds)
+
+    job.step(current.name, "placing boundaries")
+    current = TP.place(replace(current, duration=seconds), TP.gaps_of(lane))
+    T.save(layout, current)
+    job.finished = 4
+    return current
 
 
 def _sited(
@@ -103,7 +171,7 @@ def look_up(asking: Asking, tape_id: str, job: Job, *, again: bool = False) -> T
     so a restart carries on."""
     tape = T.read(asking.layout, tape_id)
     waiting = TP.to_match(tape, again=again)
-    job.total, job.finished = len(waiting), 0
+    job.total, job.finished, job.phase = len(waiting), 0, ALBUMS
     for song in waiting:
         job.step(TP.label(song), "looking it up")
         made, maybe = _lookup_one(asking, tape, song)
@@ -111,6 +179,28 @@ def look_up(asking: Asking, tape_id: str, job: Job, *, again: bool = False) -> T
         T.save(asking.layout, tape)
         job.finished += 1
     return tape
+
+
+def prepare(asking: Asking, tape_id: str, job: Job) -> dict[str, Any]:
+    """Audio and boundaries, then every album, for a tape with its audio and list both
+    in. The two have nothing to do with each other, so one failing is said at the end
+    and stops neither, and what is already done is not done again: running this after an
+    interruption finishes the job."""
+    said = {BOUNDARIES: "", ALBUMS: ""}
+    if not TP.is_placed(T.read(asking.layout, tape_id)):
+        try:
+            find_boundaries(asking.runner, asking.layout, tape_id, job)
+        except Exception as e:  # kept, and raised below once the albums have been asked
+            said[BOUNDARIES] = str(e)
+    try:
+        look_up(asking, tape_id, job)
+    except Exception as e:  # as above, after the boundaries that are already saved
+        said[ALBUMS] = str(e)
+    job.result = said
+    failed = [f"{part}: {why}" for part, why in said.items() if why]
+    if failed:
+        raise ValueError("; ".join(failed))
+    return said
 
 
 def _cut_one(

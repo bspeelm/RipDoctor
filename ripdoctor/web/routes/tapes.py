@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.audio import ffprobe, split
-from ripdoctor.audio import ingest as G
 from ripdoctor.core import filing as TF
 from ripdoctor.core import match as TM
 from ripdoctor.core import playlist as PL
@@ -148,6 +145,15 @@ def add(app: App, service: Service) -> None:
             beets,
         )
 
+    def wanted_ready(tape: TP.Tape) -> bool:
+        if archived(tape):
+            return False
+        try:
+            TJ.arrived(layout, tape)
+        except ValueError:  # nothing to prepare yet, which is all this asks
+            return False
+        return TP.wants_preparing(tape, True)
+
     def view(tape: TP.Tape) -> dict[str, Any]:
         key = T.key_of(tape.id)
         upload = IN.state(layout, key)
@@ -165,6 +171,7 @@ def add(app: App, service: Service) -> None:
             "job": None if job is None else job.as_dict(),
             "chunk": CHUNK,
             "all_settled": TP.all_settled(tape),
+            "prepare_needed": wanted_ready(tape),
             "ear": ear_rows(tape),
             "cut_refusal": TP.cut_refusal(tape),
             "all_cut": TP.all_cut(tape, cuts),
@@ -348,70 +355,34 @@ def add(app: App, service: Service) -> None:
     def cancel(r: H.Request, tape: TP.Tape) -> H.Response:
         return H.ok({"freed_bytes": IN.clear(layout, T.key_of(tape.id))})
 
-    def ready(r: H.Request) -> tuple[TP.Tape, IN.Incoming | None]:
-        """The tape and what has arrived for it, or why it cannot be processed."""
+    def ready(r: H.Request) -> TP.Tape:
+        """The tape, or why it cannot be processed."""
         tape = listed(r)
-        arrived = IN.state(layout, T.key_of(tape.id))
-        if not T.audio_file(layout, tape.id).is_file():
-            if arrived is None:
-                raise H.HttpError(409, "this tape has no audio yet - upload it first")
-            if arrived.have != arrived.total:
-                raise H.HttpError(
-                    409,
-                    f"only {arrived.have} of {arrived.total} bytes arrived "
-                    "- send the rest",
-                )
-        return tape, arrived
+        try:
+            TJ.arrived(layout, tape)
+        except ValueError as e:
+            raise H.HttpError(409, str(e)) from e
+        return tape
 
     @app.route("POST", "/api/tapes/([^/]+)/process")
     def process(r: H.Request) -> H.Response:
         """Make the audio a tape's, measure it, and lay the list over it."""
-        tape, _ = ready(r)
-        key = T.key_of(tape.id)
-
-        def take_in(job: Job, source: str) -> None:
-            part, done = IN.part_file(layout, key), IN.done_file(layout, key)
-            job.step(source, "reading what arrived")
-            try:
-                G.probe(service.runner, str(part))
-            except G.NotAudio as e:
-                raise ValueError(str(e)) from e
-            job.finished = 1
-            job.step(source, "normalising")
-            G.normalise(service.runner, str(part), str(done), timeout=T.LONG_RUN)
-            job.finished = 2
-            job.step(source, "checking it decodes")
-            if not split.verify(service.runner, str(done), timeout=T.LONG_RUN):
-                done.unlink(missing_ok=True)
-                raise ValueError("the encoded tape would not decode - nothing placed")
-            T.take_audio(layout, tape.id)
+        tape = ready(r)
 
         def work(job: Job) -> dict[str, Any]:
-            job.total = 4
-            # Read again: only now does the job hold the tape against a change.
-            current, arrived = ready(r)
-            if not T.audio_file(layout, tape.id).is_file() and arrived is not None:
-                take_in(job, arrived.name)
-                current = replace(current, source=arrived.name)
-                T.save(layout, current)
-            if arrived is not None:
-                IN.clear(layout, key)
-            job.finished = 3
-
-            audio = str(T.audio_file(layout, tape.id))
-            job.step(tape.name, "measuring")
-            seconds = ffprobe.true_duration(service.runner, audio, timeout=T.LONG_RUN)
-            if seconds <= 0:
-                raise ValueError("the tape has no playable audio in it")
-            lane = T.measure(service.runner, layout, tape.id, seconds)
-
-            job.step(tape.name, "placing boundaries")
-            current = TP.place(replace(current, duration=seconds), TP.gaps_of(lane))
-            T.save(layout, current)
-            job.finished = 4
-            return current.to_dict()
+            found = TJ.find_boundaries(service.runner, layout, tape.id, job)
+            return found.to_dict()
 
         return started(tape.id, "tape", work)
+
+    @app.route("POST", "/api/tapes/([^/]+)/prepare")
+    def prepare(r: H.Request) -> H.Response:
+        """All a tape needs once its audio and list are both in: one job, by phases."""
+        tape = ready(r)
+        not_archived(tape)
+        return started(
+            tape.id, "prepare", lambda job: TJ.prepare(asking(), tape.id, job)
+        )
 
     @app.route("POST", "/api/tapes/([^/]+)/match")
     def match(r: H.Request) -> H.Response:

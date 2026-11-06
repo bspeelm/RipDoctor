@@ -1279,6 +1279,16 @@ function showTape(t) {
   // Opening the tape again during a job would otherwise offer what it would refuse.
   if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
   if (t.playlist.done) archivedControls();
+  autoPrepare(t);
+}
+
+// With its audio and list both in, a tape needs no button to go on. A run that failed
+// has said why, so nothing starts it again until the page does. The server says what
+// is owed, which a job in progress or a song already answered is not.
+function autoPrepare(t) {
+  const failed = t.job?.op === "prepare" && t.job.error;
+  if (!t.prepare_needed || tapeWatching || failed || (t.job && !t.job.done)) return;
+  startTapeJob(`/api/tapes/${t.id}/prepare`, {});
 }
 
 // An archived tape stays as it is, so nothing here may offer to change it. Its
@@ -1303,7 +1313,7 @@ function showStart(t) {
 // ---- the rail
 
 const TP_STEPS = ["recording", "list", "boundaries", "albums", "cut", "file", "playlist", "archive"];
-const JOB_STEP = { tape: "boundaries", match: "albums", cut: "cut", file: "file", playlist: "playlist", archive: "archive" };
+const JOB_STEP = { audio: "recording", boundaries: "boundaries", albums: "albums", tape: "boundaries", match: "albums", cut: "cut", file: "file", playlist: "playlist", archive: "archive" };
 
 const songsNamed = (numbers) => {
   const first = numbers.slice(0, 6).join(", ");
@@ -2411,8 +2421,9 @@ async function watchTape() {
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
-      if (JOB_STEP[j.op] && tpJobStep !== JOB_STEP[j.op]) {
-        tpJobStep = JOB_STEP[j.op];
+      const stepNow = JOB_STEP[j.phase] ?? JOB_STEP[j.op];
+      if (stepNow && tpJobStep !== stepNow) {
+        tpJobStep = stepNow;
         stepBusy(tpJobStep);
         showLeft();
       }

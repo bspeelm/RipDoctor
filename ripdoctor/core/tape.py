@@ -884,6 +884,23 @@ def to_match(tape: Tape, *, again: bool = False) -> tuple[Song, ...]:
     )
 
 
+def is_placed(tape: Tape) -> bool:
+    return (
+        bool(tape.songs)
+        and tape.music_start is not None
+        and all(s.start is not None and s.end is not None for s in tape.songs)
+    )
+
+
+def wants_preparing(tape: Tape, audio: bool) -> bool:
+    """With a list and audio both in, whether boundaries or a first lookup are owed."""
+    if not tape.songs or not audio:
+        return False
+    return not is_placed(tape) or any(
+        s.proposal is None and not s.settled_by for s in tape.songs
+    )
+
+
 def with_proposals(
     tape: Tape, found: dict[int, Proposal], maybe: dict[int, str] | None = None
 ) -> Tape:

@@ -549,3 +549,18 @@ def test_a_cut_is_not_said_to_wait_on_an_album_and_a_file_is() -> None:
     assert "settled_by" not in waits
     step = re.search(r"function stepFile\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "!s.settled_by" in step
+
+
+def test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in() -> None:
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "autoPrepare(t);" in shown
+    body = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.prepare_needed" in body and "tapeWatching" in body
+    assert "t.job.error" in body
+    assert "/prepare" in body
+
+
+def test_a_job_of_several_parts_shows_on_the_rail_step_it_is_in() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "JOB_STEP[j.phase] ?? JOB_STEP[j.op]" in js
