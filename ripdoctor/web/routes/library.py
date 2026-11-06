@@ -341,17 +341,20 @@ def add(app: App, service: Service) -> None:
             job.total = sum(len(s.tracks) for s in plan.sides)
             job.step(plan.album, f"importing with {importer.name}")
             with one_import(job):
-                done = importer.apply(
-                    service.runner,
-                    plan,
-                    review,
-                    root,
-                    mbid=mbid,
-                    duplicates=duplicates,
-                    replacing=replacing,
-                    file_mode=service.settings.file_mode,
-                    dir_mode=service.settings.dir_mode,
-                )
+                try:
+                    done = importer.apply(
+                        service.runner,
+                        plan,
+                        review,
+                        root,
+                        mbid=mbid,
+                        duplicates=duplicates,
+                        replacing=replacing,
+                        file_mode=service.settings.file_mode,
+                        dir_mode=service.settings.dir_mode,
+                    )
+                except IMP.ImportFailed as e:  # written for the person; see `Jobs`
+                    raise ValueError(str(e)) from e
             job.finished = done.tracks
             notes = [*done.notes, *after_import(service)]
             return {**done.as_dict(), "importer": importer.name, "notes": notes}

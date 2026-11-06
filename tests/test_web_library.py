@@ -855,6 +855,20 @@ def test_a_caller_that_says_nothing_still_gets_the_spec(tmp_path: Path) -> None:
     assert "--search-id" in argv and "from-the-spec" in argv
 
 
+def test_a_refused_import_reads_as_the_refusal_and_not_a_class_name(
+    tmp_path: Path,
+) -> None:
+    """A person read `ImportFailed: ` in front of why nothing was removed."""
+    service, _library = ready_to_import(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    service.runner = FakeRunner(installed={"beet", "metaflac"}).expect("ls", stdout=b"")
+    pinned(service, "from-the-spec")
+    r = post(
+        build(service), "/api/import/album", service, {"mbid": "", "replace": True}
+    )
+    assert r.json()["error"].startswith("the library holds nothing that is exactly")
+
+
 def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
     """beets asks a second question when the album is already there, and an
     unanswered one ends the import with a message about stdin."""
