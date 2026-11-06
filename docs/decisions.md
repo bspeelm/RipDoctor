@@ -1820,6 +1820,17 @@ earlier take is kept until the new one reads back and then goes. A pool that
 silently doubles and one that silently does not are both worse than one that
 says which.
 
+**The gate has to prove that premise, and for a while it did not.** It counted rows, and
+a side captured again leaves the earlier import counted in full: measured in a browser,
+rows read `From an earlier capture`, the rail read `Ready`, and pressing it replaced the
+only capture those tracks were cut from. So a successful import records in
+`<slug>.filed.json` which capture each side's tracks came from, as the size and time stamp
+the plan uses, and a raw side passes only on matching it. A plan on another capture shuts
+the gate as well. With no record at all, a side differing from its archived copy shuts it
+and a side with no archived copy passes, so a record imported before this can still be
+archived the first time. The way through is the ordinary one: cut this capture and import
+it over them (`test_a_re_rip_the_library_was_not_cut_from_cannot_cost_the_earlier_capture`).
+
 **`keep_superseded` is there for the other case.** Comparing two cartridges, or
 keeping a first pressing's capture, is a real reason to want both. It is off,
 because the common case is a re-rip made precisely because the new take is

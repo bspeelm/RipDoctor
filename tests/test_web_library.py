@@ -7,6 +7,7 @@ seam as the external tools, so the whole first pass runs from a scripted reply.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from ripdoctor.core.plan import Plan
 from ripdoctor.core.xcorr import Transform
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations.importer import _SEP as I_SEP
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import auth as A
@@ -385,13 +387,96 @@ def test_a_side_that_does_not_read_back_stops_everything(tmp_path: Path) -> None
     assert (service.layout.raw / "album" / "side-a.flac").is_file()
 
 
-def rerip(service: Service) -> bytes:
-    """Archive a record, then put a newer capture of one side in raw."""
+def rerip(service: Service, *, filed: bool = True) -> bytes:
+    """Archive a record, then put a newer capture of one side in raw, by default one
+    the library's tracks have since been cut from and filed."""
     post(build(service), "/api/archive/album", service)
     first = (service.layout.archive / "album" / "side-a.flac").read_bytes()
     (service.layout.raw / "album").mkdir()
-    (service.layout.raw / "album" / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 99)
+    again = service.layout.raw / "album" / "side-a.flac"
+    again.write_bytes(b"fLaC" + b"\x00" * 99)
+    if filed:
+        AR.note_filed(service.layout, "album", {again.name: C.stamp_of(again)})
     return first
+
+
+def test_a_re_rip_the_library_was_not_cut_from_cannot_cost_the_earlier_capture(
+    tmp_path: Path,
+) -> None:
+    """Measured in a browser: the earlier import counted in full, the rail read Ready,
+    and pressing Archive replaced the only capture those tracks were cut from."""
+    service, _library = arrived(tmp_path)
+    first = rerip(service, filed=False)
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "captured again" in body["why"]
+    assert "side a" in body["why"] and body["captured_again"]
+    r = post(build(service), "/api/archive/album", service)
+    assert r.status == 409 and "captured again" in r.json()["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").read_bytes() == first
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+
+
+def test_a_proof_of_an_older_capture_does_not_cover_a_newer_one(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    rerip(service)
+    again = service.layout.raw / "album" / "side-a.flac"
+    again.write_bytes(b"fLaC" + b"\x00" * 123)
+    assert (
+        "captured again"
+        in get(build(service), "/api/archive/album", service).json()["why"]
+    )
+
+
+def test_a_plan_on_another_capture_shuts_the_gate(tmp_path: Path) -> None:
+    """Rows reading `From an earlier capture` under a rail reading Ready."""
+    service, _library = arrived(tmp_path)
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = "some-other-capture"
+    F.write_json(service.layout.plan_file("album"), doc)
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "captured again" in body["why"]
+
+
+def test_an_import_records_the_capture_its_tracks_came_from(tmp_path: Path) -> None:
+    service, _library = ready_to_import(tmp_path)
+    service.runner = a_runner()
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    os.utime(raw, (1000, 1000))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    assert json.loads(service.layout.filed_file("album").read_text()) == {
+        "side-a.flac": C.stamp_of(raw)
+    }
+
+
+def test_a_cut_older_than_the_capture_proves_nothing_about_it(tmp_path: Path) -> None:
+    """Cut, captured again, saved so the plan's stamp moved, then imported: the tracks
+    are the old capture's whatever the plan now says."""
+    service, _library = ready_to_import(tmp_path)
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    cut = service.layout.review_dir("album") / "01 One.flac"
+    os.utime(cut, (raw.stat().st_mtime - 60, raw.stat().st_mtime - 60))
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert AR.cut_captures(service.layout, "album", plan) == {}
+
+
+def test_a_replacing_side_is_said_on_the_rail() -> None:
+    js = STATIC_JS.read_text()
+    step = js[js.index("function railArchive(") :]
+    step = step[: step.index("\n}\n")]
+    assert "f.arc.will_replace" in step and "replaces the earlier capture" in step
+    assert "are cleared unfiled" in step
+    cut = js[js.index("function railCut(") :]
+    assert "f.arc?.captured_again" in cut[: cut.index("\n}\n")]
+    assert '.replace(/\\.$/, "")' in step
 
 
 def test_a_record_that_was_archived_before_can_be_archived_again(

@@ -126,6 +126,9 @@ class Layout:
     def plan_file(self, slug: str) -> Path:
         return under(self.work, f"{slug}.plan.json")
 
+    def filed_file(self, slug: str) -> Path:
+        return under(self.work, f"{slug}.filed.json")
+
     def review_dir(self, slug: str) -> Path:
         return under(self.review, slug)
 

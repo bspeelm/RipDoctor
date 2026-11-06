@@ -340,6 +340,7 @@ def add(app: App, service: Service) -> None:
             review = str(review_dir)
             job.total = sum(len(s.tracks) for s in plan.sides)
             job.step(plan.album, f"importing with {importer.name}")
+            captures = AR.cut_captures(layout, slug, plan)
             with one_import(job):
                 try:
                     done = importer.apply(
@@ -355,6 +356,7 @@ def add(app: App, service: Service) -> None:
                     )
                 except IMP.ImportFailed as e:  # written for the person; see `Jobs`
                     raise ValueError(str(e)) from e
+            AR.note_filed(layout, slug, captures)
             job.finished = done.tracks
             notes = [*done.notes, *after_import(service)]
             return {**done.as_dict(), "importer": importer.name, "notes": notes}

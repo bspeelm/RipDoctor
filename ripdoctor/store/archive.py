@@ -12,6 +12,7 @@ sense in five years.
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from collections.abc import Callable
@@ -23,11 +24,11 @@ from typing import Any
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
-from ripdoctor.core.plan import OldFormat
+from ripdoctor.core.plan import OldFormat, Plan
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
-from ripdoctor.store.files import Layout, read_plan, read_spec, save
+from ripdoctor.store.files import Layout, read_plan, read_spec, save, write_json
 from ripdoctor.store.safety import under
 
 # What is cleared once the record is safe: the cut tracks, the tick clips and
@@ -55,6 +56,70 @@ def removable(layout: Layout, slug: str) -> list[Path]:
         layout.clips_dir(slug),
         C.dir_for(layout, slug),
     ]
+
+
+def cut_captures(layout: Layout, slug: str, plan: Plan) -> dict[str, str]:
+    """Which capture the tracks waiting in review came from, by side. A cut saves first,
+    so the plan's stamp is the audio it cut, unless the side was captured since."""
+    cuts = [p.stat().st_mtime for p in layout.review_dir(slug).glob("*.flac")]
+    if not cuts:
+        return {}
+    source = layout.raw / slug
+    return {
+        s.file: s.audio
+        for s in plan.sides
+        if s.audio
+        and (
+            not (source / s.file).is_file()
+            or (source / s.file).stat().st_mtime <= min(cuts)
+        )
+    }
+
+
+def note_filed(layout: Layout, slug: str, captures: dict[str, str]) -> None:
+    """Which capture the library's tracks came from, for the gate. ADR-055."""
+    write_json(layout.filed_file(slug), {**_filed_captures(layout, slug), **captures})
+
+
+def _filed_captures(layout: Layout, slug: str) -> dict[str, str]:
+    where = layout.filed_file(slug)
+    try:
+        return dict(json.loads(where.read_text()))
+    except (
+        OSError,
+        ValueError,
+    ):  # no proof reads as no proof, and the gate asks for one
+        return {}
+
+
+def _capture_doubt(layout: Layout, slug: str) -> str:
+    """Why the tracks in the library may not be from what is in raw, or nothing.
+
+    Counting rows cannot tell: a side captured again leaves the earlier import counted
+    in full, and archiving then replaces the capture those tracks were cut from.
+    """
+    try:
+        plan = read_plan(layout.plan_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return ""
+    placed = {s.file: s.audio for s in plan.sides}
+    filed = _filed_captures(layout, slug)
+    for side in sorted((layout.raw / slug).glob("side-*.flac")):
+        now = C.stamp_of(side)
+        kept = layout.archive / slug / side.name
+        proof = filed.get(side.name)
+        if (
+            placed.get(side.name, now) not in ("", now)
+            or (proof and proof != now)
+            or (not proof and kept.is_file() and C.stamp_of(kept) != now)
+        ):
+            letter = side.stem.removeprefix("side-")
+            return (
+                f"side {letter} was captured again, and the tracks in the library were "
+                "not cut from this capture. Archiving now would replace the earlier "
+                "capture they came from. Cut this one and import it over them first"
+            )
+    return ""
 
 
 def survey(
@@ -94,8 +159,9 @@ def survey(
             sides.append(
                 Side(p.name, p.stat().st_size, verify(runner, str(p)) if read else None)
             )
-    ready = where is not None and count == expected and bool(sides)
-    why = ""
+    doubt = _capture_doubt(layout, slug) if where and count == expected else ""
+    ready = where is not None and count == expected and bool(sides) and not doubt
+    why = doubt
     if not sides:
         why = f"no sides in raw for {slug}"
     elif editions:
@@ -117,6 +183,7 @@ def survey(
     return {
         "ready": ready,
         "why": why,
+        "captured_again": bool(doubt),
         "library_path": None if where is None else str(where),
         "library_tracks": count,
         "expected": expected,

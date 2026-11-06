@@ -281,7 +281,7 @@ function railCut(f) {
   const files = counted(f.review ?? 0, "file", "files");
   const later = S.dirty ? " Cutting saves your changes first." : "";
   $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length || !!f.earlier.length;
-  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length && !f.overlaps.length && !f.earlier.length);
+  blue("#split", !!f.tracks.length && !f.review && (!f.imported || !!f.arc?.captured_again) && !S.dirty && !f.forced.length && !f.overlaps.length && !f.earlier.length);
   if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
   if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
   if (f.overlaps.length) return cutStep("cut", "todo", "Overlap", `Tracks ${namedList(f.overlaps.map((t) => t.number))} overlap. Move a boundary so they do not, and this can run.`);
@@ -296,6 +296,7 @@ function railCut(f) {
   if (f.review) return S.dirty
     ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.${later}`)
     : cutStep("cut", "done", "Cut", `${files} in review/.`);
+  if (f.arc?.captured_again) return cutStep("cut", "ready", "Ready", `${n} will be written to review/ from this capture. The library's came from an earlier one.${later}`);
   if (f.imported) return cutStep("cut", "done", "Cut", "The files have moved to the library.");
   return cutStep("cut", "ready", "Ready", `${n} will be written to review/.${later}`);
 }
@@ -303,7 +304,8 @@ function railCut(f) {
 function railImport(f) {
   // Unknown is not nothing: if the server could not say, the button stays pressable.
   $("#import").disabled = !S.slug || (f.review === 0 && !f.imported);
-  blue("#import", !!f.review && !f.imported);
+  blue("#import", !!f.review);
+  if (f.imported && f.review) return cutStep("import", "ready", "Not filed", `${counted(f.review, "cut track", "cut tracks")} in review/ and not in the library yet. What the library holds came from an earlier import.`);
   if (f.imported) return cutStep("import", "done", "In library", `${counted(f.arc.library_tracks, "track", "tracks")} in the library.`);
   if (f.review) return cutStep("import", "ready", "Ready", "Tag the cut tracks and place them in the library.");
   return cutStep("import", "wait", "Waiting", "Waiting on the cut.");
@@ -312,9 +314,14 @@ function railImport(f) {
 function railArchive(f) {
   blue("#archive", !!f.arc?.ready);
   if (f.archived) return cutStep("archive", "done", "Archived", "The raw sides are in the archive.");
-  if (f.arc?.ready) return cutStep("archive", "ready", "Ready", "Put the raw sides away and clean up.");
+  if (f.arc?.ready) {
+    const going = (f.arc.will_replace || []).map((n) => n.replace(/^side-|\.flac$/g, ""));
+    const replacing = going.length ? ` Side ${going.join(" and ")} replaces the earlier capture in the archive, which goes once the new one reads back.` : "";
+    const unfiled = f.review ? ` The ${counted(f.review, "cut track", "cut tracks")} in review/ are cleared unfiled, and can be cut again.` : "";
+    return cutStep("archive", "ready", "Ready", `Put the raw sides away and clean up.${replacing}${unfiled}`);
+  }
   const why = f.arc?.why || (f.overlaps.length ? "Waiting on the overlapping tracks" : "Enabled once the album is in the library");
-  return cutStep("archive", "wait", "Waiting", `${why[0].toUpperCase()}${why.slice(1)}.`);
+  return cutStep("archive", "wait", "Waiting", `${why[0].toUpperCase()}${why.slice(1).replace(/\.$/, "")}.`);
 }
 
 // The names are read from the fields, so the heading says what a save would write.
@@ -1163,13 +1170,13 @@ async function archiveRun() {
     for (const a of r.archived) lines.push(`  ${a.side.padEnd(22)} ${a.seconds}s  ${(a.bytes / 1e6).toFixed(0)} MB  verified`);
     lines.push("", ...r.notes.map((n) => "  " + n), "", "removed:", ...r.removed.map((d) => "  " + d));
     $("#arc-plan").textContent = lines.join("\n");
-    status("archived and cleaned up");
     await refreshCutRail();
     $("#arcdlg").close();
     resetCaptureAfterArchive(done);
     await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
 
     await loadOrphans();
+    status("archived and cleaned up");   // last, since opening the picker's choice clears it
   } catch (e) {
     $("#arc-err").textContent = e.message;
     $("#arc-go").disabled = false;
