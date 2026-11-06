@@ -648,16 +648,19 @@ def list_digest(tape: Tape) -> str:
 
 
 def only_edits(tape: Tape, songs: tuple[Song, ...]) -> bool:
-    """Whether this list is the old one with rows changed where they stand. A row that
-    takes on what another row said is that row moved, whatever else changed: which audio
-    belongs to which song would be different, and no boundary can stay for that."""
+    """Whether this list is the old one with at most one row changed where it stands. A
+    page saves a field at a time, so two rows changing at once is a new list, however it
+    reads, and so is a row taking on what another row said: which audio belongs to which
+    song would be different, and no boundary can stay for that."""
     if len(songs) != len(tape.songs):
         return False
     was = [_said(s) for s in tape.songs]
-    return not any(
-        _said(new) != _said(old) and _said(new) in was
+    changed = [
+        new
         for old, new in zip(tape.songs, songs, strict=True)
-    )
+        if _said(new) != _said(old)
+    ]
+    return len(changed) <= 1 and not any(_said(new) in was for new in changed)
 
 
 def _redoubted(tape: Tape, song: Song) -> Song:

@@ -162,6 +162,7 @@ def test_a_new_length_unsettles_what_the_catalogue_said_and_not_what_a_person_di
     T.save(service.layout, current)
     rows = rows_of(service, tape)
     rows[0]["length"] = 60.0
+    assert send(app, service, tape, rows).status == 200
     rows[1]["length"] = 60.0
     assert send(app, service, tape, rows).status == 200
     one, two = T.read(service.layout, tape).songs
@@ -323,3 +324,40 @@ def test_a_list_edit_that_would_clear_boundaries_cannot_slip_through_a_job_butto
     assert send(app, service, tape, rows).status == 409
     assert post(app, f"/api/tapes/{tape}/match", service, {}).status == 202
     assert edges(service, tape) == before
+
+
+def test_a_swap_with_both_rows_retyped_read_as_edits_and_is_a_new_list(
+    service: Service,
+) -> None:
+    """Neither row took on exactly what the other said, so it kept every boundary on
+    audio that now belongs to the other song."""
+    app = build(service)
+    tape = placed(app, service)
+    before = edges(service, tape)
+    rows = rows_of(service, tape)
+    swapped = [
+        {**rows[1], "title": rows[1]["title"] + " (retyped)"},
+        {**rows[0], "title": rows[0]["title"] + " (retyped)"},
+    ]
+    asked = send(app, service, tape, swapped)
+    assert asked.status == 409
+    assert asked.json()["needs_confirm"] is True
+    assert edges(service, tape) == before
+    sure = send(app, service, tape, swapped, confirm=True)
+    assert sure.status == 200
+    assert edges(service, tape) == [(None, None), (None, None)]
+
+
+def test_two_rows_changed_at_once_are_a_new_list_and_one_is_an_edit(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    rows = rows_of(service, tape)
+    one = [{**rows[0], "album": "Other"}, rows[1]]
+    assert send(app, service, tape, one).status == 200
+    rows = rows_of(service, tape)
+    two = [{**rows[0], "album": "Again"}, {**rows[1], "album": "Again"}]
+    assert send(app, service, tape, two).json().get("needs_confirm") is True
+    assert send(app, service, tape, rows).status == 200
+    assert edges(service, tape)[0] != (None, None)
