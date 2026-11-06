@@ -61,7 +61,7 @@ class Library(Beet):
 
     def _ls(self, args: tuple[str, ...]) -> Result:
         said = args[args.index("-f") + 1]
-        pinning = args[args.index("-f") + 2].startswith("albumartist:")
+        pinning = args[args.index("-f") + 2].startswith("album::")
         if pinning or not said.endswith("$mb_albumid"):
             return super()._ls(args)
         assert said == FORMAT

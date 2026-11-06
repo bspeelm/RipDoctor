@@ -407,9 +407,44 @@ def test_merging_into_another_edition_once_rewrote_an_owned_album_so_it_keeps_bo
     assert not [f for f in fed_to_import(service) if b"M" in f or b"R" in f]
     one = songs(service, tape)[0]
     assert one.filing == F.FILED
-    assert "another edition" in one.filing_note
-    assert "second album entry" in one.filing_note
+    assert "separate album entry" in one.filing_note
     assert "did not change" in one.filing_note
+
+
+def canonically(service: Service, release: str) -> None:
+    """A row of the album song 1 is pinned to, under the name beets itself keeps for
+    the artist, where the release credits another."""
+    beet_of(service).owns(
+        "Another",
+        album="Record rel-1",
+        albumartist="The Artist As Beets Knows Them",
+        mb_albumid=release,
+        length="9:00",
+    )
+
+
+def test_an_edition_under_the_artists_own_name_is_seen_and_never_merged_into(
+    service: Service,
+) -> None:
+    """Rows were read by the release's credit, so these were missed, and beets, asking
+    by the artist's own name, could take a merge onto another edition."""
+    app = build(service)
+    tape = pinned(app, service)
+    canonically(service, "rel-other")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nK\n"
+
+
+def test_a_later_song_joining_an_album_under_the_artists_own_name_merges(
+    service: Service,
+) -> None:
+    """It was answered as if nothing were held, and the duplicate question beets then
+    asked failed that song on every retry."""
+    app = build(service)
+    tape = pinned(app, service)
+    canonically(service, "rel-1")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nM\nA\n"
 
 
 def test_a_library_holding_two_editions_is_never_merged_into_either(

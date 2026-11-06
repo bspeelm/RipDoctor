@@ -548,10 +548,12 @@ def second_row(run: Run, rows: Sequence[Row]) -> str:
 
 
 def joining(run: Run, rows: Sequence[Row]) -> str:
-    """How a pinned run meets the album rows already there. Merging rematches every
-    row of the album against the pinned release, so an owned track is renamed,
-    renumbered and retagged unless all of them are already that release. Anything else
-    goes beside them, and an empty or foreign album id is not that release."""
+    """How a pinned run meets the album rows already there, of any album artist. Beets
+    asks about a duplicate by the artist's own name, where a release may credit another,
+    so only the album's name can be compared here. Merging rematches every row of that
+    album against the pinned release, so an owned track is renamed, renumbered and
+    retagged unless all of them are already that release. Anything else goes beside
+    them, and an empty or foreign album id is not that release."""
     held = {r.release for r in rows if fold(r.album) == fold(run.album)}
     if not held:
         return NEW_ALBUM
@@ -560,8 +562,8 @@ def joining(run: Run, rows: Sequence[Row]) -> str:
 
 def beside_note(run: Run) -> str:
     return (
-        f"beets already held {run.album} as another edition, so this is a second album "
-        "entry beside it, and your tracks there did not change"
+        f"beets already held an album called {run.album}, so this is a separate album "
+        "entry, and the tracks already there did not change"
     )
 
 

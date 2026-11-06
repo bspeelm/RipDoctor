@@ -754,12 +754,9 @@ class Beets:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
 
-    def album_rows(
-        self, runner: Runner, root: str, artist: str, album: str
-    ) -> tuple[Row, ...]:
-        """The rows under this album artist and album, with the release each is of."""
-        query = [term("albumartist", artist), term("album", album)]
-        return self._held(runner, root, query, 300.0)
+    def album_rows(self, runner: Runner, root: str, album: str) -> tuple[Row, ...]:
+        """The rows on an album of this name, with the release each is of."""
+        return self._held(runner, root, [term("album", album)], 300.0)
 
     def held_rows(
         self,

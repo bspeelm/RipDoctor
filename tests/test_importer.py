@@ -813,7 +813,7 @@ def test_a_pinned_run_told_nothing_merges_nothing() -> None:
     assert runner.fed == [b"A\nK\n"]
 
 
-def test_the_album_rows_are_read_by_album_artist_and_album_with_their_release() -> None:
+def test_the_album_rows_are_read_by_album_alone_with_their_release() -> None:
     runner = FakeRunner()
     runner.expect(
         "ls",
@@ -821,12 +821,10 @@ def test_the_album_rows_are_read_by_album_artist_and_album_with_their_release() 
             ("A Song", "A Band", "A Record", "3:20", "/lib/a.flac", "rec", "1", "rel-9")
         ).encode(),
     )
-    rows = I.Beets().album_rows(runner, "/lib", "A Band", "A Record")
+    rows = I.Beets().album_rows(runner, "/lib", "A Record")
     assert [r.release for r in rows] == ["rel-9"]
-    assert runner.calls[0][-2:] == (
-        F.term("albumartist", "A Band"),
-        F.term("album", "A Record"),
-    )
+    assert runner.calls[0][-1] == F.term("album", "A Record")
+    assert not [a for a in runner.calls[0] if a.startswith("albumartist")]
 
 
 def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) -> None:

@@ -515,8 +515,7 @@ class _Filing:
         doubled, how = "", F.BESIDE
         if run.release:
             how = F.joining(
-                run,
-                self.beets.album_rows(self.runner, self.library, run.artist, run.album),
+                run, self.beets.album_rows(self.runner, self.library, run.album)
             )
             doubled = F.beside_note(run) if how == F.BESIDE else ""
         else:

@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,816, and
-at 4,116 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,812, and
+at 4,112 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2342,7 +2342,9 @@ text sort puts song 100 before song 11.
 
 **Filing is one import per album.** A song with a release is a pinned import: title
 and track number are written first, then `import --search-id` runs. Its answers depend
-on what the library holds under that album artist and album, read just before. With
+on what the library holds of an album of that name, read just before, under any album
+artist: beets asks about a duplicate by the artist's own name, which a release may credit
+otherwise. With
 nothing held, apply alone. With every row already this release, apply, merge, apply:
 joining an album takes all three, and with only the first two the run stopped safely
 at end of input. With anything else held, apply, keep both. Merging rematches every row
