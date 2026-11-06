@@ -1217,6 +1217,7 @@ async function loadTapes(keep) {
 
 async function openTape(id) {
   try {
+    await flushNudge();
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
     else if (tape.job?.error && !$("#tp-err").textContent) $("#tp-err").textContent = tape.job.error;
@@ -1325,6 +1326,7 @@ function whyText(song) {
 async function settleSong(send) {
   $("#tp-err").textContent = "";
   if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
+  await flushNudge();
   try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
@@ -1396,7 +1398,9 @@ function reviewRow(song) {
 
 // The waveform is the same editor a rip's Cut screen has, on its own canvas, and a
 // song's edges reach the server only when a marker is let go.
-let tpDrawn = null, tpAudio = null, tpNudge = null;
+let tpDrawn = null, tpAudio = null;
+let tpPicked = null;                  // the marker a person pressed, which arrows may move
+let tpNudge = null;                   // {tape, song, seen, start, end, timer}, not yet saved
 
 const songOf = (n) => tape?.songs.find((s) => s.number === n);
 const earOf = (n) => tape?.ear.find((r) => r.number === n);
@@ -1486,8 +1490,10 @@ function tapeReadout() {
   sayGap($("#tp-ro-gap"), v, tpEd.side?.gaps.band.gaps ?? []);
 }
 
-function tapeSelect(num, edge, fit) {
+function tapeSelect(num, edge, fit, picked = false) {
+  if (tpNudge && tpNudge.song !== num) flushNudge();
   tpEd.sel = num == null ? null : { track: num, edge };
+  tpPicked = picked && num != null ? { track: num, edge } : null;
   const t = tpEd.tracks.find((x) => x.number === num);
   if (fit && t) tpEd.fitRange(t.start, t.end); else tpEd.render();
   for (const row of $("#tp-ear").children) row.classList.toggle("sel", Number(row.dataset.song) === num);
@@ -1557,7 +1563,8 @@ function moveSaid(before, after, num) {
 
 async function saveTapeEdges(num, start, end) {
   const before = tape;
-  clearTimeout(tpNudge);
+  if (tpNudge?.tape === tape.id && tpNudge.song === num) dropNudge();
+  else await flushNudge();
   if (tapeEdited) {
     tpEd.setTracks(tapeTracks(tape));
     waveSay("save the song list first", true);
@@ -1569,7 +1576,7 @@ async function saveTapeEdges(num, start, end) {
     const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`,
       { start, end, seen_start: seen.start, seen_end: seen.end });
     showTape(after);
-    tapeSelect(num, tpEd.sel?.edge ?? "start", false);
+    if (tpEd.sel?.track === num) tapeSelect(num, tpEd.sel.edge, false, tpPicked?.track === num);
     waveSay(moveSaid(before, after, num));
   } catch (e) {
     tpEd.frozen = tapeWatching || !!tape?.playlist.done;
@@ -1591,12 +1598,43 @@ function tapeEdgeDropped(num, edge, landed) {
   saveTapeEdges(num, t.start, t.end);
 }
 
+function dropNudge() {
+  const n = tpNudge;
+  if (n) clearTimeout(n.timer);
+  tpNudge = null;
+  return n;
+}
+
+// What a person nudged is saved whatever happens next. It belongs to its tape and song,
+// which may not be the ones on screen by the time it goes.
+async function flushNudge() {
+  const n = dropNudge();
+  if (!n) return;
+  if (tape?.id === n.tape) { await saveTapeEdges(n.song, n.start, n.end); return; }
+  try { await postJSON(nudgeUrl(n), nudgeBody(n)); }
+  catch (e) { $("#tp-err").textContent = `song ${n.song} was not moved: ${e.message}`; }
+}
+
+const nudgeUrl = (n) => `/api/tapes/${n.tape}/songs/${n.song}/edges`;
+const nudgeBody = (n) => ({ start: n.start, end: n.end, seen_start: n.seen[0], seen_end: n.seen[1] });
+
+// `keepalive` is what lets a request outlive the page that sent it.
+function flushNudgeOnLeaving() {
+  const n = dropNudge();
+  if (n) fetch(nudgeUrl(n), { method: "POST", keepalive: true, credentials: "same-origin",
+                              headers: { "content-type": "application/json" }, body: JSON.stringify(nudgeBody(n)) });
+}
+
 function nudgeTapeEdge(t, edge, by) {
   if (tpEd.frozen) return;
   t[edge] += by;
   tpEd.render(); tapeReadout();
-  clearTimeout(tpNudge);
-  tpNudge = setTimeout(() => saveTapeEdges(t.number, t.start, t.end), 500);
+  const song = songOf(t.number);
+  const seen = tpNudge?.song === t.number ? tpNudge.seen : [song.start, song.end];
+  dropNudge();
+  tpNudge = { tape: tape.id, song: t.number, seen, start: t.start, end: t.end };
+  tpNudge.timer = setTimeout(flushNudge, 500);
+  waveSay(`Song ${t.number} becomes yours when this saves, and nothing will move it after that.`);
 }
 
 function tapeJudge(send) {
@@ -1618,6 +1656,8 @@ function tapeZoom(by) {
 }
 
 function tapeKey(e) {
+  // Alt-left is the browser going back. Shift is this page's own larger step.
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
   const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
   if (e.code === "Space") {
     e.preventDefault();
@@ -1627,6 +1667,11 @@ function tapeKey(e) {
   } else if (e.key === "a" || e.key === "A") {
     if (t) { e.preventDefault(); tapeHear(t[sel.edge]); }
   } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
+    // A nudge sets a boundary for good, so a song chosen from its row is not enough.
+    if (tpPicked?.track !== sel.track || tpPicked.edge !== sel.edge) {
+      waveSay("Press a marker on the waveform first, and the arrow keys will move it.");
+      return;
+    }
     e.preventDefault();
     nudgeTapeEdge(t, sel.edge, (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
   } else if (e.key === "n" || e.key === "N") {
@@ -1646,11 +1691,12 @@ function wireTapeWave() {
       const t = tpEd.tracks.find((x) => x.number === num);
       if (t) { t[edge] = at; tpEd.render(); tapeReadout(); }
     },
-    (num, edge) => tapeSelect(num, edge, false),
+    (num, edge) => tapeSelect(num, edge, false, true),
     (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
     { onDrop: tapeEdgeDropped, long: true });
   tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
   $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
+  addEventListener("pagehide", flushNudgeOnLeaving);
   $("#tp-prev").onclick = () => stepDoubt(-1);
   $("#tp-next").onclick = () => stepDoubt(1);
   $("#tp-play").onclick = tapePlay;
@@ -1780,7 +1826,7 @@ function edgeCell(song, edge) {
   input.value = song[edge] ?? "";
   input.setAttribute("aria-label", `song ${song.number} ${edge}, in seconds`);
   const hear = judgeButton("Hear", "across this boundary, with a tick on it",
-    () => { tapeSelect(song.number, edge, false); tapeHear(song[edge]); });
+    () => { tapeSelect(song.number, edge, false, true); tapeHear(song[edge]); });
   hear.disabled = song[edge] == null;
   td.append(input, hear);
   return td;
@@ -1860,6 +1906,7 @@ function earRow(row, t) {
 async function startTapeJob(path, body) {
   $("#tp-err").textContent = "";
   if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
+  await flushNudge();
   try {
     await postJSON(path, body);
     watchTape();
@@ -2104,7 +2151,7 @@ function setMode(mode) {
   if (mode === "punch") loadPunchTracks();
   if (mode === "upload") loadIncoming();
   if (mode === "precut") loadPrecut();
-  if (mode === "tapes") { player?.stop(); loadTapes(); } else tpPlayer?.stop();
+  if (mode === "tapes") { player?.stop(); loadTapes(); } else { tpPlayer?.stop(); flushNudge(); }
   if (!source) ed.render();
 }
 

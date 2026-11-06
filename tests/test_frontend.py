@@ -336,3 +336,34 @@ def test_only_a_long_timeline_gets_its_grid_its_clock_or_its_care() -> None:
     assert "this.long ? fmtLong(t) : fmt(t)" in js
     assert "return this.long && (this.t1 - this.t0)" in js
     assert "this.opts" not in js
+
+
+def test_a_key_with_a_modifier_is_the_browser_s_and_alt_left_is_not_a_nudge() -> None:
+    """Alt-left went back a page, and set the selected boundary as the person's too."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function tapeKey\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    first = body.index("if (e.altKey || e.ctrlKey || e.metaKey) return;")
+    assert first < body.index("nudgeTapeEdge(")
+
+
+def test_only_a_marker_a_person_pressed_can_be_nudged() -> None:
+    """A row selects a song, and an arrow key then set its start for good."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function tapeKey\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    guard = body.index("tpPicked?.track !== sel.track")
+    assert guard < body.index("nudgeTapeEdge(")
+    assert "(num, edge) => tapeSelect(num, edge, false, true)" in js
+    assert 'tapeSelect(song.number, "start", true);' in js
+
+
+def test_a_nudge_says_whose_it_becomes_and_is_flushed_rather_than_dropped() -> None:
+    """A pending nudge was a bare timer, lost with the page or sent for another song."""
+    js = (STATIC / "app.js").read_text()
+    assert "becomes yours when this saves" in js
+    assert "tpNudge = { tape: tape.id, song: t.number, seen," in js
+    assert 'addEventListener("pagehide", flushNudgeOnLeaving)' in js
+    assert "keepalive: true" in js
+    for caller in ("async function openTape(", "async function startTapeJob("):
+        start = js.index(caller)
+        assert "await flushNudge();" in js[start : js.index("\n}", start)]
+    assert "if (tpNudge && tpNudge.song !== num) flushNudge();" in js
