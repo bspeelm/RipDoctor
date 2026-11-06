@@ -202,15 +202,20 @@ export class Editor {
     const step = span > 14400 ? 3600 : span > 7200 ? 1800 : span > 3600 ? 600 : span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
     c.strokeStyle = "#20242b"; c.fillStyle = "#5a626c";
     c.font = "10px ui-monospace,monospace"; c.lineWidth = 1;
+    let clear = -Infinity;
     for (let t = Math.ceil(this.t0 / step) * step; t < this.t1; t += step) {
       const x = Math.round(this.xOf(t)) + 0.5;
       c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-      c.fillText(gridLabel(t), x + 3, L.over.top - 4);
+      if (this.opts.titles && x < clear) continue;
+      const label = gridLabel(t);
+      c.fillText(label, x + 3, L.over.top - 4);
+      clear = x + c.measureText(label).width + 8;
     }
   }
 
   // Faint marks where the catalogue duration says a boundary should land.
   _ghosts(c, L) {
+    if (this.tooCoarse) return;
     c.strokeStyle = "rgba(139,145,153,0.5)"; c.setLineDash([2, 3]); c.lineWidth = 1;
     c.fillStyle = "rgba(139,145,153,0.8)"; c.font = "10px ui-monospace,monospace";
     for (const t of this.tracks) {
@@ -225,33 +230,72 @@ export class Editor {
   }
 
   _markers(c, L) {
-    let clear = -Infinity;            // where the last tag drawn ends, when it matters
+    if (this.opts.titles) { this._namedMarkers(c, L); return; }
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const x = this.xOf(t[edge]);
         if (x < -30 || x > L.w + 30) continue;
-        const on = this.sel && this.sel.track === t.number && this.sel.edge === edge;
-        c.strokeStyle = edge === "start" ? "#5fd38d" : "#e6705a";
-        c.lineWidth = on ? 2.5 : 1.4;
-        c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-        c.fillStyle = c.strokeStyle;
-        const label = `${t.number}${edge === "start" ? "▶" : "■"}${t.mark ?? ""}`;
-        c.font = on ? "bold 11px ui-monospace,monospace" : "11px ui-monospace,monospace";
-        const tw = c.measureText(label).width;
-        const lx = edge === "start" ? x + 3 : x - tw - 3;
-        if (this.opts.titles && lx - 2 < clear && !on) continue;
-        clear = lx + tw + 2;
-        c.fillRect(lx - 2, L.wave.top + 2, tw + 4, 14);
-        c.fillStyle = "#0b0d10";
-        c.fillText(label, lx, L.wave.top + 13);
-        if (this.opts.titles && edge === "start") this._title(c, L, t, x);
+        const on = this._selected(t, edge);
+        this._line(c, L, x, edge, on);
+        this._tag(c, L, t, edge, x, on);
       }
     }
-    if (this.tooCoarse && this.side) {
-      c.fillStyle = "#8b9199"; c.font = "11px ui-sans-serif,system-ui";
-      const say = "zoom in to move a boundary";
-      c.fillText(say, L.w - c.measureText(say).width - 6, L.wave.top + 30);
+  }
+
+  // Lines first, so none is drawn over a tag. Too far out to place a boundary, a
+  // song's end sits on the next one's start, and what is wanted is the waveform: each
+  // song gets one faint line, and a tag that would land on another is left out.
+  _namedMarkers(c, L) {
+    const coarse = this.tooCoarse;
+    const shown = [];
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        const on = this._selected(t, edge);
+        if (coarse && edge === "end" && !on) continue;
+        const x = this.xOf(t[edge]);
+        if (x < -30 || x > L.w + 30) continue;
+        c.globalAlpha = coarse && !on ? 0.3 : 1;
+        this._line(c, L, x, edge, on);
+        c.globalAlpha = 1;
+        shown.push({ t, edge, x, on });
+      }
     }
+    let clear = -Infinity;
+    for (const { t, edge, x, on } of shown) {
+      c.font = "11px ui-monospace,monospace";
+      const tw = c.measureText(`${t.number}▶${t.mark ?? ""}`).width;
+      if (!on && (edge === "start" ? x + 1 : x - tw - 5) < clear) continue;
+      clear = this._tag(c, L, t, edge, x, on);
+      if (edge === "start") this._title(c, L, t, x);
+    }
+    if (coarse) {
+      const say = "zoom in to move a boundary";
+      c.font = "11px ui-sans-serif,system-ui";
+      const w = c.measureText(say).width;
+      c.fillStyle = "#0f1114"; c.fillRect(L.w - w - 10, L.band.top + 2, w + 10, 16);
+      c.fillStyle = "#8b9199"; c.fillText(say, L.w - w - 5, L.band.top + 14);
+    }
+  }
+
+  _selected(t, edge) { return !!this.sel && this.sel.track === t.number && this.sel.edge === edge; }
+
+  _line(c, L, x, edge, on) {
+    c.strokeStyle = edge === "start" ? "#5fd38d" : "#e6705a";
+    c.lineWidth = on ? 2.5 : 1.4;
+    c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
+  }
+
+  /** Returns where the tag ends. */
+  _tag(c, L, t, edge, x, on) {
+    c.fillStyle = edge === "start" ? "#5fd38d" : "#e6705a";
+    const label = `${t.number}${edge === "start" ? "▶" : "■"}${t.mark ?? ""}`;
+    c.font = on ? "bold 11px ui-monospace,monospace" : "11px ui-monospace,monospace";
+    const tw = c.measureText(label).width;
+    const lx = edge === "start" ? x + 3 : x - tw - 3;
+    c.fillRect(lx - 2, L.wave.top + 2, tw + 4, 14);
+    c.fillStyle = "#0b0d10";
+    c.fillText(label, lx, L.wave.top + 13);
+    return lx + tw + 2;
   }
 
   // Under its tag, and only as much as fits in the stretch it names.

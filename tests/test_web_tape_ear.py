@@ -1,4 +1,4 @@
-"""A tape's ear check over the wire, with no ffmpeg. ADR-063."""
+"""A person's judgement of a tape's boundaries over the wire, no ffmpeg. ADR-063."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio import split
-from ripdoctor.audio.split import TICK_HZ
 from ripdoctor.core import tape as TP
-from ripdoctor.store import cache as C
+from ripdoctor.core.envelope import HEADER_BYTES, decode
 from ripdoctor.store import tapes as T
 from ripdoctor.web.routes import build
 from ripdoctor.web.service import Service
@@ -42,205 +40,140 @@ def placed(app, service: Service, text: str = ONE_DOUBT) -> str:  # type: ignore
     return tape
 
 
-def job_of(app, tape: str, service: Service) -> dict:  # type: ignore[no-untyped-def]
-    return get(app, f"/api/job/{T.key_of(tape)}", service).json()
+def guarded(song: float, start: float, end: float) -> tuple[str, dict]:
+    return f"songs/{song}/edges", {"start": start, "end": end, "guarded": True}
 
 
-def ticks(service: Service) -> list[tuple[str, ...]]:
-    return [c for c in service.runner.calls if any("sine=" in a for a in c)]  # type: ignore[attr-defined]
+# ------------------------------------------------------------------- the waveform
 
 
-def flag(argv: tuple[str, ...], name: str) -> str:
-    return argv[argv.index(name) + 1]
-
-
-def test_clips_are_built_only_for_flagged_boundaries_by_default(
+def test_a_tape_s_waveform_is_what_processing_measured_and_opening_measures_nothing(
     service: Service,
 ) -> None:
     app = build(service)
     tape = placed(app, service)
-    assert post(app, f"/api/tapes/{tape}/clips", service).status == 202
-    assert not job_of(app, tape, service)["error"]
-
-    made = ticks(service)
-    assert len(made) == 2, "song 2 is in doubt, song 1 agrees with the list"
-    song = T.read(service.layout, tape).songs[1]
-    assert flag(made[0], "-ss") == f"{(song.start or 0.0) - 4.0:.2f}"
-    assert f"sine=frequency={TICK_HZ}" in " ".join(made[0])
-    assert all(c[-1].endswith(".flac") for c in made)
-    assert all(T.PARTIAL in c[-1] for c in made), "a clip earns its name afterwards"
-
-    row = {
-        r["number"]: r for r in get(app, f"/api/tapes/{tape}", service).json()["ear"]
-    }
-    assert row[2]["clips"] == {"start": True, "end": True}
-    assert row[1]["clips"] == {"start": False, "end": False}
-
-
-def test_any_other_boundary_can_be_asked_for(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    asked = {"song": 1, "edge": "end"}
-    assert post(app, f"/api/tapes/{tape}/clips", service, asked).status == 202
-    assert len(ticks(service)) == 1
-    answer = get(app, f"/api/tapes/{tape}/songs/1/clip/end", service)
-    assert answer.status == 200
-    assert answer.path.endswith(".flac")
-    assert get(app, f"/api/tapes/{tape}/songs/1/clip/start", service).status == 404
-
-
-def test_a_clip_is_only_for_a_start_or_an_end(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/clips", service, {"song": 1, "edge": "end"})
-    assert get(app, f"/api/tapes/{tape}/songs/1/clip/middle", service).status == 404
-
-
-def test_a_clip_already_built_is_not_built_again(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/clips", service)
-    post(app, f"/api/tapes/{tape}/clips", service)
-    assert len(ticks(service)) == 2
-
-
-def test_a_tick_is_held_short_of_the_end_of_the_tape(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/clips", service, {"song": 2, "edge": "end"})
-    duration = T.read(service.layout, tape).duration
-    assert float(flag(ticks(service)[0], "-to")) <= duration
-
-
-def test_a_clip_too_near_the_end_for_a_tick_says_so_and_the_argv_is_unchanged(
-    service: Service,
-) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    duration = T.read(service.layout, tape).duration
-    url = f"/api/tapes/{tape}/songs/2/edges"
-    last = duration - split.EOF_MARGIN
-    answer = post(app, url, service, {"start": 6.0, "end": last})
-    assert answer.status == 200, answer.text
-    row = {r["number"]: r for r in answer.json()["ear"]}[2]
-    assert row["ticks"] == {TP.START: True, TP.END: False}
-
-    asked = {"song": 2, "edge": TP.END}
-    assert post(app, f"/api/tapes/{tape}/clips", service, asked).status == 202
-    argv = ticks(service)[-1]
-    assert argv[argv.index("-to") + 1] == f"{last:.2f}"
-    assert any("adelay=4000|4000" in a for a in argv), "never moved to fit"
-
-
-def test_a_tick_that_only_just_fits_is_not_flagged() -> None:
-    duration = 100.0
-    room = split.EOF_MARGIN + split.TICK_SECONDS
-    assert split.tick_lands(duration - room, duration)
-    assert not split.tick_lands(duration - room + 0.001, duration)
-
-
-def test_the_ear_check_shows_a_clip_with_no_tick_for_what_it_is() -> None:
-    source = (Path(__file__).parent.parent / "ripdoctor/web/static/app.js").read_text()
-    assert "row.ticks[edge]" in source
-    assert "no tick in this clip" in source
-
-
-def test_a_boundary_that_moved_needs_its_own_clip(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/clips", service, {"song": 2, "edge": "end"})
-    url = f"/api/tapes/{tape}/songs/2/clip/end"
-    assert get(app, url, service).status == 200
-    post(app, f"/api/tapes/{tape}/songs/2/edges", service, {"start": 7.0, "end": 11.0})
-    assert get(app, url, service).status == 404
-
-
-def test_with_nothing_flagged_a_clip_has_to_be_asked_for_by_name(
-    service: Service,
-) -> None:
-    app = build(service)
-    tape = a_new_tape(app, service)
-    send_csv(
-        app,
-        tape,
-        service,
-        ONE_DOUBT.replace("0:30", "0:05"),
-    )
-    upload(app, tape, service)
-    process(app, tape, service)
-    assert post(app, f"/api/tapes/{tape}/clips", service).status == 409
-    assert ticks(service) == []
-
-
-@pytest.mark.parametrize(
-    ("body", "status"),
-    [
-        ({"song": 1, "edge": "middle"}, 400),
-        ({"song": 9, "edge": "start"}, 404),
-    ],
-)
-def test_a_boundary_that_is_not_there_is_refused(
-    service: Service, body: dict, status: int
-) -> None:
-    app = build(service)
-    tape = placed(app, service)
-    assert post(app, f"/api/tapes/{tape}/clips", service, body).status == status
-
-
-def test_clips_and_a_preview_need_the_audio(service: Service) -> None:
-    app = build(service)
-    tape = a_new_tape(app, service)
-    send_csv(app, tape, service, ONE_DOUBT)
-    assert post(app, f"/api/tapes/{tape}/clips", service).status == 409
-    assert post(app, f"/api/tapes/{tape}/preview", service).status == 409
-
-
-def test_opening_a_tape_never_builds_a_preview(service: Service) -> None:
-    app = build(service)
-    tape = placed(app, service)
+    kept = T.envelope_file(service.layout, tape)
+    lanes = decode(kept.read_bytes())
+    assert len(kept.read_bytes()) == HEADER_BYTES + 3 * len(lanes.full)
     before = len(service.runner.calls)  # type: ignore[attr-defined]
-    view = get(app, f"/api/tapes/{tape}", service).json()
-    assert not view["preview"]
-    assert len(service.runner.calls) == before  # type: ignore[attr-defined]
-    assert get(app, f"/api/tapes/{tape}/preview", service).status == 404
+    assert get(app, f"/api/tapes/{tape}", service).json()["waveform"]
+    answer = get(app, f"/api/tapes/{tape}/envelope", service)
+    assert answer.status == 200
+    assert answer.path == str(kept)
+    assert len(service.runner.calls) == before, "no measure, no encode, no probe"  # type: ignore[attr-defined]
 
 
-def test_a_preview_is_a_job_writing_the_record_flow_s_encode(service: Service) -> None:
+def test_a_tape_with_no_measurement_says_so_rather_than_drawing_nothing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = a_new_tape(app, service)
+    assert not get(app, f"/api/tapes/{tape}", service).json()["waveform"]
+    assert get(app, f"/api/tapes/{tape}/envelope", service).status == 404
+
+
+def test_a_tape_s_audio_is_its_own_file_served_for_seeking(service: Service) -> None:
     app = build(service)
     tape = placed(app, service)
-
-    def encode(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
-        if "libopus" in argv:
-            Path(argv[-1]).write_bytes(b"OggS")
-        return plain(argv, stdin=stdin, timeout=timeout)
-
-    plain = service.runner.run
-    service.runner.run = encode  # type: ignore[method-assign]
-    assert post(app, f"/api/tapes/{tape}/preview", service).status == 202
-    done = job_of(app, tape, service)
-    assert done["op"] == "preview"
-    assert not done["error"], done["error"]
-
-    audio = str(T.audio_file(service.layout, tape))
-    encodes = [c for c in service.runner.calls if "libopus" in c]
-    assert len(encodes) == 1
-    assert list(encodes[0][:-1]) == C.preview_argv(audio, "x")[:-1]
-    assert get(app, f"/api/tapes/{tape}", service).json()["preview"]
-    assert get(app, f"/api/tapes/{tape}/preview", service).status == 200
-
-    post(app, f"/api/tapes/{tape}/preview", service)
-    assert len([c for c in service.runner.calls if "libopus" in c]) == 1
+    answer = get(app, f"/api/tapes/{tape}/audio", service)
+    assert answer.status == 200
+    assert answer.path == str(T.audio_file(service.layout, tape))
+    assert answer.content_type == "audio/flac"
 
 
-def test_a_preview_that_produced_nothing_carries_a_message(service: Service) -> None:
+def test_a_tape_with_no_audio_serves_none(service: Service) -> None:
     app = build(service)
-    tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/preview", service)
-    assert "produced nothing" in job_of(app, tape, service)["error"]
-    assert not T.preview_file(service.layout, tape).exists()
+    tape = a_new_tape(app, service)
+    assert get(app, f"/api/tapes/{tape}/audio", service).status == 409
+    assert get(app, "/api/tapes/nobody/audio", service).status == 404
 
 
 # ----------------------------------------------------------------- judgements
+
+
+def test_a_drag_is_saved_as_the_person_s_and_a_re_run_leaves_it(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    url, body = guarded(2, 6.5, 11.0)
+    answer = post(app, f"/api/tapes/{tape}/{url}", service, body)
+    assert answer.status == 200, answer.text
+    process(app, tape, service)
+    song = T.read(service.layout, tape).songs[1]
+    assert (song.start, song.end, song.set_by) == (6.5, 11.0, TP.EAR)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "said"),
+    [
+        (1.0, 11.0, "overlaps song 1"),
+        (6.5, 9999.0, "does not fit"),
+        (12.0, 11.0, "does not fit"),
+    ],
+)
+def test_an_impossible_drag_is_refused_with_its_reason_and_changes_nothing(
+    service: Service, start: float, end: float, said: str
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    before = T.read(service.layout, tape)
+    url, body = guarded(2, start, end)
+    refused = post(app, f"/api/tapes/{tape}/{url}", service, body)
+    assert refused.status == 409
+    assert said in refused.json()["error"]
+    assert T.read(service.layout, tape) == before
+
+
+def test_moving_a_boundary_settles_that_song_s_doubt(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    url, body = guarded(2, 6.5, 11.0)
+    view = post(app, f"/api/tapes/{tape}/{url}", service, body).json()
+    assert not {r["number"]: r for r in view["ear"]}[2]["doubtful"]
+
+
+def test_accepting_settles_a_doubt_and_the_cut_waits_until_it_is_settled(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    for song in (1, 2):
+        post(app, f"/api/tapes/{tape}/songs/{song}/from-list", service)
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert "song 2 (Two): still in doubt" in view["cut_refusal"]
+    refused = post(app, f"/api/tapes/{tape}/cut", service)
+    assert refused.status == 409
+    assert "song 2 (Two)" in refused.json()["error"]
+
+    accepted = post(app, f"/api/tapes/{tape}/songs/2/heard", service).json()
+    assert accepted["cut_refusal"] == ""
+    assert accepted["songs"][1]["set_by"] == TP.FOUND
+    taken_back = post(
+        app, f"/api/tapes/{tape}/songs/2/heard", service, {"heard": False}
+    )
+    assert "song 2 (Two)" in taken_back.json()["cut_refusal"]
+
+
+def test_a_document_written_with_clips_and_a_preview_beside_it_still_opens(
+    service: Service,
+) -> None:
+    """Those files stay on disk, unread, until the tape is removed."""
+    app = build(service)
+    tape = placed(app, service)
+    post(app, f"/api/tapes/{tape}/songs/2/heard", service)
+    where = T.dir_for(service.layout, tape)
+    (where / "clips").mkdir()
+    (where / "clips" / "0000005000.flac").write_bytes(b"fLaC")
+    (where / "tape.opus").write_bytes(b"OggS")
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["songs"][1]["heard"]
+    assert not {r["number"]: r for r in view["ear"]}[2]["doubtful"]
+    assert set(view["ear"][0]) == {"number", "doubtful", "cut"}
+    assert "preview" not in view
+    assert (where / "clips" / "0000005000.flac").is_file()
 
 
 def test_an_edge_set_over_the_wire_is_not_moved_by_a_re_run(service: Service) -> None:

@@ -67,12 +67,12 @@ header > button,header .tabs,header strong{flex:none}
 
 #cv{display:block;width:100%;flex:1;min-height:0;cursor:crosshair;touch-action:none}
 
-#readout{display:flex;align-items:center;gap:1rem;padding:.35rem .75rem;flex:none;
+#readout,#tp-readout{display:flex;align-items:center;gap:1rem;padding:.35rem .75rem;flex:none;
   border-top:1px solid var(--line);border-bottom:1px solid var(--line);
   font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel)}
-#ro-time{color:var(--accent);font-weight:600;min-width:7rem}
-#ro-gap.bad{color:var(--warn)}
-#ro-gap.good{color:var(--start)}
+#ro-time,#tp-ro-time{color:var(--accent);font-weight:600;min-width:7rem}
+#ro-gap.bad,#tp-ro-gap.bad{color:var(--warn)}
+#ro-gap.good,#tp-ro-gap.good{color:var(--start)}
 .hint{margin:0;color:var(--ghost);font-size:11px;line-height:1.45;max-width:44rem}
 kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 .25rem}
 
@@ -154,8 +154,18 @@ table.ear td{white-space:normal;vertical-align:top}
 table.ear .why{min-width:10rem}
 table.ear .moves{min-width:7.5rem}
 table.ear .edge input{min-width:5.5rem;width:5.5rem;display:block;margin-bottom:.2rem}
-table.ear audio{height:1.9rem;width:9rem;display:block}
-#tp-whole{width:100%;margin-bottom:.4rem}
+table.songs tr.sel td{background:#20262e}
+table.ear tbody tr{cursor:pointer}
+/* It stays on screen while the rows under it scroll, because a row is how you get
+   about a timeline hours long. */
+#tp-wave-wrap{position:sticky;top:0;z-index:2;display:flex;flex-direction:column;
+  gap:.4rem;flex:none;background:var(--bg);padding:.4rem 0}
+#tp-cv{display:block;width:100%;height:clamp(14rem,38vh,26rem);cursor:crosshair;touch-action:none}
+#tp-readout{flex-wrap:wrap;row-gap:0}
+#tp-tools{flex-wrap:wrap;margin:0}
+#tp-tools button{flex:0 1 auto}
+#tp-tools button:disabled{cursor:default}
+#tp-wave-say{margin:0;min-height:1.5em}
 table.review select{min-width:0;flex:1;max-width:22rem}
 table.review input{min-width:7rem;flex:1}
 table.review input[data-field=track]{flex:none;min-width:0;width:3.5rem}
@@ -343,6 +353,7 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   table.review td,table.ear td{display:block;border:0;min-width:0;text-align:left}
   table.ear td:empty{display:none}
   table.ear .edge{display:inline-block;width:50%}
-  table.ear audio,table.ear .edge input{width:100%}
+  table.ear .edge input{width:100%}
+  #tp-wave-wrap{position:static}
   table.review select{max-width:none}
 }

@@ -80,12 +80,6 @@ def cut_one(runner: Runner, cut: Cut, timeout: float = 300.0) -> None:
     runner.run(cut_argv(cut), timeout=timeout).require()
 
 
-def tick_lands(at: float, duration: float) -> bool:
-    """Whether a clip that stops `EOF_MARGIN` short of the end holds a tick at `at`.
-    The instant is the question, so one too near the end is never moved to fit."""
-    return at + TICK_SECONDS <= duration - EOF_MARGIN
-
-
 def tick_argv(
     source: str,
     at: float,

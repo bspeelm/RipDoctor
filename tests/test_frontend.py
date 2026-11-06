@@ -277,3 +277,47 @@ def test_a_job_s_error_is_still_there_after_a_reload() -> None:
 def test_a_song_on_an_archived_tape_is_not_called_uncut() -> None:
     js = (STATIC / "app.js").read_text()
     assert 't.playlist.done && row.cut === "not cut" ? "cleared" : row.cut' in js
+
+
+def test_a_tape_s_waveform_is_the_rip_s_editor_and_player_and_not_a_copy_of_them() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    assert 'tpEd = new Editor($("#tp-cv"),' in js
+    assert "tpPlayer = new Player(" in js
+    assert "class Editor" not in js and "class Player" not in js
+    assert sorted(p.name for p in STATIC.glob("*.js")) == [
+        "app.js",
+        "audio.js",
+        "editor.js",
+        "ripui.js",
+    ]
+
+
+def test_every_edge_the_tapes_page_sends_is_guarded() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert js.count("/songs/${num}/edges`, { start, end, guarded: true })") == 1
+    assert "/edges`" not in js.replace(
+        "/songs/${num}/edges`, { start, end, guarded: true })", ""
+    )
+
+
+def test_a_refused_move_puts_the_marker_back_and_says_why() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function saveTapeEdges\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    rest = body.split("catch (e)", 1)[1]
+    assert "tpEd.setTracks(tapeTracks(tape))" in rest
+    assert "waveSay(`Not moved: ${e.message}`, true)" in rest
+
+
+def test_the_tapes_page_keeps_the_rip_s_keys_to_itself() -> None:
+    """Space on the Tapes page played whatever record the Cut screen had loaded."""
+    js = (STATIC / "app.js").read_text()
+    assert 'if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }' in js
+
+
+def test_opening_a_tape_does_not_start_reading_its_audio() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function showTapeWave\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpPlayer.load" not in body
+    assert "tpPlayer.load(url)" in js

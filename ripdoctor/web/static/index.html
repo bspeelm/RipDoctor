@@ -131,13 +131,11 @@
         <button type="button" id="tp-match" disabled>Match songs</button>
         <button type="button" id="tp-rematch" class="ghost" disabled>Look again</button>
       </div>
-      <h2>Listen and cut</h2>
-      <p class="dim">A clip has a tick at the boundary: did it fall in the silence
-        or on the music? Set the edges, mark the song heard, or skip it if it is
-        damaged. The cut waits until nothing is left in doubt.</p>
+      <h2>Check and cut</h2>
+      <p class="dim">Every boundary is on the waveform. Drag it to move it, listen
+        across it, accept it as it is, or skip a song that is damaged. The cut waits
+        until nothing is left in doubt.</p>
       <div class="row btns">
-        <button type="button" id="tp-clips" disabled>Build clips for the doubts</button>
-        <button type="button" id="tp-preview" class="ghost" disabled>Build the whole preview</button>
         <button type="button" id="tp-cut" disabled>Cut</button>
       </div>
       <p class="warn" id="tp-cut-why" hidden></p>
@@ -168,6 +166,37 @@
       <div class="row"><div class="bar" id="tp-bar"><i></i></div></div>
       <p class="dim" id="tp-state"></p>
       <p class="warn" id="tp-mismatch" hidden></p>
+      <div id="tp-wave-wrap" hidden>
+        <canvas id="tp-cv"></canvas>
+        <div id="tp-readout">
+          <span id="tp-ro-time">&mdash;</span>
+          <span id="tp-ro-song"></span>
+          <span id="tp-ro-gap"></span>
+        </div>
+        <div class="row btns" id="tp-tools">
+          <button type="button" id="tp-prev" class="ghost" title="the doubt before this one (shift-N)">&larr; Doubt</button>
+          <button type="button" id="tp-next" class="ghost" title="the next doubt (N)">Doubt &rarr;</button>
+          <button type="button" id="tp-play" class="ghost" title="from the playhead, or 3 s before the selected boundary (space)">Play</button>
+          <button type="button" id="tp-hear" class="ghost" title="across the selected boundary, with a tick on it (A)">Hear</button>
+          <button type="button" id="tp-accept" class="ghost" title="the found edges are right, by ear">Accept</button>
+          <button type="button" id="tp-skip" class="ghost" title="a damaged song is not cut, and stays named">Skip</button>
+          <button type="button" data-nav id="tp-in" class="ghost tiny" title="zoom in (wheel)">+</button>
+          <button type="button" data-nav id="tp-out" class="ghost tiny" title="zoom out (wheel)">&minus;</button>
+          <button type="button" id="tp-song" class="ghost" title="the selected song (Z)">Song</button>
+          <button type="button" data-nav id="tp-whole" class="ghost" title="the whole tape (F)">Whole</button>
+          <label class="vol" title="playback volume"><input type="range" id="tp-vol" min="0" max="100" value="100"></label>
+        </div>
+        <p class="dim" id="tp-wave-say"></p>
+      </div>
+      <div class="tp-scroll" id="tp-ear-wrap" hidden>
+        <h2>Boundaries</h2>
+        <table class="songs ear">
+          <thead><tr>
+            <th>#</th><th>Song</th><th>Why</th><th>Start</th><th>End</th><th>Judge</th><th>Cut</th>
+          </tr></thead>
+          <tbody id="tp-ear"></tbody>
+        </table>
+      </div>
       <div class="tp-scroll">
         <table class="songs">
           <thead><tr>
@@ -189,16 +218,6 @@
             <th>#</th><th>On the list</th><th>Proposed</th><th>Why</th><th>Change it</th>
           </tr></thead>
           <tbody id="tp-review"></tbody>
-        </table>
-      </div>
-      <div class="tp-scroll" id="tp-ear-wrap" hidden>
-        <h2>Ear check</h2>
-        <audio id="tp-whole" controls preload="none" hidden></audio>
-        <table class="songs ear">
-          <thead><tr>
-            <th>#</th><th>Song</th><th>Why</th><th>Start</th><th>End</th><th>Judge</th><th>Cut</th>
-          </tr></thead>
-          <tbody id="tp-ear"></tbody>
         </table>
       </div>
       <div class="tp-scroll" id="tp-filing-wrap" hidden>
@@ -357,6 +376,7 @@
         <tr><td><kbd>S</kbd></td><td>split the track under the playhead &mdash; snaps to the gap edges if the playhead is inside a detected silence</td></tr>
         <tr><td><kbd>F</kbd> / <kbd>0</kbd></td><td>zoom to the whole side</td></tr>
         <tr><td><kbd>Z</kbd></td><td>zoom to the selected track</td></tr>
+        <tr><td><kbd>N</kbd></td><td>on a tape, the next doubt (<kbd>shift</kbd> for the one before)</td></tr>
         <tr><td><kbd>esc</kbd></td><td>stop playback</td></tr>
         <tr><td>click</td><td>set the playhead &mdash; and seek there if audio is playing</td></tr>
         <tr><td>drag</td><td>on a marker moves it; on the background pans</td></tr>

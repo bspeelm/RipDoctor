@@ -179,21 +179,24 @@ def test_a_song_with_no_boundaries_or_set_by_ear_cannot_be_heard() -> None:
 # ---------------------------------------------------------------------- flagging
 
 
-def test_only_the_doubtful_song_s_boundaries_are_flagged() -> None:
-    flagged = [(s.number, edge) for s, edge in TP.flagged(one_doubt())]
-    assert flagged == [(2, TP.START), (2, TP.END)]
+def flagged(tape: TP.Tape) -> list[int]:
+    return [s.number for s in TP.ear_order(tape) if TP.doubtful(tape, s)]
+
+
+def test_only_the_doubtful_song_is_flagged() -> None:
+    assert flagged(one_doubt()) == [2]
 
 
 def test_a_mismatch_flags_every_song_with_its_own_doubts_first() -> None:
     tape = replace(one_doubt(), mismatch="the list disagrees")
     assert [s.number for s in TP.ear_order(tape)] == [2, 1, 3]
-    assert len(TP.flagged(tape)) == 6
+    assert flagged(tape) == [2, 1, 3]
 
 
 def test_heard_skipped_and_ear_set_songs_are_not_flagged() -> None:
     tape = replace(one_doubt(), mismatch="the list disagrees")
     tape = TP.set_edges(TP.skip(TP.hear(tape, 1), 3), 2, 101.0, 203.0)
-    assert TP.flagged(replace(tape, mismatch="still")) == ()
+    assert flagged(replace(tape, mismatch="still")) == []
 
 
 def test_skipped_songs_come_last_in_the_ear_check() -> None:
@@ -226,7 +229,7 @@ def test_setting_the_doubts_does_not_clear_a_flagged_song_nobody_heard() -> None
     assert not tape.mismatch
     assert TP.doubtful(tape, tape.songs[5])
     assert "song 6 (Song 6)" in TP.cut_refusal(tape)
-    assert [s for s, _ in TP.flagged(tape)] == [tape.songs[5], tape.songs[5]]
+    assert flagged(tape) == [6]
 
 
 def test_a_flag_survives_the_document() -> None:

@@ -33,9 +33,7 @@ REMOVED = "tapes-removed"
 DOCUMENT = "tape.json"
 AUDIO = "tape.flac"
 ENVELOPE = "tape.env"
-PREVIEW = "tape.opus"
 CUTS = "cuts"
-CLIPS = "clips"
 PARTIAL = "partial"
 SUPERSEDED = "superseded"
 FILING = "filing"
@@ -66,20 +64,8 @@ def _document(layout: Layout, tape: str) -> Path:
     return dir_for(layout, tape) / DOCUMENT
 
 
-def _envelope(layout: Layout, tape: str) -> Path:
+def envelope_file(layout: Layout, tape: str) -> Path:
     return dir_for(layout, tape) / ENVELOPE
-
-
-def preview_file(layout: Layout, tape: str) -> Path:
-    return dir_for(layout, tape) / PREVIEW
-
-
-def clip_file(layout: Layout, tape: str, name: str) -> Path:
-    return dir_for(layout, tape) / CLIPS / name
-
-
-def clips_on_disk(layout: Layout, tape: str) -> set[str]:
-    return _names_in(dir_for(layout, tape) / CLIPS)
 
 
 def _names_in(where: Path) -> set[str]:
@@ -229,7 +215,7 @@ def listed(layout: Layout) -> Listing:
 def take_audio(layout: Layout, tape: str) -> Path:
     """Move a verified encode into the tape, with no stale measurements behind it."""
     target = audio_file(layout, tape)
-    _envelope(layout, tape).unlink(missing_ok=True)
+    envelope_file(layout, tape).unlink(missing_ok=True)
     os.replace(IN.done_file(layout, key_of(tape)), target)
     return target
 
@@ -237,7 +223,7 @@ def take_audio(layout: Layout, tape: str) -> Path:
 def measure(runner: Runner, layout: Layout, tape: str, duration: float) -> Envelope:
     """The full lane on the recording's real length, measured once per recording."""
     source = audio_file(layout, tape)
-    target = _envelope(layout, tape)
+    target = envelope_file(layout, tape)
     if not target.is_file():
         rate = sample_rate(runner, str(source))
         lanes = astats.lanes(runner, str(source), rate=rate, timeout=LONG_RUN)

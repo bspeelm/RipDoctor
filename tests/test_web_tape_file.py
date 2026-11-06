@@ -1751,3 +1751,18 @@ def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
     one = songs(service, tape)[0]
     assert (one.filing, one.path) == (F.ALREADY, filed_at)
     assert len(beet_of(service).imports) == before
+
+
+def test_a_filed_song_s_boundary_cannot_be_dragged_and_the_library_s_copy_stands(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = T.read(service.layout, tape)
+    current = before.songs[1]
+    body = {"start": current.start, "end": (current.end or 0.0) - 0.5, "guarded": True}
+    refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
+    assert refused.status == 409
+    assert "already in the library" in refused.json()["error"]
+    assert T.read(service.layout, tape) == before

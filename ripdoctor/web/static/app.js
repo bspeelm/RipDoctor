@@ -36,7 +36,7 @@ const S = {
   dirty: false,
 };
 
-let ed, player, ripTimer;
+let ed, player, ripTimer, tpEd, tpPlayer;
 // True while a stop is being waited out. The readout has one owner then: the
 // meter poll and the wait were both writing it on different intervals, so it
 // alternated between what each of them thought was happening.
@@ -1270,11 +1270,12 @@ function showTape(t) {
 }
 
 // An archived tape stays as it is, so nothing here may offer to change it. Its
-// clips still play, and its playlist can still be asked about.
+// waveform can still be looked around, and its playlist can still be asked about.
 function archivedControls() {
   for (const id of ["#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-match", "#tp-rematch"])
     $(id).disabled = true;
   for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
+  for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = false;
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1392,20 +1393,287 @@ function reviewRow(song) {
   return row;
 }
 
-const clipUrl = (song, edge) => `/api/tapes/${tape.id}/songs/${song.number}/clip/${edge}`;
+// The waveform is the same editor a rip's Cut screen has, on its own canvas, and a
+// song's edges reach the server only when a marker is let go.
+let tpDrawn = null, tpAudio = null, tpNudge = null;
+
+const songOf = (n) => tape?.songs.find((s) => s.number === n);
+const earOf = (n) => tape?.ear.find((r) => r.number === n);
+
+const STANDING = (song) => (song.skip ? "–" : song.set_by === "ear" ? "•" : song.heard ? "✓"
+  : CHOICE_HELD[song.filing] ? "⚑" : "");
+
+function tapeTracks(t) {
+  return t.songs.filter((s) => s.start != null && s.end != null).map((s) => ({
+    number: s.number, title: s.title, start: s.start, end: s.end, cat: s.length,
+    flag: !!t.ear.find((r) => r.number === s.number)?.doubtful, mark: STANDING(s),
+  }));
+}
+
+// A found edge sits in a gap's quiet interior, which can reach a window past the
+// gap's stated end, so both are what counts as being in the gap.
+const tapeGaps = (t) => t.gaps.map(([lo, hi], i) => {
+  const [quietLo, quietHi] = t.quiet[i];
+  return { lo: Math.min(lo, quietLo), hi: Math.max(hi, quietHi) };
+});
+
+function waveSay(text, warn) {
+  const say = $("#tp-wave-say");
+  say.textContent = text || "";
+  say.className = warn ? "warn" : "dim";
+}
+
+// The window comes from the real length, which is the grid boundaries were placed
+// on, so what is drawn at an instant is what was measured there.
+async function loadTapeWave(t, drawn) {
+  try {
+    const env = await fetchEnvelope(`/api/tapes/${t.id}/envelope`);
+    if (tpDrawn !== drawn) return;
+    tpEd.load({ ...env, windowMs: (t.duration * 1000) / env.peak.length, duration: t.duration,
+                gaps: { band: { gaps: tapeGaps(t) } } },
+              tapeTracks(tape));
+    tapeReadout();
+  } catch (e) {
+    tpDrawn = null;
+    waveSay(`no waveform: ${e.message}`, true);
+  }
+}
+
+function showTapeWave(t) {
+  tpEd.frozen = tapeWatching || t.playlist.done;
+  const drawn = t.waveform ? `${t.id}/${t.created}` : null;
+  if (drawn !== tpDrawn) {
+    tpPlayer.stop();
+    tpAudio = null;
+    tpDrawn = drawn;
+    tpEd.clear();
+    waveSay(drawn ? "" : "This tape has no waveform kept. Find boundaries measures it, and leaves any boundary you set where it is.", !drawn);
+    if (drawn) loadTapeWave(t, drawn);
+  } else if (tpEd.side) {
+    tpEd.side.gaps.band.gaps = tapeGaps(t);
+    tpEd.setTracks(tapeTracks(t));
+    tapeReadout();
+  }
+  showTapeTools();
+}
+
+function showTapeTools() {
+  const song = songOf(tpEd.sel?.track);
+  const doubts = tape?.ear.filter((r) => r.doubtful).length ?? 0;
+  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = !doubts;
+  $("#tp-next").textContent = doubts ? `Doubt → (${doubts})` : "No doubts";
+  for (const id of ["#tp-play"]) $(id).disabled = !tape?.audio;
+  $("#tp-hear").disabled = !tape?.audio || !song;
+  $("#tp-accept").disabled = !song || song.set_by === "ear";
+  $("#tp-accept").textContent = song?.heard ? "Take back" : "Accept";
+  $("#tp-skip").disabled = !song;
+  $("#tp-skip").textContent = song?.skip ? "Keep" : "Skip";
+  $("#tp-song").disabled = !song;
+}
+
+function tapeReadout() {
+  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
+  if (!t) {
+    $("#tp-ro-time").textContent = fmt(tpEd.playhead);
+    $("#tp-ro-song").textContent = ""; $("#tp-ro-gap").textContent = ""; $("#tp-ro-gap").className = "";
+    return;
+  }
+  const v = t[sel.edge], len = t.end - t.start, d = len - t.cat;
+  $("#tp-ro-time").textContent = `${fmt(v)}  ${v.toFixed(2)}s`;
+  $("#tp-ro-song").textContent = `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s`
+    + ` (list ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`;
+  sayGap($("#tp-ro-gap"), v, tpEd.side?.gaps.band.gaps ?? []);
+}
+
+function tapeSelect(num, edge, fit) {
+  tpEd.sel = num == null ? null : { track: num, edge };
+  const t = tpEd.tracks.find((x) => x.number === num);
+  if (fit && t) tpEd.fitRange(t.start, t.end); else tpEd.render();
+  for (const row of $("#tp-ear").children) row.classList.toggle("sel", Number(row.dataset.song) === num);
+  tapeReadout();
+  showTapeTools();
+  const song = songOf(num);
+  const why = song && (song.reason || (earOf(num)?.doubtful ? MISMATCH_SAYS : ""));
+  waveSay(why ? `song ${num}: ${why}` : "");
+}
+
+function stepDoubt(by) {
+  const doubts = tape.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
+  if (!doubts.length) return;
+  const here = tpEd.sel?.track ?? 0;
+  const next = by > 0 ? doubts.find((n) => n > here) ?? doubts[0]
+    : doubts.findLast((n) => n < here) ?? doubts.at(-1);
+  tapeSelect(next, "start", true);
+  document.querySelector(`#tp-ear tr[data-song="${next}"]`)?.scrollIntoView({ block: "center" });
+}
+
+// Asked for only when something is to be played: a long tape's file is gigabytes,
+// and opening its page should not start reading it.
+function tapeAudioReady() {
+  if (!tape?.audio) return false;
+  const url = `/api/tapes/${tape.id}/audio`;
+  if (tpAudio !== url) { tpPlayer.load(url); tpAudio = url; }
+  return true;
+}
+
+function tapePlay() {
+  if (!tapeAudioReady()) return;
+  const t = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  tpPlayer.toggle(tpPlayer.playing ? null : (t ? Math.max(0, t[tpEd.sel.edge] - 3) : tpEd.playhead));
+}
+
+function tapeHear(at) {
+  if (tapeAudioReady()) tpPlayer.audition(at);
+}
+
+function tapeHearSelected() {
+  const t = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  if (t) tapeHear(t[tpEd.sel.edge]);
+}
+
+function tapeHearSilence(lo, hi) {
+  if (!tapeAudioReady()) return;
+  tpEd.fitRange(Math.max(0, lo - 4), hi + 4);
+  tpPlayer.stop();
+  tpPlayer.toggle(Math.max(0, lo - 4));
+}
+
+// What a move did beyond the song moved, which is the part nobody asked for.
+function moveSaid(before, after, num) {
+  const was = (n) => before.songs.find((s) => s.number === n);
+  const moved = after.songs.filter((s) => s.number !== num
+    && (was(s.number).start !== s.start || was(s.number).end !== s.end));
+  const unheard = moved.filter((s) => was(s.number).heard && !s.heard);
+  const stale = after.ear.filter((r) => r.cut === "out of date").length;
+  const shown = moved.slice(0, 3).map((s) => `song ${s.number} (${fmt(s.start)} to ${fmt(s.end)})`);
+  return [
+    `Song ${num} is yours now, and nothing will move it.`,
+    moved.length ? `Laid around it: ${shown.join(", ")}${moved.length > 3 ? ` and ${moved.length - 3} more` : ""}.` : "",
+    unheard.length ? `No longer accepted, because they moved: ${unheard.map((s) => s.number).join(", ")}.` : "",
+    stale ? `${stale} cut${stale === 1 ? " is" : "s are"} now out of date - press Cut again.` : "",
+  ].filter(Boolean).join(" ");
+}
+
+async function saveTapeEdges(num, start, end) {
+  const before = tape;
+  clearTimeout(tpNudge);
+  if (tapeEdited) {
+    tpEd.setTracks(tapeTracks(tape));
+    waveSay("save the song list first", true);
+    return;
+  }
+  tpEd.frozen = true;
+  try {
+    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`, { start, end, guarded: true });
+    showTape(after);
+    tapeSelect(num, tpEd.sel?.edge ?? "start", false);
+    waveSay(moveSaid(before, after, num));
+  } catch (e) {
+    tpEd.frozen = tapeWatching || !!tape?.playlist.done;
+    if (tape) tpEd.setTracks(tapeTracks(tape));
+    tapeReadout();
+    waveSay(`Not moved: ${e.message}`, true);
+  }
+}
+
+function tapeEdgeDropped(num, edge, landed) {
+  if (!landed) {
+    tpEd.setTracks(tapeTracks(tape));
+    waveSay("the drag was interrupted, so nothing moved", true);
+    return;
+  }
+  const t = tpEd.tracks.find((x) => x.number === num);
+  saveTapeEdges(num, t.start, t.end);
+}
+
+function nudgeTapeEdge(t, edge, by) {
+  if (tpEd.frozen) return;
+  t[edge] += by;
+  tpEd.render(); tapeReadout();
+  clearTimeout(tpNudge);
+  tpNudge = setTimeout(() => saveTapeEdges(t.number, t.start, t.end), 500);
+}
+
+function tapeJudge(send) {
+  return settleSong(async () => {
+    const after = await send();
+    waveSay("");
+    return after;
+  });
+}
+const tapeAccept = (song) => tapeJudge(() =>
+  postJSON(`/api/tapes/${tape.id}/songs/${song.number}/heard`, { heard: !song.heard }));
+const tapeSkip = (song) => tapeJudge(() =>
+  postJSON(`/api/tapes/${tape.id}/songs/${song.number}/skip`, { skip: !song.skip }));
+
+function tapeZoom(by) {
+  const span = (tpEd.t1 - tpEd.t0) * by;
+  const sel = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
+}
+
+function tapeKey(e) {
+  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
+  if (e.code === "Space") {
+    e.preventDefault();
+    // A button keeps the focus after a press, and would be pressed again by this.
+    if (e.target.tagName === "BUTTON") e.target.blur();
+    tapePlay();
+  } else if (e.key === "a" || e.key === "A") {
+    if (t) { e.preventDefault(); tapeHear(t[sel.edge]); }
+  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
+    e.preventDefault();
+    nudgeTapeEdge(t, sel.edge, (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
+  } else if (e.key === "n" || e.key === "N") {
+    e.preventDefault(); stepDoubt(e.shiftKey ? -1 : 1);
+  } else if (e.key === "f" || e.key === "F" || e.key === "0") {
+    e.preventDefault(); tpEd.fit();
+  } else if (e.key === "z" || e.key === "Z") {
+    if (t) { e.preventDefault(); tpEd.fitRange(t.start, t.end); }
+  } else if (e.key === "?") {
+    e.preventDefault(); $("#helpdlg").showModal();
+  } else if (e.key === "Escape") { tpPlayer.stop(); }
+}
+
+function wireTapeWave() {
+  tpEd = new Editor($("#tp-cv"),
+    (num, edge, at) => {
+      const t = tpEd.tracks.find((x) => x.number === num);
+      if (t) { t[edge] = at; tpEd.render(); tapeReadout(); }
+    },
+    (num, edge) => tapeSelect(num, edge, false),
+    (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
+    { onDrop: tapeEdgeDropped, dragFrom: 3, coarse: 2, touchReach: 20, titles: true });
+  tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
+  $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
+  $("#tp-prev").onclick = () => stepDoubt(-1);
+  $("#tp-next").onclick = () => stepDoubt(1);
+  $("#tp-play").onclick = tapePlay;
+  $("#tp-hear").onclick = tapeHearSelected;
+  $("#tp-in").onclick = () => tapeZoom(0.5);
+  $("#tp-out").onclick = () => tapeZoom(2);
+  $("#tp-whole").onclick = () => tpEd.fit();
+  $("#tp-song").onclick = () => {
+    const t = tpEd.tracks.find((x) => x.number === tpEd.sel?.track);
+    if (t) tpEd.fitRange(t.start, t.end);
+  };
+  $("#tp-accept").onclick = () => tapeAccept(songOf(tpEd.sel?.track));
+  $("#tp-skip").onclick = () => tapeSkip(songOf(tpEd.sel?.track));
+}
 
 function showEar(t) {
   const placed = !!t && t.songs.some((s) => s.start != null);
   $("#tp-ear-wrap").hidden = !placed;
-  for (const id of ["#tp-preview", "#tp-cut"]) $(id).disabled = !t || !t.audio;
-  $("#tp-clips").disabled = !t || !t.audio || !t.ear.some((row) => row.doubtful);
-  if (!placed) { $("#tp-ear").replaceChildren(); $("#tp-cut-why").hidden = true; return; }
-  const whole = $("#tp-whole");
-  whole.hidden = !t.preview;
-  $("#tp-preview").disabled = !t.audio || t.preview;
-  const previewUrl = `/api/tapes/${t.id}/preview`;
-  if (t.preview && whole.getAttribute("src") !== previewUrl) whole.src = previewUrl;
-  if (!t.preview) whole.removeAttribute("src");
+  $("#tp-wave-wrap").hidden = !placed;
+  $("#tp-cut").disabled = !t || !t.audio;
+  if (!placed) {
+    $("#tp-ear").replaceChildren();
+    $("#tp-cut-why").hidden = true;
+    tpPlayer.stop();
+    tpDrawn = tpAudio = null;
+    tpEd.clear();
+    return;
+  }
   $("#tp-cut").disabled = !t.audio || !!t.cut_refusal;
   const skipped = t.songs.filter((s) => s.skip).map((s) => `song ${s.number} (${s.title})`);
   const said = [
@@ -1417,6 +1685,7 @@ function showEar(t) {
   $("#tp-cut-why").className = t.cut_refusal ? "warn" : "dim";
   $("#tp-cut-why").hidden = !said;
   $("#tp-ear").replaceChildren(...t.ear.map((row) => earRow(row, t)));
+  showTapeWave(t);
 }
 
 const FILING_WORDS = {
@@ -1498,48 +1767,32 @@ function showPlaylist(t) {
   $("#tp-arch-why").hidden = !why;
 }
 
-function edgeCell(song, row, edge) {
-  const built = row.clips[edge];
+function edgeCell(song, edge) {
   const td = el("td", "edge");
   const input = el("input");
   input.type = "number"; input.step = "0.01"; input.min = "0";
   input.dataset.edge = edge;
   input.value = song[edge] ?? "";
   input.setAttribute("aria-label", `song ${song.number} ${edge}, in seconds`);
-  td.append(input);
-  if (built) {
-    const clip = el("audio");
-    clip.controls = true; clip.preload = "none";
-    clip.src = `${clipUrl(song, edge)}?at=${song[edge]}`;
-    td.append(clip);
-    if (!row.ticks[edge]) {
-      td.append(el("div", "why mark",
-        "no tick in this clip: this edge is too near the tape's end for one - what you hear stops before it, and silence here says nothing"));
-    }
-  } else {
-    const make = el("button", "ghost tiny", "Build clip");
-    make.type = "button";
-    make.disabled = song[edge] == null;
-    make.onclick = () => buildClips({ song: song.number, edge });
-    td.append(make);
-  }
+  const hear = judgeButton("Hear", "across this boundary, with a tick on it",
+    () => { tapeSelect(song.number, edge, false); tapeHear(song[edge]); });
+  hear.disabled = song[edge] == null;
+  td.append(input, hear);
   return td;
 }
 
+const MISMATCH_SAYS = "the list and the audio disagreed across this tape, and this song has not been judged";
+
 function whyCell(song, row, t) {
   const td = el("td", "why");
-  const said = song.reason || (row.doubtful ? "the list and the audio disagreed across this tape, and this song has not been heard" : "");
+  const said = song.reason || (row.doubtful ? MISMATCH_SAYS : "");
   if (said) td.append(el("div", row.doubtful ? "mark" : "dim", said));
   for (const g of t.inside.filter((i) => i.song === song.number)) {
     const seek = el("button", "ghost tiny", `hear ${fmt(g.lo)} to ${fmt(g.hi)}`);
     seek.type = "button";
-    seek.title = t.preview ? "play the preview from just before this silence" : "build the preview first";
-    seek.disabled = !t.preview;
-    seek.onclick = () => {
-      const whole = $("#tp-whole");
-      whole.currentTime = Math.max(0, g.lo - 4);
-      whole.play();
-    };
+    seek.title = "play from just before this silence";
+    seek.disabled = !t.audio;
+    seek.onclick = () => tapeHearSilence(g.lo, g.hi);
     td.append(seek);
   }
   return td;
@@ -1553,14 +1806,22 @@ function judgeButton(text, title, act) {
 
 function earRow(row, t) {
   const song = t.songs.find((s) => s.number === row.number);
-  const tr = el("tr", row.doubtful ? "doubt" : null);
+  const selected = tpEd.sel?.track === song.number;
+  const tr = el("tr", [row.doubtful ? "doubt" : "", selected ? "sel" : ""].join(" ").trim());
+  tr.dataset.song = song.number;
+  tr.onclick = (e) => {
+    if (e.target.closest("button, input")) return;
+    tapeSelect(song.number, "start", true);
+    // Stacked on a phone, the waveform is not beside the row that was pressed.
+    if (getComputedStyle($("#tp-wave-wrap")).position === "static")
+      $("#tp-wave-wrap").scrollIntoView({ block: "start" });
+  };
   tr.append(el("td", "num", song.number));
   const who = el("td");
   who.append(el("div", null, song.title),
              el("div", "dim", `${song.artist}, ${mss(song.length)}`
                + `${song.delta != null ? `, ${signed(song.delta)}` : ""}`));
-  tr.append(who, whyCell(song, row, t),
-            edgeCell(song, row, "start"), edgeCell(song, row, "end"));
+  tr.append(who, whyCell(song, row, t), edgeCell(song, "start"), edgeCell(song, "end"));
 
   const judge = el("td", "moves");
   judge.append(judgeButton("Set", "keep these two edges as yours", () => {
@@ -1570,15 +1831,15 @@ function earRow(row, t) {
       return;
     }
     const [start, end] = [Number(edge("start")), Number(edge("end"))];
-    settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/edges`, { start, end }));
+    saveTapeEdges(song.number, start, end);
   }));
   if (song.set_by !== "ear") {
-    judge.append(judgeButton(song.heard ? "Not heard" : "Heard", "the found edges are right, by ear",
-      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/heard`, { heard: !song.heard }))));
+    judge.append(judgeButton(song.heard ? "Take back" : "Accept", "the found edges are right, by ear",
+      () => tapeAccept(song)));
   }
   judge.append(judgeButton(song.skip ? "Keep" : "Skip", "a damaged song is not cut, and stays named",
-    () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/skip`, { skip: !song.skip }))));
-  judge.append(el("div", "dim", song.set_by === "ear" ? "set by ear" : song.heard ? "heard" : ""));
+    () => tapeSkip(song)));
+  judge.append(el("div", "dim", song.set_by === "ear" ? "set by you" : song.heard ? "accepted" : ""));
   tr.append(judge);
 
   // Archiving clears the cuts of songs already proved to be in the library.
@@ -1600,8 +1861,6 @@ async function startTapeJob(path, body) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const buildClips = (body) => startTapeJob(`/api/tapes/${tape.id}/clips`, body);
-const buildPreview = () => startTapeJob(`/api/tapes/${tape.id}/preview`, {});
 const cutTape = () => startTapeJob(`/api/tapes/${tape.id}/cut`, {});
 const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
 const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
@@ -1747,7 +2006,7 @@ async function matchTape(again) {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-clips", "#tp-preview", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
+const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
@@ -1755,6 +2014,7 @@ async function watchTape() {
   tapeWatching = true;
   const { id, key } = tape;
   for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  tpEd.frozen = true;
   let missed = 0;
   try {
     for (;;) {
@@ -1839,7 +2099,7 @@ function setMode(mode) {
   if (mode === "punch") loadPunchTracks();
   if (mode === "upload") loadIncoming();
   if (mode === "precut") loadPrecut();
-  if (mode === "tapes") loadTapes();
+  if (mode === "tapes") { player?.stop(); loadTapes(); } else tpPlayer?.stop();
   if (!source) ed.render();
 }
 
@@ -2800,6 +3060,7 @@ function wire() {
     (t) => { if (player.playing) player.seek(t); });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
+  wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();
   $("#help-close").onclick = () => $("#helpdlg").close();
@@ -2871,8 +3132,6 @@ function wire() {
   $("#tp-process").onclick = processTape;
   $("#tp-match").onclick = () => matchTape(false);
   $("#tp-rematch").onclick = () => matchTape(true);
-  $("#tp-clips").onclick = () => buildClips({});
-  $("#tp-preview").onclick = buildPreview;
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;
@@ -3046,6 +3305,7 @@ function wire() {
     // a shortcut firing behind an open dialog once split a track while the
     // First-pass dialog had focus
     if (document.querySelector("dialog[open]")) return;
+    if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }
     const sel = ed.sel, t = sel && trackByNum(sel.track);
     if (e.code === "Space") {
       e.preventDefault();

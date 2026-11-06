@@ -368,7 +368,7 @@ class Alignment:
     groupings: int = 1
 
 
-def _clock(seconds: float) -> str:
+def clock(seconds: float) -> str:
     minutes, secs = divmod(round(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
@@ -388,8 +388,8 @@ def _judged(start: float, end: float, delta: float, *, grounded: bool = True) ->
 def _also(starts: Sequence[float], ends: Sequence[float]) -> str:
     """Where the other groupings that fit as well would put this song's edges."""
     could = [
-        *(f"start at {_clock(t)}" for t in starts),
-        *(f"end at {_clock(t)}" for t in ends),
+        *(f"start at {clock(t)}" for t in starts),
+        *(f"end at {clock(t)}" for t in ends),
     ]
     if not could:
         return ""
@@ -650,7 +650,7 @@ def _margin(start: float, stop: float, gaps: Iterable[Span]) -> Span:
 def _spanning(length: float, span: Placed, silences: Sequence[Span]) -> str:
     extent = span.end - span.start
     music = extent - sum(hi - lo for lo, hi in silences)
-    where = ", ".join(f"{_clock(lo)} to {_clock(hi)}" for lo, hi in silences)
+    where = ", ".join(f"{clock(lo)} to {clock(hi)}" for lo, hi in silences)
     return (
         f"Silence inside this song at {where}: a passage in it, damage, or a song "
         f"missing from the list - listen there. It measures {extent:.1f} s with the "
@@ -915,26 +915,6 @@ def ear_order(tape: Tape) -> tuple[Song, ...]:
     return tuple(sorted(tape.songs, key=rank))
 
 
-def edge_at(song: Song, edge: str) -> float | None:
-    return song.start if edge == START else song.end
-
-
-def flagged(tape: Tape) -> tuple[tuple[Song, str], ...]:
-    """The boundaries worth a clip without being asked for."""
-    return tuple(
-        (s, edge)
-        for s in ear_order(tape)
-        if doubtful(tape, s) and s.start is not None
-        for edge in (START, END)
-    )
-
-
-def clip_name(at: float) -> str:
-    """By the instant alone: the audio under a tape never changes, so a clip for a
-    boundary that moved is another file and never a stale one."""
-    return f"{round(at * 1000):010d}.flac"
-
-
 def cut_name(song: Song, count: int) -> str:
     title = safe_filename(song.title).encode()[:CUT_TITLE_BYTES]
     return f"{file_number(song.number, count)} {title.decode(errors='ignore')}.flac"
@@ -963,7 +943,7 @@ def cut_refusal(tape: Tape) -> str:
             ],
         ),
         (
-            "still in doubt - listen, then set it, mark it heard or skip it",
+            "still in doubt - listen, then move it, accept it or skip it",
             [s for s in active if doubtful(tape, s)],
         ),
         (
