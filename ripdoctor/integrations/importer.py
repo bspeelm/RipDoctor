@@ -224,16 +224,17 @@ _STARVED = "stdin stream ended"
 _MISSING = re.compile(r"FileNotFoundError:[^\n]*?: b?(['\"])([^\n]+)\1\s*$", re.M)
 _NO_RELEASE = re.compile(r"^No matching release found.*$", re.M)
 
-# Apply the release; merge when the album is already filed; apply again, because
-# merging matches afresh. Whatever goes unasked stays unread, which does no harm.
-# Replace is not among any of these and never may be: it deletes the filed audio.
-# ADR-060.
-TAPE_ANSWERS = b"A\nM\nA\n"
-# What a pinned run answers, once the library has said what it holds of that album. A
-# duplicate question nobody expected meets end of input, which stops the run safely.
-# Merging into another edition rewrites every owned track, so that goes beside it.
-# ADR-063.
-PINNED_ANSWERS = {NEW_ALBUM: b"A\n", JOIN: TAPE_ANSWERS, BESIDE: b"A\nK\n"}
+# What a tape's runs answer. Replace is not among these and never may be: it deletes
+# the filed audio. ADR-060.
+#
+# With no release there is no candidate to accept, so the first question is the
+# duplicate one, and merging would rematch what is already filed. Keeping both is what
+# the song's outcome says happened.
+FROM_LIST_ANSWERS = b"K\n"
+# Apply the release; merge; apply again, because merging matches afresh. A duplicate
+# question nobody expected meets end of input, which stops the run safely. Merging into
+# another edition rewrites every owned track, so that goes beside it. ADR-063.
+PINNED_ANSWERS = {NEW_ALBUM: b"A\n", JOIN: b"A\nM\nA\n", BESIDE: b"A\nK\n"}
 
 
 def answers(duplicates: str, *, matching: bool) -> bytes:
@@ -525,7 +526,7 @@ class Beets:
         run is told `how` it meets the library, and left untold it merges nothing."""
         result = runner.run(
             self._argv(self._import(directory, release)),
-            stdin=PINNED_ANSWERS[how] if release else TAPE_ANSWERS,
+            stdin=PINNED_ANSWERS[how] if release else FROM_LIST_ANSWERS,
             timeout=3600,
         )
         return TapeRun(result.returncode, _plain(result.text + result.err), root)

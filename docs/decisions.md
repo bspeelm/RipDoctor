@@ -2356,7 +2356,8 @@ number from its edition that may match one beside it. That is said on the song's
 later song of an edition held beside another, because merging there would take in both.
 A song with a release is not filed with lookup off, which made two album rows for one
 album when tried. A from-list
-song has no release to pin, so its album is one lookup-off run, numbered by its place
+song has no release to pin, so its album is one lookup-off run answering keep both, since
+merging would rematch what is filed, numbered by its place
 among its album's songs on this tape, with no date, which a list does not carry. One
 with no album fails rather than being given one. A second album row is said on the
 song's outcome, not refused.

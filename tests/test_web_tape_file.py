@@ -731,7 +731,7 @@ def test_from_list_songs_of_one_album_go_in_one_lookup_off_run_with_full_tags(
     argv = imports_of(service)[0]
     assert argv[3:5] == ("import", "-A")
     assert "--search-id" not in argv
-    assert runner.fed[runner.calls.index(argv)] == b"A\nM\nA\n"
+    assert runner.fed[runner.calls.index(argv)] == b"K\n"
     assert sorted(runner.tags.values(), key=lambda t: t["TRACKNUMBER"]) == [
         {
             "TITLE": title,

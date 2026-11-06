@@ -780,16 +780,17 @@ def test_a_tape_s_pinned_run_sends_this_argv_and_these_answers() -> None:
     assert runner.fed == [b"A\nM\nA\n"]
 
 
-def test_a_tape_s_from_list_run_turns_lookup_off_and_sends_the_same_answers() -> None:
+def test_a_from_list_run_keeps_both_and_never_merges_what_is_filed() -> None:
+    """Sent the pinned answers, its first question took `A` as no answer and `M` as the
+    merge, which rematched an album already filed."""
     runner = FakeRunner()
     _beets().file_tape_run(runner, "/work/album")
     assert runner.calls[0][3:] == ("import", "-A", "/work/album")
-    assert runner.fed == [b"A\nM\nA\n"]
+    assert runner.fed == [b"K\n"]
 
 
 def test_the_answers_for_a_tape_can_never_say_replace() -> None:
-    assert b"R" not in I.TAPE_ANSWERS
-    assert I.TAPE_ANSWERS.split() == [b"A", b"M", b"A"]
+    assert b"R" not in I.FROM_LIST_ANSWERS
     assert not [a for a in I.PINNED_ANSWERS.values() if b"R" in a]
 
 
