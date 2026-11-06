@@ -23,6 +23,7 @@ async function api(path, opts = {}) {
     e.status = r.status;
     e.needsConfirm = !!body?.needs_confirm;
     e.stale = !!body?.stale;
+    e.busy = !!body?.busy;
     throw e;
   }
   return body;

@@ -71,8 +71,8 @@ def find_boundaries(runner: Runner, layout: Layout, tape_id: str, job: Job) -> T
     came = arrived(layout, current)
     if not T.audio_file(layout, tape_id).is_file() and came is not None:
         _take_in(runner, layout, tape_id, job, came.name)
-        current = replace(current, source=came.name)
-        T.save(layout, current)
+        with T.changing(tape_id):
+            T.save(layout, replace(T.read(layout, tape_id), source=came.name))
     if came is not None:
         IN.clear(layout, T.key_of(tape_id))
     job.finished = 3
@@ -86,9 +86,11 @@ def find_boundaries(runner: Runner, layout: Layout, tape_id: str, job: Job) -> T
     lane = T.measure(runner, layout, tape_id, seconds)
 
     job.step(current.name, "placing boundaries")
-    current = TP.place(replace(current, duration=seconds), TP.gaps_of(lane))
-    current = replace(current, prepare_failed="")
-    T.save(layout, current)
+    with T.changing(tape_id):
+        current = T.read(layout, tape_id)
+        current = TP.place(replace(current, duration=seconds), TP.gaps_of(lane))
+        current = replace(current, prepare_failed="")
+        T.save(layout, current)
     job.finished = 4
     return current
 
@@ -184,18 +186,32 @@ def _lookup_one(
 
 def look_up(asking: Asking, tape_id: str, job: Job, *, again: bool = False) -> TP.Tape:
     """Every song with no answer, or with `again` every one unsettled, saved after each
-    so a restart carries on."""
-    tape = T.read(asking.layout, tape_id)
-    waiting = TP.to_match(tape, again=again)
-    job.total, job.finished, job.phase = len(waiting), 0, ALBUMS
-    for song in waiting:
+    so a restart carries on. A person may edit or choose while this runs: the tape is
+    read again for every song, so an edit is asked about in its turn and an answer that
+    came too late for one is dropped."""
+    layout = asking.layout
+    job.finished, job.phase = 0, ALBUMS
+    asked: set[tuple[int, str, str, str, float]] = set()
+    while True:
+        tape = T.read(layout, tape_id)
+        waiting = [
+            s
+            for s in TP.to_match(tape, again=again)
+            if (s.number, *TP.words_of(s)) not in asked
+        ]
+        job.total = job.finished + len(waiting)
+        if not waiting:
+            break
+        song = waiting[0]
+        asked.add((song.number, *TP.words_of(song)))
         job.step(TP.label(song), "looking it up")
         made, maybe = _lookup_one(asking, tape, song)
-        tape = TP.with_proposals(tape, {song.number: made}, {song.number: maybe})
-        T.save(asking.layout, tape)
+        with T.changing(tape_id):
+            T.save(layout, TP.answered(T.read(layout, tape_id), song, made, maybe))
         job.finished += 1
-    tape = replace(tape, prepare_failed="")
-    T.save(asking.layout, tape)
+    with T.changing(tape_id):
+        tape = replace(T.read(layout, tape_id), prepare_failed="")
+        T.save(layout, tape)
     return tape
 
 
@@ -218,8 +234,9 @@ def prepare(asking: Asking, tape_id: str, job: Job) -> dict[str, Any]:
     failed = "; ".join(f"{part}: {why}" for part, why in said.items() if why)
     if failed:
         try:
-            tape = T.read(asking.layout, tape_id)
-            T.save(asking.layout, replace(tape, prepare_failed=failed))
+            with T.changing(tape_id):
+                tape = T.read(asking.layout, tape_id)
+                T.save(asking.layout, replace(tape, prepare_failed=failed))
         except OSError as e:  # the job's own error still stops it being started again
             failed = f"{failed}; that could not be kept with the tape: {e}"
         raise ValueError(failed)

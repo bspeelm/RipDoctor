@@ -643,14 +643,15 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
     return tuple(kept_as(s) for s in songs)
 
 
-def _said(song: Song) -> tuple[str, str, str, float]:
+def words_of(song: Song) -> tuple[str, str, str, float]:
+    """What the list says of a song, which is all that identifies it across an edit."""
     return song.title, song.artist, song.album, song.length
 
 
 def list_digest(tape: Tape) -> str:
     """The list as it stands, which a save names as what it was made from: a whole list
     sent from a page left open would otherwise put back whatever has changed since."""
-    said = json.dumps([_said(s) for s in tape.songs], ensure_ascii=False)
+    said = json.dumps([words_of(s) for s in tape.songs], ensure_ascii=False)
     return hashlib.sha256(said.encode()).hexdigest()[:16]
 
 
@@ -661,13 +662,13 @@ def only_edits(tape: Tape, songs: tuple[Song, ...]) -> bool:
     song would be different, and no boundary can stay for that."""
     if len(songs) != len(tape.songs):
         return False
-    was = [_said(s) for s in tape.songs]
+    was = [words_of(s) for s in tape.songs]
     changed = [
         new
         for old, new in zip(tape.songs, songs, strict=True)
-        if _said(new) != _said(old)
+        if words_of(new) != words_of(old)
     ]
-    return len(changed) <= 1 and not any(_said(new) in was for new in changed)
+    return len(changed) <= 1 and not any(words_of(new) in was for new in changed)
 
 
 def _redoubted(tape: Tape, song: Song) -> Song:
@@ -684,7 +685,7 @@ def _edited(tape: Tape, old: Song, new: Song) -> Song:
     """What a song's own edit changes: never its boundaries. Other words are another
     question to the catalogue, and another length unsettles only what it answered, since
     a person's choice was theirs whatever the list says."""
-    if _said(new) == _said(old):
+    if words_of(new) == words_of(old):
         return old
     held = edges_held(old)
     if held:
@@ -974,6 +975,17 @@ def with_proposals(
         return replace(song, proposal=made, settled_by=by, unconfirmed=copy)
 
     return replace(tape, songs=tuple(answered(s) for s in tape.songs))
+
+
+def answered(tape: Tape, asked: Song, made: Proposal, maybe: str = "") -> Tape:
+    """A lookup's answer to a song as it was when asked about, on the tape as it is now.
+    A song edited since has asked another question, so this answers nothing, and one
+    moved since is found by what it says. A person's choice stays, as it always does."""
+    same = [s for s in tape.songs if words_of(s) == words_of(asked)]
+    if not same:
+        return tape
+    song = next((s for s in same if s.number == asked.number), same[0])
+    return with_proposals(tape, {song.number: made}, {song.number: maybe})
 
 
 def settle(tape: Tape, number: int, choice: Choice | None) -> Tape:

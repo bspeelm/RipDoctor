@@ -7,6 +7,7 @@ import re
 import unicodedata
 import urllib.error
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -565,13 +566,154 @@ def test_a_persons_choice_survives_a_run_for_everything_unsettled(
     assert catalogue.calls == []
 
 
-def test_a_person_may_not_settle_a_song_while_a_run_holds_the_tape(service) -> None:  # type: ignore[no-untyped-def]
+def test_a_person_may_settle_a_song_beside_a_lookup_and_not_start_another_run(
+    service,
+) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     tape = a_tape(app, service)
     service.jobs = Jobs(spawn=lambda _work: None, now=service.now)
     assert post(app, f"/api/tapes/{tape}/match", service).status == 202
-    assert post(app, f"/api/tapes/{tape}/songs/1/from-list", service).status == 409
+    assert post(app, f"/api/tapes/{tape}/songs/1/from-list", service).status == 200
     assert post(app, f"/api/tapes/{tape}/match", service).status == 409
+
+
+def test_a_person_may_not_change_a_song_while_a_job_they_pressed_holds_the_tape(
+    service,
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    tape = a_tape(app, service)
+    service.jobs = Jobs(spawn=lambda _work: None, now=service.now)
+    service.jobs.start(T.key_of(tape), "cut", lambda _job: None)
+    said = post(app, f"/api/tapes/{tape}/songs/1/from-list", service)
+    assert said.status == 409
+    assert said.json()["busy"] is True
+    assert "busy with cut" in said.json()["error"]
+    assert not T.read(service.layout, tape).songs[0].settled_by
+
+
+def during_the_first_lookup(catalogue: Catalogue, act: Callable[[], None]) -> None:
+    """Runs `act` once, from inside the first request the job makes of the catalogue."""
+    original = catalogue.get
+    acted: list[bool] = []
+
+    def asked(url: str, headers: dict[str, str]) -> bytes:
+        if not acted:
+            acted.append(True)
+            act()
+        return original(url, headers)
+
+    catalogue.get = asked  # type: ignore[method-assign]
+
+
+def rows_of(service, tape: str) -> list[dict[str, object]]:  # type: ignore[no-untyped-def]
+    return [
+        {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
+        for s in T.read(service.layout, tape).songs
+    ]
+
+
+def test_an_edit_during_a_lookup_was_refused_and_lost_and_now_lands(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    """/songs answered 409 busy, the title stayed as it was and the message went."""
+    app = build(service)
+    tape = a_tape(app, service)
+    answers: list[int] = []
+
+    def edit() -> None:
+        rows = rows_of(service, tape)
+        rows[0].update(title="B Song", album="Elsewhere", length=180)
+        answers.append(save_list(app, tape, service, rows).status)
+
+    during_the_first_lookup(catalogue, edit)
+    assert post(app, f"/api/tapes/{tape}/match", service).status == 202
+    assert answers == [200]
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert not view["job"]["error"]
+    first = T.read(service.layout, tape).songs[0]
+    assert first.title == "B Song"
+    assert first.proposal is not None
+    assert first.proposal.status == M.MATCHED
+    assert first.proposal.choice.track_title == "B Song"  # type: ignore[union-attr]
+
+
+def test_a_choice_during_a_lookup_is_not_overwritten_by_the_answer_it_overtook(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    tape = a_tape(app, service)
+    answers: list[int] = []
+    during_the_first_lookup(
+        catalogue,
+        lambda: answers.append(
+            post(app, f"/api/tapes/{tape}/songs/1/from-list", service).status
+        ),
+    )
+    assert post(app, f"/api/tapes/{tape}/match", service).status == 202
+    assert answers == [200]
+    first = T.read(service.layout, tape).songs[0]
+    assert first.settled_by == M.PERSON
+    assert first.proposal is not None and first.proposal.choice is None
+
+
+def test_a_song_moved_during_a_lookup_keeps_its_own_answer(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    tape = a_tape(app, service)
+    answers: list[int] = []
+
+    def move() -> None:
+        rows = rows_of(service, tape)
+        rows.insert(0, rows.pop())
+        answers.append(save_list(app, tape, service, rows).status)
+
+    during_the_first_lookup(catalogue, move)
+    assert post(app, f"/api/tapes/{tape}/match", service).status == 202
+    assert answers == [200]
+    assert not get(app, f"/api/tapes/{tape}", service).json()["job"]["error"]
+    for song in T.read(service.layout, tape).songs:
+        assert song.proposal is not None
+        assert song.proposal.choice is not None
+        assert song.proposal.choice.track_title == song.title
+
+
+def test_a_search_during_a_lookup_is_not_lost_by_the_lookup_saving(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    tape = a_tape(app, service)
+    answers: list[int] = []
+    url = f"/api/tapes/{tape}/songs/2/search"
+    during_the_first_lookup(
+        catalogue,
+        lambda: answers.append(
+            post(app, url, service, {"title": "B Song", "artist": "A Band"}).status
+        ),
+    )
+    assert post(app, f"/api/tapes/{tape}/match", service).status == 202
+    assert answers == [200]
+    assert not get(app, f"/api/tapes/{tape}", service).json()["job"]["error"]
+
+
+def test_a_search_that_outlived_the_list_it_was_for_saves_nothing(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    tape = a_tape(app, service)
+
+    def edit() -> None:
+        rows = rows_of(service, tape)
+        rows[1]["title"] = "Something Else"
+        assert save_list(app, tape, service, rows).status == 200
+
+    during_the_first_lookup(catalogue, edit)
+    said = post(
+        app,
+        f"/api/tapes/{tape}/songs/2/search",
+        service,
+        {"title": "B Song", "artist": "A Band"},
+    )
+    assert said.status == 409
+    assert "changed while that search ran" in said.json()["error"]
 
 
 def test_an_interrupted_run_keeps_what_it_finished_and_resumes_after_it(

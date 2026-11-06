@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -123,18 +123,19 @@ class Jobs:
     lock: threading.Lock = field(default_factory=threading.Lock)
     claims: dict[str, str] = field(default_factory=dict)
 
-    def _refuse_if_held(self, slug: str) -> None:
+    def _refuse_if_held(self, slug: str, beside: Collection[str] = ()) -> None:
         current = self.running.get(slug)
-        if current and not current.done:
+        if current and not current.done and current.op not in beside:
             raise Busy(f"{current.op} is already running for {slug}")
         if slug in self.claims:
             raise Busy(f"{self.claims[slug]} is under way for {slug}")
 
     @contextmanager
-    def claim(self, slug: str, op: str) -> Iterator[None]:
-        """Hold the record while a request changes it, with no worker involved."""
+    def claim(self, slug: str, op: str, beside: Collection[str] = ()) -> Iterator[None]:
+        """Hold the record while a request changes it, with no worker involved. `beside`
+        names jobs whose own saves keep their turn, which may run alongside it."""
         with self.lock:
-            self._refuse_if_held(slug)
+            self._refuse_if_held(slug, beside)
             self.claims[slug] = op
         try:
             yield

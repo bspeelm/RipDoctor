@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -169,6 +171,18 @@ def copy_cut(layout: Layout, tape: str, name: str, into: Path) -> Path:
     target = into / name
     shutil.copy2(cut_file(layout, tape, name), target)
     return target
+
+
+_CHANGING: dict[str, threading.Lock] = {}
+
+
+@contextmanager
+def changing(tape: str) -> Iterator[None]:
+    """One read, change and save of a document at a time, in this process. A lookup and
+    a person's edit can run side by side only if each reads what the other last wrote.
+    Held for the change and not for what a lookup waits on."""
+    with _CHANGING.setdefault(tape, threading.Lock()):
+        yield
 
 
 def save(layout: Layout, tape: Tape) -> None:

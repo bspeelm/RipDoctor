@@ -325,6 +325,29 @@ def test_an_edit_after_an_unsaved_failure_lets_the_tape_go_on_by_itself(
     assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is True
 
 
+def test_an_edit_while_the_tape_is_measured_is_kept_when_its_boundaries_are_saved(
+    service: Service, catalogue: Catalogue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = build(service)
+    tape = ready(app, service)
+    real = T.measure
+
+    def edited_meanwhile(*args, **kwargs):  # type: ignore[no-untyped-def]
+        rows = [
+            {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
+            for s in T.read(service.layout, tape).songs
+        ]
+        rows[1]["album"] = "An Album Meant"
+        assert save_list(app, tape, service, rows).status == 200
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(T, "measure", edited_meanwhile)
+    assert not prepared(app, service, tape)["error"]
+    two = T.read(service.layout, tape).songs[1]
+    assert two.album == "An Album Meant"
+    assert two.start is not None
+
+
 def test_what_a_person_presses_after_a_failed_run_clears_it(
     service: Service, catalogue: Catalogue
 ) -> None:

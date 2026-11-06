@@ -31,6 +31,7 @@ CHUNK = 8 * 1024 * 1024
 MAX_UPLOAD = 16 * 1024 * 1024 * 1024
 # Someone is waiting on the page, and a list can be sent again.
 ASKING_BEETS = 20.0
+ASKS_AS_IT_GOES = frozenset(("prepare", "match"))
 
 
 def _size(body: dict[str, Any]) -> int:
@@ -112,10 +113,37 @@ def add(app: App, service: Service) -> None:
             try:
                 with service.jobs.claim(T.key_of(slug_of(r)), "a change"):
                     return change(r, held(r))
-            except Busy as e:
-                raise H.HttpError(409, "this tape is busy - wait for it") from e
+            except Busy:
+                return busy(slug_of(r))
 
         return holding
+
+    def alongside(
+        change: Callable[[H.Request, TP.Tape], H.Response],
+    ) -> Callable[[H.Request], H.Response]:
+        """What a person does to a row. A job a person did not press, or that only asks
+        the catalogue, saves a song at a time and reads the tape again each time, so it
+        is no reason to refuse anybody. Any other job still is."""
+
+        def holding(r: H.Request) -> H.Response:
+            tape = slug_of(r)
+            try:
+                with (
+                    service.jobs.claim(T.key_of(tape), "a change", ASKS_AS_IT_GOES),
+                    T.changing(tape),
+                ):
+                    return change(r, held(r))
+            except Busy:
+                return busy(tape)
+
+        return holding
+
+    def busy(tape: str) -> H.Response:
+        """A real conflict, said as one. The page holds on to what was being saved."""
+        job = service.jobs.status(T.key_of(tape))
+        doing = job.op if job and not job.done else "a change"
+        said = f"this tape is busy with {doing}, so nothing was changed - wait for it"
+        return H.ok({"error": said, "busy": True}, 409)
 
     def started(tape: str, op: str, work: Callable[[Job], Any]) -> H.Response:
         try:
@@ -308,7 +336,7 @@ def add(app: App, service: Service) -> None:
         return H.ok(view(held(r)))
 
     @app.route("POST", "/api/tapes/([^/]+)/songs")
-    @settled
+    @alongside
     def songs(r: H.Request, tape: TP.Tape) -> H.Response:
         """The whole list by hand; adding, editing and reordering all send this. A row
         changed where it stands keeps its boundaries; anything else is a new list.
@@ -468,7 +496,7 @@ def add(app: App, service: Service) -> None:
         return kept(TP.settle(tape, song.number, choice))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/release")
-    @settled
+    @alongside
     def release(r: H.Request, tape: TP.Tape) -> H.Response:
         """One of the candidates needs no request and no track, since it carries its
         own, and an option names its recording, because one release can be offered with
@@ -508,10 +536,12 @@ def add(app: App, service: Service) -> None:
         return chosen(tape, song, choice, confirmed)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/search")
-    @settled
-    def search(r: H.Request, tape: TP.Tape) -> H.Response:
+    def search(r: H.Request) -> H.Response:
         """A person's own words for a song. What it finds is offered and never settled,
-        and is kept with the song so that choosing one takes no typing."""
+        and is kept with the song so that choosing one takes no typing. The tape is not
+        held while the catalogue answers, so what comes back is for a list that may have
+        changed underneath it."""
+        tape = held(r)
         song = choosable(tape, r)
         body = r.json()
         title = str(body.get("title") or song.title).strip()
@@ -523,21 +553,31 @@ def add(app: App, service: Service) -> None:
         answer = asking().catalogue(asked, made.held)
         if answer.status == TM.FAILED:
             raise H.HttpError(503, answer.reason)
-        changed = TP.offered(tape, song.number, answer.candidates)
-        T.save(layout, changed)
-        said = "" if answer.candidates else answer.reason
-        return H.ok(
-            {"options": TM.options(asked, answer), "reason": said, "song": song.number}
-        )
+
+        def kept_with_song(_r: H.Request, current: TP.Tape) -> H.Response:
+            if TP.list_digest(current) != TP.list_digest(tape):
+                said = "the list changed while that search ran, so look for it again"
+                raise H.HttpError(409, said)
+            T.save(layout, TP.offered(current, song.number, answer.candidates))
+            said = "" if answer.candidates else answer.reason
+            return H.ok(
+                {
+                    "options": TM.options(asked, answer),
+                    "reason": said,
+                    "song": song.number,
+                }
+            )
+
+        return alongside(kept_with_song)(r)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/from-list")
-    @settled
+    @alongside
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
         return kept(TP.settle(tape, choosable(tape, r).number, None))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/use-copy")
-    @settled
+    @alongside
     def use_copy(r: H.Request, tape: TP.Tape) -> H.Response:
         """A person says the row the pre-check could not vouch for is this song. The
         path is sent back so a page left open can only speak for the row it showed."""
@@ -650,7 +690,7 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, str(e)) from e
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/edges")
-    @settled
+    @alongside
     def edges(r: H.Request, tape: TP.Tape) -> H.Response:
         """`seen_start` and `seen_end` are the edges the sender last saw, so that a page
         left open cannot put back an edge somebody has moved since."""
@@ -665,13 +705,13 @@ def add(app: App, service: Service) -> None:
         return judged(tape, moved)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
-    @settled
+    @alongside
     def heard(r: H.Request, tape: TP.Tape) -> H.Response:
         song, now_heard = song_of(tape, r), bool(r.json().get("heard", True))
         return judged(tape, lambda: TP.hear(tape, song.number, now_heard))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/skip")
-    @settled
+    @alongside
     def skip(r: H.Request, tape: TP.Tape) -> H.Response:
         song, skipped = song_of(tape, r), bool(r.json().get("skip", True))
         return judged(tape, lambda: TP.skip(tape, song.number, skipped))
