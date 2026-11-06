@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 # Silence kept before a track's first note and after its last. A boundary placed
@@ -20,6 +20,7 @@ EAR = "ear"  # left where it was, and heard to be right
 # made for it either way.
 GAP = "gap"  # its edges came from what was measured
 LENGTH = "length"  # an edge has no gap behind it, only the catalogue's arithmetic
+EARLIER = "earlier"  # its times are positions on a capture since replaced
 
 
 def _settled(value: Any) -> str:
@@ -28,7 +29,7 @@ def _settled(value: Any) -> str:
 
 
 def _placed(value: Any) -> str:
-    return str(value) if value in (GAP, LENGTH) else ""
+    return str(value) if value in (GAP, LENGTH, EARLIER) else ""
 
 
 class OldFormat(Exception):
@@ -148,6 +149,9 @@ class PlanTrack:
 class PlanSide:
     file: str
     tracks: tuple[PlanTrack, ...]
+    # The capture these times are positions on, as the stamp the cache keys it
+    # by. Empty on a plan from before the field: nothing says which it was.
+    audio: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +189,7 @@ class Plan:
                         )
                         for t in s.get("tracks", [])
                     ),
+                    audio=str(s.get("audio", "")),
                 )
             )
         return cls(
@@ -204,6 +209,7 @@ class Plan:
             "sides": [
                 {
                     "file": s.file,
+                    **({"audio": s.audio} if s.audio else {}),
                     "tracks": [
                         {
                             "number": t.number,
@@ -221,6 +227,105 @@ class Plan:
                 for s in self.sides
             ],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class Released:
+    """A person's mark a new fit does not hold, and why."""
+
+    file: str
+    track: PlanTrack
+    why: str
+
+
+def _gone(side: PlanSide, stamps: dict[str, str]) -> str:
+    """Why this side's times cannot be trusted to mean the audio on disk, or nothing."""
+    if side.file not in stamps:
+        return "that side is no longer there"
+    if not side.audio:
+        return "nothing records which capture it was set on"
+    if side.audio != stamps[side.file]:
+        return "that side has been captured again since"
+    return ""
+
+
+def holding_only_current(
+    plan: Plan, stamps: dict[str, str]
+) -> tuple[Plan, tuple[Released, ...]]:
+    """The plan with no mark left on audio that has gone, and which ones went.
+
+    A settled time is a position in one capture. On another it points at
+    different music, so it is a judgement about nothing. ADR-064.
+    """
+    released: list[Released] = []
+    sides = []
+    for side in plan.sides:
+        why = _gone(side, stamps)
+        if not why:
+            sides.append(side)
+            continue
+        released += [Released(side.file, t, why) for t in side.tracks if t.settled]
+        sides.append(
+            replace(side, tracks=tuple(replace(t, settled="") for t in side.tracks))
+        )
+    return replace(plan, sides=tuple(sides)), tuple(released)
+
+
+def as_it_stands(plan: Plan, stamps: dict[str, str]) -> Plan:
+    """The plan as it should read now: a replaced side's times are not what they say.
+
+    A side nothing can compare is left alone. A plan from before the field, or a
+    side nobody has on disk, gives no grounds to call its times wrong.
+    """
+    return replace(
+        plan,
+        sides=tuple(
+            replace(side, tracks=tuple(_from_earlier(t) for t in side.tracks))
+            if side.audio and side.file in stamps and side.audio != stamps[side.file]
+            else side
+            for side in plan.sides
+        ),
+    )
+
+
+def _from_earlier(t: PlanTrack) -> PlanTrack:
+    return replace(t, settled="", placed=EARLIER)
+
+
+def saved_over(
+    plan: Plan, before: Plan | None, stamps: dict[str, str]
+) -> tuple[Plan, tuple[Released, ...]]:
+    """A plan being saved, on the capture that is there now.
+
+    A time unchanged from the plan it replaces, on a side captured again since,
+    was placed on the earlier audio: saving it again must not launder it into a
+    judgement about this one. A time that differs was set here, on what is
+    there now, and is whatever the page says it is. ADR-064.
+    """
+    old = {s.file: s for s in before.sides} if before else {}
+    released: list[Released] = []
+    sides = []
+    for side in plan.sides:
+        now = stamps.get(side.file, "")
+        was = old.get(side.file)
+        if not now:
+            sides.append(replace(side, audio=was.audio if was else ""))
+            continue
+        if was is None or not was.audio or was.audio == now:
+            sides.append(replace(side, audio=now))
+            continue
+        placed = {t.number: t for t in was.tracks}
+        tracks = []
+        for t in side.tracks:
+            prior = placed.get(t.number)
+            same = prior is not None and (prior.start, prior.end) == (t.start, t.end)
+            if prior is not None and same and prior.settled:
+                released.append(
+                    Released(side.file, prior, "that side has been captured again")
+                )
+            tracks.append(_from_earlier(t) if same else t)
+        sides.append(replace(side, tracks=tuple(tracks), audio=now))
+    return replace(plan, sides=tuple(sides)), tuple(released)
 
 
 def cut_refusal(plan: Plan) -> str:

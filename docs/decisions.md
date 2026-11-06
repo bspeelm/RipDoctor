@@ -2667,10 +2667,34 @@ settled track the new release has no place for refuses the pass by name. Droppin
 would discard a judgement nobody asked to discard; removing the track and saving is
 how to ask.
 
-**A re-rip is the awkward case.** Aligning carries a settled boundary across as `hand`,
-never `ear`, because nobody has heard it on the new capture. But a first pass after a
-re-rip, without aligning, also holds settled boundaries, and those are times on the
-audio that was replaced. The way out is the same: remove the track, or align instead.
+**A settled time is a position in one capture.** On another it points at different
+music, so a re-rip ends the judgement, and a first pass does not hold it. Each plan side
+records the capture its times are on, as `audio`: the size and modification time the
+cache already keys a side's measurements to. That stamp can be wrong in one direction
+only. A copied or touched file reads as replaced and a mark is let go, by name; nothing
+reads as the same capture that is not. A rip, an upload and a kept partial all write a
+new file, so none of them has to remember to say so, and neither does a file dropped in
+by hand. The archive's copy keeps its stamp, and when a truncated side is repaired on the
+way the plan follows it, because that changes the file and not the music.
+
+Holding is therefore by capture. A first pass holds marks on a side whose stamp matches.
+It lets go of marks on a side captured since, on a side no longer there, and on a plan
+that never said which capture it was on, since those can only be branch-era documents and
+holding one is the hazard. Its report names each track and the reason.
+
+**Before anything is run,** a replaced side's rows read `From an earlier capture`, in
+amber, and the First pass step says so. This is the page refusing to call an old time
+`Set by you` or `Fitted to gap`. It does not stop Cut: that is a separate question, and
+is not decided here.
+
+**Saving cannot launder an old mark.** A save moves the side's stamp to the capture on
+disk, so a time unchanged from the plan it replaces is marked `placed: earlier`, loses its
+`settled`, and is named in the reply. A time that differs was set on what is there now,
+and is the person's. The page never says which capture a plan is on; the server does.
+
+**Aligning** carries times from the archived capture onto the new one, so it refuses a
+side already stamped with the new one. Such times would be moved by a transform that was
+never about them, a person's included, and running it twice used to do exactly that.
 
 ### The refusal
 

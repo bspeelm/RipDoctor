@@ -994,3 +994,232 @@ def test_a_saved_plan_keeps_what_the_fit_rested_on_through_the_page(
     app = build(service)
     shown = get(app, "/api/album/album", service).json()["tracks_by_side"]
     assert [t["placed"] for s in shown.values() for t in s] == before
+
+
+def captured_again(service: Service, letter: str = "a") -> None:
+    """What a rip, an upload and a salvage all come to: a new file under the name."""
+    side = service.layout.raw / "album" / f"side-{letter}.flac"
+    side.write_bytes(side.read_bytes() + b"another take")
+    C.build(service.runner, service.layout, "album", letter, dwell=0.0)
+
+
+def a_fit_with_a_mark(tmp_path: Path, who: str = "hand"):  # type: ignore[no-untyped-def]
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plain = track_in(service, 1)
+    settled_at(service, 1, plain.start + 0.25, plain.end - 0.25, who)
+    return service, plain
+
+
+def page_saves(service: Service, moved: dict[int, float] | None = None):  # type: ignore[no-untyped-def]
+    """The document the page sends: what it was shown, with any end moved by hand."""
+    shown = get(build(service), "/api/album/album", service).json()
+    sides = []
+    for letter, tracks in shown["tracks_by_side"].items():
+        for t in tracks:
+            if t["number"] in (moved or {}):
+                t.update(end=moved[t["number"]], settled="hand", placed="")  # type: ignore[index]
+        sides.append({"letter": letter, "tracks": tracks})
+    return post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {"album": "A", "artist": "B", "sides": sides},
+    ).json()
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_a_first_pass_after_a_re_rip_does_not_hold_times_on_the_audio_that_went(
+    tmp_path: Path, who: str
+) -> None:
+    """Run again pinned settled tracks, and after a re-rip those were positions on
+    a replaced capture that would be cut as "Set by you"."""
+    service, plain = a_fit_with_a_mark(tmp_path, who)
+    captured_again(service)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert body["result"]["released"] == [
+        {
+            "side": "a",
+            "number": 1,
+            "title": plain.title,
+            "why": "that side has been captured again since",
+        }
+    ]
+    again = track_in(service, 1)
+    assert again.settled == ""
+    assert (again.start, again.end) == (plain.start, plain.end)
+
+
+def test_a_replaced_side_lets_go_only_of_its_own_marks(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    on_a, on_b = plan.sides[0].tracks[0], plan.sides[1].tracks[0]
+    settled_at(service, on_a.number, on_a.start + 0.25, on_a.end - 0.25, "hand")
+    settled_at(service, on_b.number, on_b.start + 0.25, on_b.end - 0.25, "ear")
+    captured_again(service, "a")
+
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert [x["number"] for x in body["result"]["released"]] == [on_a.number]
+    assert track_in(service, on_b.number).settled == "ear"
+
+
+def test_the_same_audio_says_nothing_was_released(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert body["result"]["released"] == []
+
+
+def test_a_side_since_removed_does_not_stop_the_first_pass_over_its_marks(
+    tmp_path: Path,
+) -> None:
+    """The page cannot show a side that is gone, so "remove it first" had no way out."""
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    on_b = F.read_plan(service.layout.plan_file("album")).sides[1].tracks[0]
+    settled_at(service, on_b.number, on_b.start + 0.25, on_b.end - 0.25, "hand")
+    (service.layout.raw / "album" / "side-b.flac").unlink()
+
+    service.fetcher = Catalogue(release([1000, 1000, 1000, 1000]))  # type: ignore[assignment]
+    body = post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"}).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["released"][0]["why"] == "that side is no longer there"
+
+
+def test_a_mark_on_a_plan_that_never_said_which_capture_is_not_held(
+    tmp_path: Path,
+) -> None:
+    """Holding it is the hazard, and letting it go is named."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    bare = replace(plan, sides=tuple(replace(s, audio="") for s in plan.sides))
+    F.save(service.layout, "album", F.spec_of(bare), bare)
+
+    body = a_second_pass(service)
+    assert "nothing records" in body["result"]["released"][0]["why"]
+
+
+def test_a_first_pass_records_the_capture_it_placed_on(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    stamps = C.stamps_of(service.layout, "album")
+    assert [s.audio for s in plan.sides] == [stamps[s.file] for s in plan.sides]
+    assert all(s.audio for s in plan.sides)
+
+
+def test_a_replaced_side_reads_as_from_an_earlier_capture_before_anything_is_run(
+    tmp_path: Path,
+) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    assert {t["placed"] for t in shown["a"]} == {"earlier"}
+    assert {t["settled"] for t in shown["a"]} == {""}
+    assert shown["a"][0]["start"] == plain.start + 0.25
+    assert "earlier" not in {t["placed"] for t in shown["b"]}
+
+
+def test_saving_over_a_re_rip_does_not_launder_an_old_mark_into_a_new_one(
+    tmp_path: Path,
+) -> None:
+    """Nothing here tells a page's unchanged row from a judgement, except its time."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+
+    reply = page_saves(service)
+    assert reply["released"] == [1]
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+    assert saved.sides[0].tracks[0].settled == ""
+    assert saved.sides[0].tracks[0].placed == "earlier"
+
+    assert not a_second_pass(service)["result"]["released"], "already let go, and said"
+
+
+def test_a_boundary_moved_after_a_re_rip_is_a_judgement_about_the_new_capture(
+    tmp_path: Path,
+) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    new_end = plain.end - 0.5
+
+    assert page_saves(service, {1: new_end})["released"] == []
+    assert track_in(service, 1).settled == "hand"
+
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert track_in(service, 1).end == new_end
+
+
+def test_saving_on_the_same_audio_leaves_every_mark_alone(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    assert page_saves(service)["released"] == []
+    assert track_in(service, 1).settled == "hand"
+
+
+def test_the_page_cannot_tell_the_server_which_capture_a_plan_is_on(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {
+            "album": "A",
+            "artist": "B",
+            "sides": [
+                {"letter": k, "audio": "made up", "tracks": v} for k, v in shown.items()
+            ],
+        },
+    )
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_relabelling_keeps_which_capture_the_times_are_on(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    before = F.read_plan(service.layout.plan_file("album")).sides[0].audio
+    service.fetcher = Catalogue(release([2000, 2000, 2000, 2000]))  # type: ignore[assignment]
+    captured_again(service)
+    assert (
+        post(build(service), "/api/relabel/album", service, {"mbid": "aaa"}).status
+        == 200
+    )
+    assert F.read_plan(service.layout.plan_file("album")).sides[0].audio == before
+
+
+def test_a_copy_into_the_archive_is_still_the_same_capture(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    side = service.layout.raw / "album" / "side-a.flac"
+    plan = F.read_plan(service.layout.plan_file("album"))
+    plan = replace(plan, sides=(replace(plan.sides[0], audio=C.stamp_of(side)),))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    held = F.read_plan(service.layout.plan_file("album")).sides[0]
+    assert held.audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_a_truncated_side_repaired_on_the_way_is_still_the_same_capture(
+    tmp_path: Path,
+) -> None:
+    """The repair writes a different file, and the times on it are as right as ever."""
+    service, _library = arrived(tmp_path)
+    side = service.layout.raw / "album" / "side-a.flac"
+    plan = F.read_plan(service.layout.plan_file("album"))
+    plan = replace(plan, sides=(replace(plan.sides[0], audio=C.stamp_of(side)),))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    service.runner = Archiving().expect(
+        lambda a: a[0] == "flac" and "raw" in a[-1], returncode=1
+    )
+
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    held = F.read_plan(service.layout.plan_file("album")).sides[0]
+    assert held.audio == C.stamps_of(service.layout, "album")["side-a.flac"]

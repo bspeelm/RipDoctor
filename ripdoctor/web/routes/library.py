@@ -11,9 +11,11 @@ from ripdoctor.core.plan import (
     BadPlan,
     OldFormat,
     Plan,
+    Released,
     Spec,
     SpecSide,
     SpecTrack,
+    holding_only_current,
     validate,
 )
 from ripdoctor.core.sides import assign_sides, music_span
@@ -141,15 +143,25 @@ def add(app: App, service: Service) -> None:
                 job.finished += 1
 
             spec = spec_from(slug, release, spans)
+            stamps = C.stamps_of(layout, slug)
             saved = _saved_plan(layout, slug)
+            released: tuple[Released, ...] = ()
             if saved is not None:
-                spec = F.keeping_settled(spec, saved)
+                held, released = holding_only_current(saved, stamps)
+                spec = F.keeping_settled(spec, held)
             plan, working = fit_plan(
                 spec, lanes, above=service.thresholds.gap_above, force=force
             )
             validate(plan)
+            plan = replace(
+                plan,
+                sides=tuple(
+                    replace(s, audio=stamps.get(s.file, "")) for s in plan.sides
+                ),
+            )
             F.save(layout, slug, spec, plan)
             return {
+                "released": [_released(x) for x in released],
                 "album": plan.album,
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
@@ -431,6 +443,15 @@ def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
         artist=release.artist or plan.artist,
         date=release.date or plan.date,
     )
+
+
+def _released(gone: Released) -> dict[str, Any]:
+    return {
+        "side": F.letter_of(gone.file),
+        "number": gone.track.number,
+        "title": gone.track.title,
+        "why": gone.why,
+    }
 
 
 def _saved_plan(layout: F.Layout, slug: str) -> Plan | None:

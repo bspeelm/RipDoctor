@@ -26,7 +26,7 @@ from ripdoctor.audio.ffprobe import sample_rate, true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.core.envelope import Lanes, decode, encode, window_count_is_plausible
 from ripdoctor.core.naming import token
-from ripdoctor.store.files import Layout, write_json
+from ripdoctor.store.files import SIDE, Layout, write_json
 from ripdoctor.store.safety import under
 
 WINDOW = astats.WINDOW_MS / 1000.0
@@ -83,6 +83,14 @@ def stamp_of(path: str | Path) -> str:
     """
     st = Path(path).stat()
     return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def stamps_of(layout: Layout, slug: str) -> dict[str, str]:
+    """Every side of a record as it is on disk now, by the name a plan gives it."""
+    return {
+        SIDE.format(letter=letter): stamp_of(layout.side_file(slug, letter))
+        for letter in layout.sides_on_disk(slug)
+    }
 
 
 def is_growing(

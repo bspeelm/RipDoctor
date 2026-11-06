@@ -11,7 +11,15 @@ from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
-from ripdoctor.core.plan import HAND, BadPlan, OldFormat, Plan, Spec
+from ripdoctor.core.plan import (
+    HAND,
+    BadPlan,
+    OldFormat,
+    Plan,
+    Spec,
+    as_it_stands,
+    saved_over,
+)
 from ripdoctor.core.xcorr import AlignError
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
@@ -120,7 +128,7 @@ def add(app: App, service: Service) -> None:
         plan_file = layout.plan_file(slug)
         if plan_file.is_file():
             try:
-                plan = F.read_plan(plan_file)
+                plan = as_it_stands(F.read_plan(plan_file), C.stamps_of(layout, slug))
             except (OldFormat, BadPlan) as e:
                 # Refusing the superseded format is deliberate, so say so with a
                 # status the browser can act on rather than a 500.
@@ -289,9 +297,19 @@ def add(app: App, service: Service) -> None:
         # it dropped every one of them.
         current = _saved_spec(layout, slug)
         mbid = str(body.get("mbid", "")) or (current.mbid if current else "")
+        plan, released = saved_over(
+            plan, _saved_plan_or_none(layout, slug), C.stamps_of(layout, slug)
+        )
         spec = replace(F.spec_of(plan, current), mbid=mbid)
         spec_path, plan_path = F.save(layout, slug, spec, plan)
-        return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
+        return H.ok(
+            {
+                "ok": True,
+                "spec": spec_path.name,
+                "plan": plan_path.name,
+                "released": [t.track.number for t in released],
+            }
+        )
 
 
 def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
@@ -313,6 +331,14 @@ def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
     except (BadPlan, OSError, ValueError):
         return album, artist, date, False
     return plan.album or album, plan.artist or artist, plan.date or date, False
+
+
+def _saved_plan_or_none(layout: F.Layout, slug: str) -> Plan | None:
+    """The plan a save replaces. One that cannot be read holds nothing to compare."""
+    try:
+        return F.read_plan(layout.plan_file(slug))
+    except (OldFormat, BadPlan, OSError, ValueError, KeyError):
+        return None
 
 
 def _saved_spec(layout: F.Layout, slug: str) -> Spec | None:
@@ -354,6 +380,19 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
     for where, what in ((old, "archived"), (new, "new")):
         if not where.is_file():
             raise FileNotFoundError(f"no {what} capture at {where.name}")
+    # The transform maps the archived capture onto the new one. Times already on
+    # the new one would be moved by it, a person's included.
+    saved = _saved_plan_or_none(layout, slug)
+    placed = (
+        next((s for s in saved.sides if F.letter_of(s.file) == side.letter), None)
+        if saved
+        else None
+    )
+    if placed and placed.audio == C.stamp_of(new):
+        raise AlignError(
+            f"side {side.letter}'s boundaries are already on this capture, so "
+            "there is nothing to carry"
+        )
 
     built = C.prepared(layout, slug, side.letter)
     duration = built.duration if built else true_duration(service.runner, str(new))

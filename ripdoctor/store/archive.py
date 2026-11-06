@@ -16,17 +16,18 @@ import shutil
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
+from ripdoctor.core.plan import OldFormat
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
-from ripdoctor.store.files import Layout
+from ripdoctor.store.files import Layout, read_plan, read_spec, save
 from ripdoctor.store.safety import under
 
 # What is cleared once the record is safe: the cut tracks, the tick clips and
@@ -192,6 +193,7 @@ def put_away(
             progress(what, detail)
 
     archived, notes = [], []
+    reencoded: dict[str, tuple[str, str]] = {}
     # Held until every side has read back, not just this one: a later side
     # failing must still be able to put the earlier ones back.
     stepped: list[Path] = []
@@ -207,6 +209,7 @@ def put_away(
             # Not a failure: it is what a capture ended with a signal looks
             # like, and re-encoding is how it stops being that.
             say(side.name, "re-encoding")
+            reencoded[side.name] = (C.stamp_of(side), "")
             runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
             notes.append(f"{side.name} was truncated and has been re-encoded")
 
@@ -216,6 +219,8 @@ def put_away(
             if superseded:
                 superseded.replace(target)
             raise NotReady(f"{side.name} did not read back from the archive")
+        if side.name in reencoded:
+            reencoded[side.name] = (reencoded[side.name][0], C.stamp_of(target))
         archived.append(
             {
                 "side": side.name,
@@ -226,6 +231,8 @@ def put_away(
 
     if not archived:
         raise NotReady(f"no sides in raw for {slug}")
+
+    _same_audio(layout, slug, reencoded)
 
     # Only now, with every side read back from where it will live.
     for old_take in stepped:
@@ -248,6 +255,31 @@ def put_away(
         "notes": notes,
         "removed": removed,
     }
+
+
+def _same_audio(
+    layout: Layout, slug: str, reencoded: dict[str, tuple[str, str]]
+) -> None:
+    """A re-encode changes the file and not the music, so the plan follows it.
+
+    Times placed on a truncated capture are still right on its repaired copy. A
+    plan that does not read is left for whoever opens it to be told about.
+    """
+    where = layout.plan_file(slug)
+    if not reencoded or not where.is_file():
+        return
+    try:
+        plan = read_plan(where)
+        spec = read_spec(layout.spec_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return
+    sides = tuple(
+        replace(s, audio=reencoded[s.file][1])
+        if s.file in reencoded and s.audio == reencoded[s.file][0]
+        else s
+        for s in plan.sides
+    )
+    save(layout, slug, spec, replace(plan, sides=sides))
 
 
 def keep_tape(runner: Runner, layout: Layout, tape: str) -> dict[str, Any]:

@@ -233,12 +233,21 @@ function railRip(f) {
   return cutStep("rip", "done", counted(sides.length, "side", "sides"), `${sides.length === 1 ? "Side" : "Sides"} ${letters}.`);
 }
 
+function sidesFromEarlier() {
+  return (S.meta?.sides ?? []).filter((letter) => (S.bySide[letter] || []).some((t) => t.placed === "earlier"));
+}
+
 function railFirstPass(f) {
   const n = f.tracks.length;
   $("#firstpass").textContent = n ? "Run again" : "First pass";
   blue("#firstpass", !!f.sides.length && !n);
   if (!f.sides.length) return cutStep("firstpass", "wait", "Waiting", "Waiting on a side.");
   if (!n) return cutStep("firstpass", "ready", "Not run", "Find the release and fit its tracks to the gaps, or add tracks by hand.");
+  const earlier = sidesFromEarlier();
+  if (earlier.length) {
+    blue("#firstpass", true);
+    return cutStep("firstpass", "todo", "Captured again", `Side ${namedList(earlier)} was captured again after its boundaries were placed. Run this again${$("#realign").hidden ? "" : ", or align from the archive"}.`);
+  }
   return cutStep("firstpass", "done", S.meta.mbid ? "Matched" : "By hand",
                  `${counted(n, "track", "tracks")} across ${counted(f.sides.length, "side", "sides")}.`);
 }
@@ -553,7 +562,7 @@ function trackByNum(n) { return tracks().find((t) => t.number === n); }
 // Nothing settled it, so the fit did, or the catalogue if the track is forced. A plan that
 // does not say what the fit rested on is only called fitted. ADR-064.
 const BOUNDARY_WORDS = { hand: ["Set by you", "good"], ear: ["Checked by ear", "good"] };
-const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by length", "quiet"] };
+const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by length", "quiet"], earlier: ["From an earlier capture", "warn"] };
 function trackBoundary(t) {
   return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
 }
@@ -607,6 +616,7 @@ function trackRowView(t) {
   const bnd = statusCell(trackBoundary(t));
   bnd.classList.add("c-bnd-cell");
   if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
+  else if (t.placed === "earlier") bnd.title = "this side was captured again after this was placed, so these times are positions on audio that has gone";
   else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Cut does not wait on it";
   tr.append(bnd);
   return tr;
@@ -1042,10 +1052,12 @@ function buildDoc() {
 // can stop. The Save button ignores the answer; Cut does not.
 async function save() {
   try {
-    await postJSON(`/api/plan/${S.slug}`, buildDoc());
+    const { released } = await postJSON(`/api/plan/${S.slug}`, buildDoc());
     markDirty(false);
     dropDraft();
-    status("saved plan + spec");
+    status(released?.length
+      ? `saved. ${counted(released.length, "track", "tracks")} (${released.join(", ")}) kept ${released.length === 1 ? "its time" : "their times"} from the earlier capture, no longer marked as yours`
+      : "saved plan + spec", !!released?.length);
     return true;
   } catch (e) {
     status(`save failed: ${e.message}`, true);
@@ -1416,6 +1428,13 @@ async function fpSearch() {
   }
 }
 
+// Named one by one, since each is a judgement of theirs this pass did not hold.
+function notHeld(released = []) {
+  if (!released.length) return "";
+  const lines = released.map((x) => `  ${x.number} \u201c${x.title}\u201d on side ${x.side}: ${x.why}`);
+  return `Fitted again, not kept where you had them:\n${lines.join("\n")}\n\n`;
+}
+
 async function fpRun(rel) {
   $("#fp-err").textContent = "";
   $("#fp-report").hidden = true;
@@ -1427,7 +1446,7 @@ async function fpRun(rel) {
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
     const kept = r.kept ? `${counted(r.kept, "track", "tracks")} you set or checked left where ${r.kept === 1 ? "it was" : "they were"}` : "";
-    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + (kept ? `${kept}.\n\n` : "") + r.report;
+    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + notHeld(r.released) + (kept ? `${kept}.\n\n` : "") + r.report;
     $("#fp-done").hidden = false;
     $("#fp-cancel").hidden = true;
     S.sideData = {};
