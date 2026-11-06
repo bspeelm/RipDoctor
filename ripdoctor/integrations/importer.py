@@ -469,11 +469,11 @@ class Beets:
         if duplicates == "merge" and not mbid:
             raise ImportFailed(NO_RELEASE_TO_MERGE)
         how = self._merging(runner, library, mbid, plan.album, duplicates)
-        cleared = 0
+        removed: list[Path] = []
         # Only with the acknowledgement: "replace" alone is a default, not a
         # licence to delete. ADR-060.
         if replacing and duplicates == "replace":
-            cleared = self.replace_filed(
+            removed = self._remove_filed(
                 runner, library, plan.artist, plan.album, mbid=mbid
             )
         if not mbid:
@@ -486,6 +486,8 @@ class Beets:
             timeout=3600,
         )
         output = _plain(result.text + result.err)
+        # After the import, since the new copy may land in the same folder.
+        folders = _clear_emptied(library, removed)
 
         left = (
             [p for p in Path(review).glob(f"*{FLAC}")] if Path(review).is_dir() else []
@@ -514,8 +516,10 @@ class Beets:
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
-        if cleared:
-            notes.append(f"removed {cleared} files of the copy already filed")
+        if removed:
+            notes.append(f"removed {len(removed)} files of the copy already filed")
+        if folders:
+            notes.append(f"removed {folders} empty folders it left")
         notes.extend(self._merged(runner, library, mbid, how))
         if duplicates != "merge":
             notes.extend(too_many(count, sum(len(s.tracks) for s in plan.sides)))
@@ -899,14 +903,19 @@ class Beets:
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> int:
         """Remove the copy already filed, audio as well as rows. ADR-060."""
+        return len(self._remove_filed(runner, library, artist, album, mbid=mbid))
+
+    def _remove_filed(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> list[Path]:
         query = _query(album, mbid)
         if not query:
-            return 0
+            return []
         filed = self._paths(runner, query, library)
         if not filed:
-            return 0
+            return []
         root = Path(library).resolve()
-        gone = 0
+        gone = []
         for path in filed:
             if not path.is_file():
                 continue
@@ -914,7 +923,7 @@ class Beets:
             if not contains(root, path):
                 raise ImportFailed(f"refusing to delete {path}: outside {root}")
             path.unlink()
-            gone += 1
+            gone.append(path)
         runner.run(self._argv(["remove", "-f", *query]), timeout=600)
         return gone
 
@@ -1013,6 +1022,26 @@ def _merge_answers(how: str) -> bytes:
     if not how:
         return b""
     return SKIP_ANY_OTHER if how == NEW_ALBUM else PINNED_ANSWERS[how]
+
+
+def _clear_emptied(library: str, removed: list[Path]) -> int:
+    """The folders these files were in, and those above them, up to and not including
+    the root, as far as each is now empty. `rmdir` is the check: it refuses a folder
+    with anything in it, so nothing else can go, nor one this did not empty."""
+    root = Path(library).resolve()
+    cleared = 0
+    for folder in sorted({p.parent for p in removed}, key=lambda p: -len(p.parts)):
+        while folder.resolve() != root and contains(root, folder):
+            try:
+                folder.rmdir()
+            except FileNotFoundError:  # went with a deeper one on this same walk
+                pass
+            except OSError:  # it holds something, so everything above it does too
+                break
+            else:
+                cleared += 1
+            folder = folder.parent
+    return cleared
 
 
 def holds_nothing(library: str) -> bool:

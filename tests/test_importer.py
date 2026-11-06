@@ -1256,3 +1256,92 @@ def test_another_edition_in_the_folder_was_once_called_not_in_the_library(
         fake, str(tmp_path), "A Band", "A Record", mbid="rel"
     )
     assert [p.name for p in spare] == ["02 Stray.flac"]
+
+
+# ----------------------------------------------------- the folders a replace empties
+
+
+def replaced(tmp_path: Path, *also: str) -> tuple[Path, I.Outcome]:
+    """The old copy replaced by one beets files somewhere else. `also` is other files
+    already under the library, by their place in it."""
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    for name in also:
+        where = Path(library) / name
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_bytes(b"x")
+    review = Path(a_review(tmp_path))
+    done = I.Beets().apply(
+        replacing(library, said, review),
+        a_plan(),
+        str(review),
+        library,
+        mbid="x",
+        replacing=True,
+    )
+    return Path(library), done
+
+
+def test_replacing_once_left_the_folders_it_had_emptied(tmp_path: Path) -> None:
+    library, done = replaced(tmp_path)
+    assert not (library / "A Band").exists()
+    assert library.is_dir()
+    assert any("removed 2 empty folders" in n for n in done.notes)
+
+
+def test_a_folder_holding_anything_else_stays(tmp_path: Path) -> None:
+    library, _ = replaced(tmp_path, "A Band/A Record/notes.txt")
+    assert (library / "A Band" / "A Record" / "notes.txt").is_file()
+    assert not list((library / "A Band" / "A Record").glob("*.flac"))
+
+
+def test_an_artist_with_another_album_keeps_its_folder(tmp_path: Path) -> None:
+    library, _ = replaced(tmp_path, "A Band/Another/01.flac")
+    assert not (library / "A Band" / "A Record").exists()
+    assert (library / "A Band" / "Another" / "01.flac").is_file()
+
+
+def test_a_folder_it_never_emptied_is_not_touched_even_if_empty(tmp_path: Path) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    (library_path := Path(library)).joinpath("Empty Already").mkdir()
+    review = Path(a_review(tmp_path))
+    I.Beets().apply(
+        replacing(library, said, review),
+        a_plan(),
+        str(review),
+        library,
+        mbid="x",
+        replacing=True,
+    )
+    assert (library_path / "Empty Already").is_dir()
+
+
+def test_the_library_root_is_never_removed_with_its_last_folder(tmp_path: Path) -> None:
+    library = tmp_path / "lib"
+    library.mkdir()
+    (library / "01 Old.flac").write_bytes(b"fLaC")
+    said = f"A Record{SEP}{library / '01 Old.flac'}".encode()
+    review = Path(a_review(tmp_path))
+    I.Beets().apply(
+        replacing(str(library), said, review),
+        a_plan(),
+        str(review),
+        str(library),
+        mbid="x",
+        replacing=True,
+    )
+    assert library.is_dir()
+
+
+def test_a_folder_the_new_copy_landed_back_in_stays(tmp_path: Path) -> None:
+    class Landing(Moving):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            if "import" in [str(a) for a in argv]:
+                (album / "01 New.flac").write_bytes(b"fLaC")
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    album = Path(library) / "A Band" / "A Record"
+    review = Path(a_review(tmp_path))
+    fake = Landing(review, installed={"beet", "metaflac"}).expect("ls", stdout=said)
+    I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    assert (album / "01 New.flac").is_file()
