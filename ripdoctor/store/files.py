@@ -212,6 +212,7 @@ def _spec_to_dict(spec: Spec) -> dict[str, Any]:
                         "len": t.cat,
                         **({"start": t.start} if t.start is not None else {}),
                         **({"end": t.end} if t.end is not None else {}),
+                        **({"settled": t.settled} if t.settled else {}),
                     }
                     for t in s.tracks
                 ],
@@ -293,7 +294,12 @@ def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     for side in plan.sides:
         tracks = tuple(
             SpecTrack(
-                number=t.number, title=t.title, cat=t.cat, start=t.start, end=t.end
+                number=t.number,
+                title=t.title,
+                cat=t.cat,
+                start=t.start,
+                end=t.end,
+                settled=t.settled,
             )
             for t in side.tracks
         )
@@ -316,6 +322,42 @@ def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
         lead=keep.lead if keep else LEAD,
         tail=keep.tail if keep else TAIL,
     )
+
+
+def keeping_settled(spec: Spec, plan: Plan) -> Spec:
+    """A new fit's spec, holding every boundary a person settled in the plan.
+
+    Tracks are matched by side and number, the only identity the two share. One
+    with no place in the new spec is refused: dropping it would discard the
+    judgement without anyone having asked for that.
+    """
+    held = {
+        (side.file, t.number): t
+        for side in plan.sides
+        for t in side.tracks
+        if t.settled
+    }
+    sides = []
+    for s in spec.sides:
+        tracks = []
+        for t in s.tracks:
+            kept = held.pop((SIDE.format(letter=s.letter), t.number), None)
+            tracks.append(
+                replace(t, start=kept.start, end=kept.end, settled=kept.settled)
+                if kept
+                else t
+            )
+        sides.append(replace(s, tracks=tuple(tracks)))
+    if held:
+        names = ", ".join(
+            f'{number} "{t.title}" on side {letter_of(file)}'
+            for (file, number), t in held.items()
+        )
+        raise ValueError(
+            f"this release has no place for what you settled: track {names}. "
+            "Choose another release, or remove that track and save first."
+        )
+    return replace(spec, sides=tuple(sides))
 
 
 def spec_from_plan(spec: Spec, plan: Plan) -> Spec:

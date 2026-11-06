@@ -153,6 +153,12 @@ def fit_side(
                 if not gap.lo <= want <= gap.hi:
                     want_outside = want - (gap.lo + gap.hi) / 2.0
 
+        # A found end stops at a start a person set, which the fit may not move.
+        if not last and track.end is None:
+            held = side.tracks[i + 1].start
+            if held is not None:
+                end = min(end, held)
+
         out.append(
             Fitted(
                 track=PlanTrack(
@@ -161,6 +167,7 @@ def fit_side(
                     start=round(cur, 2),
                     end=round(end, 2),
                     cat=track.cat,
+                    settled=track.settled,
                 ),
                 reason=reason,
                 want_outside=want_outside,
@@ -239,14 +246,18 @@ def fit_plan(
 
 def was_forced(fitted: tuple[Fitted, ...]) -> bool:
     """Whether this side was placed from the catalogue alone. ADR-061."""
-    return any(f.reason.startswith(FORCED) for f in fitted)
+    return any(_placed_blind(f) for f in fitted)
+
+
+def _placed_blind(f: Fitted) -> bool:
+    return f.reason.startswith(FORCED) and not f.track.settled
 
 
 def to_side(letter: str, fitted: tuple[Fitted, ...]) -> PlanSide:
     return PlanSide(
         file=f"side-{letter}.flac",
         tracks=tuple(
-            replace(f.track, forced=True) if f.reason.startswith(FORCED) else f.track
+            replace(f.track, forced=True) if _placed_blind(f) else f.track
             for f in fitted
         ),
     )

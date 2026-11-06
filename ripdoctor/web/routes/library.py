@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from ripdoctor.core.fit import fit_plan, report, was_forced
-from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, validate
+from ripdoctor.core.plan import (
+    BadPlan,
+    OldFormat,
+    Plan,
+    Spec,
+    SpecSide,
+    SpecTrack,
+    validate,
+)
 from ripdoctor.core.sides import assign_sides, music_span
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
@@ -133,6 +141,9 @@ def add(app: App, service: Service) -> None:
                 job.finished += 1
 
             spec = spec_from(slug, release, spans)
+            saved = _saved_plan(layout, slug)
+            if saved is not None:
+                spec = F.keeping_settled(spec, saved)
             plan, working = fit_plan(
                 spec, lanes, above=service.thresholds.gap_above, force=force
             )
@@ -143,6 +154,7 @@ def add(app: App, service: Service) -> None:
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
                 "forced": [k for k, f in working.items() if was_forced(f)],
+                "kept": sum(bool(t.settled) for s in plan.sides for t in s.tracks),
                 "report": "\n".join(
                     f"=== side {letter}\n{report(fitted)}"
                     for letter, fitted in working.items()
@@ -419,6 +431,17 @@ def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
         artist=release.artist or plan.artist,
         date=release.date or plan.date,
     )
+
+
+def _saved_plan(layout: F.Layout, slug: str) -> Plan | None:
+    """The plan a new fit replaces. A superseded format holds no judgement to keep."""
+    where = layout.plan_file(slug)
+    if not where.is_file():
+        return None
+    try:
+        return F.read_plan(where)
+    except OldFormat:
+        return None
 
 
 def _isdir(path: str) -> bool:

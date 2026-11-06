@@ -2609,3 +2609,97 @@ wherever it was sent from.
 **Not included.** Recording a physical cassette through capture. The document
 does not assume a tape's audio came from an upload, so this stays possible, but
 no capture work is part of this.
+
+## ADR-064 — a track placed from the catalogue is heard before it is cut
+
+**Status:** proposed, awaiting the author's acceptance.
+
+**The argument against, first: a gate on a button proves a press, not a listen.**
+Nothing here can tell whether anybody heard the boundary. `Checked` writes "by ear"
+into the plan on the strength of a key, and a person told to press it once a track
+before they may cut will learn to press it. That turns a warning they could read
+into a record that says something untrue. The block is also stricter than the
+failure it answers: north-star's failure is a cut on the music that nothing in the
+interface suggested, and a forced row already says so in amber. They asked for
+forcing in the first place (ADR-061), and a wrong cut destroys nothing, since the raw
+side outlives it.
+
+What survives that is the cost on each side. Pressing one key on each doubtful
+track, with the track selected and the tick clip a key away, is small. A cut from
+arithmetic that nobody heard is found out after tagging and filing, or not at all,
+and a warning is exactly what gets read past on the tenth record. The plan's claim
+is the person's own, and if they make it falsely it is theirs. Where this goes wrong,
+it goes wrong as a boundary a person vouched for, which is the same trust the rest of
+the program already places in them.
+
+**What ADR-061 left open.** It said a forced mark lives on the track, that moving the
+boundary clears it, and that the boundaries that matter are still set by a person. It
+did not say whether a marked track could be cut, so it could. And moving was the only
+way to clear a mark, so somebody who listened and found the boundary right had to
+nudge it off and back to say so, which reads as "set by hand" and is untrue.
+
+**Why now.** The record page's Boundary column has to say who settled each track, and
+its rail has a step for checking. Both need the state on the track, and once the state
+exists, leaving Cut open past it means the rail says "2 to check" over an enabled
+button. Tapes already holds a song to the same standard.
+
+### The field
+
+A plan track carries one optional field, `settled`: `hand` for a boundary a person
+moved or placed, `ear` for one they left where it was and heard to be right. It is
+left out of the document when absent, so a plan from before it loads unchanged and
+reads as the fit's, or the catalogue's if it is `forced`. The spec carries it too. A
+save makes every edge in the spec ear-set, so the spec's edges cannot say which ones
+a person meant.
+
+It is per track, not per edge. Moving a track's end settles its start as well, which
+is what a save has always done to both.
+
+**What settling does.** It ends the doubt in any document: `forced` beside `settled`
+reads as not forced, and a value nobody knows reads as absent, so a typo cannot clear
+a doubt.
+
+**A first pass holds what is settled.** Run again used to start from the catalogue and
+replace every boundary behind one confirmation, which is the thing the program says
+never happens. It now pins each settled track, matched by side and number, and fits
+around it, and a found end stops at a settled start rather than overlapping it. A
+settled track the new release has no place for refuses the pass by name. Dropping it
+would discard a judgement nobody asked to discard; removing the track and saving is
+how to ask.
+
+**A re-rip is the awkward case.** Aligning carries a settled boundary across as `hand`,
+never `ear`, because nobody has heard it on the new capture. But a first pass after a
+re-rip, without aligning, also holds settled boundaries, and those are times on the
+audio that was replaced. The way out is the same: remove the track, or align instead.
+
+### The refusal
+
+`POST /api/split` refuses with a 409 while the saved plan has a forced track, naming
+each one. The rule is `cut_refusal` in `core/plan.py`, so it is tested with no audio.
+The server reads the saved plan after the page has saved for itself, so Cut still
+never waits on unsaved changes, and a check made a moment before pressing it counts.
+
+**What is not refused.** Tick clips, which are how a doubt gets heard. Import, because
+files cut before this existed are already judged. `ripdoctor split` on the command
+line, which takes a plan by path and has no `Checked` to offer; a refusal there would
+send somebody to hand-edit the document to get past it.
+
+**A known gap in the wording.** `Fitted to gap` is what an absent field reads as, and
+that includes a track the fit placed with `no gap` near it. The plan does not record
+that case, so it is not flagged and does not block. Its delta is zero by construction,
+which is the shape ADR-061 marked `forced` for. That is an open question and not
+settled here.
+
+### The keys
+
+`A` hears a boundary and `↵` accepts on both Cut and Tapes. `S` splits on Cut and does
+nothing on Tapes, where Skip is `X`. A habit carried from one page must not skip a song
+on the other. An arrow or `−`/`+` moves a marker only once it is chosen: by pressing
+it, its Start or End cell, or `E`. Selecting a track arms nothing, because a nudge sets
+a boundary for good.
+
+### The ceiling
+
+The argument here is the same as ADR-063's and no better: the ceiling moves 12,211 →
+12,750 for this page and retires nothing, and the trim ADR-036 promised is still owed.
+The comment ratio does not move.

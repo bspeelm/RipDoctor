@@ -10,6 +10,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import musicbrainz as MB
@@ -881,6 +883,92 @@ def test_forcing_places_that_side_from_the_catalogue_and_says_which(
     plan = F.read_plan(service.layout.plan_file("album"))
     starts = [t.start for t in plan.sides[0].tracks]
     assert starts == [0.0, 11.0, 22.0, 35.0]
+
+
+def a_second_pass(service, body=None):  # type: ignore[no-untyped-def]
+    service.fetcher = Catalogue(release([2000, 2000, 2000, 2000]))  # type: ignore[assignment]
+    return post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", **(body or {})}
+    ).json()
+
+
+def settled_at(service, number: int, start: float, end: float, who: str) -> None:  # type: ignore[no-untyped-def]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = next(s for s in plan.sides if any(t.number == number for t in s.tracks))
+    moved = tuple(
+        replace(t, start=start, end=end, settled=who) if t.number == number else t
+        for t in side.tracks
+    )
+    plan = replace(
+        plan,
+        sides=tuple(replace(s, tracks=moved) if s is side else s for s in plan.sides),
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+
+def track_in(service, number: int):  # type: ignore[no-untyped-def]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    return next(t for s in plan.sides for t in s.tracks if t.number == number)
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_fitting_again_never_moves_what_a_person_settled(
+    tmp_path: Path, who: str
+) -> None:
+    """Run again used to start from the catalogue, and took every corrected
+    boundary with it behind one confirmation."""
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plain = track_in(service, 1)
+    settled_at(service, 1, plain.start + 0.25, plain.end - 0.25, who)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 1
+
+    again = track_in(service, 1)
+    assert (again.start, again.end) == (plain.start + 0.25, plain.end - 0.25)
+    assert again.settled == who
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert spec.sides[0].tracks[0].settled == who
+
+
+def test_fitting_again_still_moves_what_only_the_fit_placed(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    found = track_in(service, 2)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    moved = tuple(
+        replace(t, start=found.start + 0.25) if t.number == 2 else t
+        for t in plan.sides[0].tracks
+    )
+    plan = replace(plan, sides=(replace(plan.sides[0], tracks=moved), *plan.sides[1:]))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert track_in(service, 2).start == found.start
+
+
+def test_fitting_again_refuses_a_release_with_no_place_for_a_settled_track(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = plan.sides[0]
+    last = side.tracks[-1]
+    extra = replace(last, number=9, start=last.end, end=last.end + 0.5, settled="hand")
+    plan = replace(
+        plan, sides=(replace(side, tracks=(*side.tracks, extra)), *plan.sides[1:])
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    before = service.layout.plan_file("album").read_text()
+
+    body = a_second_pass(service)
+    assert "9" in body["error"] and "no place" in body["error"]
+    assert service.layout.plan_file("album").read_text() == before
 
 
 def test_a_pass_that_needed_no_forcing_says_so(tmp_path: Path) -> None:

@@ -10,6 +10,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
@@ -522,6 +524,26 @@ def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
     assert body["result"]["unreadable"], "an unreadable track was reported as fine"
 
 
+def test_who_settled_a_track_reaches_the_page_and_comes_back(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["settled"] = "hand"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["settled"] == "hand"
+    assert '"settled": "hand"' in service.layout.spec_file("album").read_text()
+
+
+def test_a_plan_with_no_mark_reaches_the_page_as_nobody_having_settled_it(
+    tmp_path: Path,
+) -> None:
+    service = a_service(tmp_path)
+    assert post(build(service), "/api/plan/album", service, a_plan_body()).status == 200
+    assert "settled" not in service.layout.plan_file("album").read_text()
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["settled"] == ""
+
+
 def test_splitting_without_a_plan_is_a_404(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     assert post(build(service), "/api/split/album", service).status == 404
@@ -637,6 +659,31 @@ def test_an_archived_cut_is_carried_onto_a_re_rip(tmp_path: Path, monkeypatch) -
     assert not body["error"], body["error"]
     moved = body["result"]["aligned"][0]["tracks"][0]
     assert moved["start"] == 3.0 and moved["end"] == 11.0
+    assert "settled" not in moved
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_aligning_keeps_a_boundary_as_a_persons_but_not_as_heard(
+    tmp_path: Path, monkeypatch, who: str
+) -> None:
+    """A first pass after this has to leave it alone, and nobody has listened to
+    this capture yet, so a check by ear does not come across as one."""
+    from ripdoctor.core.xcorr import Transform
+
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["settled"] = who
+    plan = R._plan_from("album", body)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    monkeypatch.setattr(
+        R, "fit_side", lambda *a, **k: (Transform(offset=2.0, scale=1.0), (), 0.01)
+    )
+    monkeypatch.setattr(R, "true_duration", lambda *a, **k: 60.0)
+    got = post(build(service), "/api/align/album", service).json()
+    assert got["result"]["aligned"][0]["tracks"][0]["settled"] == "hand"
 
 
 def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:

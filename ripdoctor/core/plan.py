@@ -10,6 +10,16 @@ from typing import Any
 LEAD = 1.3
 TAIL = 1.5
 
+# Who settled a track's boundaries. Absent, the fit did, or the catalogue if the
+# track is forced. Either value is a person's last judgement, and no fit moves it.
+HAND = "hand"  # moved or placed by a person
+EAR = "ear"  # left where it was, and heard to be right
+
+
+def _settled(value: Any) -> str:
+    """An unknown value reads as absent, so it can never clear a doubt."""
+    return str(value) if value in (HAND, EAR) else ""
+
 
 class OldFormat(Exception):
     """A superseded contiguous-cuts plan. Refused, never converted."""
@@ -28,6 +38,7 @@ class SpecTrack:
     cat: float  # catalogue duration, the arithmetic constraint
     start: float | None = None  # ear-set; overrides everything
     end: float | None = None  # ear-set; overrides everything
+    settled: str = ""  # who did, carried onto the plan; a save makes every edge ear-set
 
     @property
     def has_ear_edges(self) -> bool:
@@ -70,6 +81,7 @@ class Spec:
                     cat=float(t.get("len", 0.0)),
                     start=None if t.get("start") is None else float(t["start"]),
                     end=None if t.get("end") is None else float(t["end"]),
+                    settled=_settled(t.get("settled")),
                 )
                 for t in s.get("tracks", [])
             )
@@ -109,6 +121,7 @@ class PlanTrack:
     # Placed from the catalogue rather than found, so `delta` is zero by
     # construction and says nothing about whether the boundary is right.
     forced: bool = False
+    settled: str = ""
 
     @property
     def length(self) -> float:
@@ -153,7 +166,10 @@ class Plan:
                             start=float(t["start"]),
                             end=float(t["end"]),
                             cat=float(t.get("cat", 0.0)),
-                            forced=bool(t.get("forced", False)),
+                            # A person's judgement ends the doubt, in any document.
+                            forced=bool(t.get("forced", False))
+                            and not _settled(t.get("settled")),
+                            settled=_settled(t.get("settled")),
                         )
                         for t in s.get("tracks", [])
                     ),
@@ -184,6 +200,7 @@ class Plan:
                             "end": round(t.end, 2),
                             "cat": t.cat,
                             **({"forced": True} if t.forced else {}),
+                            **({"settled": t.settled} if t.settled else {}),
                         }
                         for t in s.tracks
                     ],

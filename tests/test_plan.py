@@ -200,3 +200,47 @@ def test_an_end_past_the_side_is_refused_when_the_duration_is_known() -> None:
 
 def test_validation_is_silent_about_sides_it_has_no_duration_for() -> None:
     P.validate(build([(1, 0.0, 500.0)]), durations={"side-z.flac": 10.0})
+
+
+# ---------------------------------------------------------- who settled a track
+
+
+def a_track_doc(**extra: object) -> dict:
+    return {"number": 1, "title": "One", "start": 1.0, "end": 9.0, "cat": 8.0, **extra}
+
+
+def a_plan_doc(*tracks: dict) -> dict:
+    return {
+        "slug": "album",
+        "album": "A",
+        "artist": "B",
+        "sides": [{"file": "side-a.flac", "tracks": list(tracks)}],
+    }
+
+
+def only_track(*docs: dict) -> P.PlanTrack:
+    return P.Plan.from_dict(a_plan_doc(*docs)).sides[0].tracks[0]
+
+
+@pytest.mark.parametrize("who", [P.HAND, P.EAR])
+def test_who_settled_a_track_survives_the_document(who: str) -> None:
+    plan = P.Plan.from_dict(a_plan_doc(a_track_doc(settled=who)))
+    assert P.Plan.from_dict(plan.to_dict()).sides[0].tracks[0].settled == who
+
+
+def test_a_plan_older_than_the_field_loads_and_writes_nothing_new() -> None:
+    plan = P.Plan.from_dict(a_plan_doc(a_track_doc(), a_track_doc(forced=True)))
+    first, second = plan.sides[0].tracks
+    assert (first.settled, first.forced) == ("", False)
+    assert (second.settled, second.forced) == ("", True)
+    assert "settled" not in json.dumps(plan.to_dict())
+
+
+def test_a_persons_judgement_ends_the_doubt_in_any_document() -> None:
+    track = only_track(a_track_doc(forced=True, settled=P.EAR))
+    assert not track.forced
+
+
+def test_a_settled_value_nobody_knows_cannot_clear_a_doubt() -> None:
+    track = only_track(a_track_doc(forced=True, settled="maybe"))
+    assert track.forced and not track.settled

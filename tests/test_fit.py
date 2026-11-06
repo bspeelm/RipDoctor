@@ -469,3 +469,69 @@ def test_a_boundary_that_was_found_is_not_marked() -> None:
 
     assert not any(t.forced for t in plan.sides[0].tracks)
     assert "forced" not in json.dumps(plan.to_dict())
+
+
+# --------------------------------------------------- what a person settled
+
+
+def test_who_settled_a_track_carries_from_the_spec_to_the_plan() -> None:
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    side = spec_side()
+    held = P.SpecTrack(
+        number=2, title="Two", cat=60.0, start=70.0, end=125.0, settled=P.HAND
+    )
+    side = P.SpecSide(
+        letter="a",
+        start=side.start,
+        end=side.end,
+        tracks=(side.tracks[0], held, *side.tracks[2:]),
+    )
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    plan, _ = FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    second = plan.sides[0].tracks[1]
+    assert (second.start, second.end, second.settled) == (70.0, 125.0, P.HAND)
+    assert not plan.sides[0].tracks[0].settled
+
+
+def test_a_found_end_stops_at_a_start_a_person_set() -> None:
+    """The gap's own end would run past it, and the plan would be refused as
+    overlapping, with no way to fit the record again but to give the boundary up."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    plain, _ = FIT.fit_plan(
+        P.Spec(slug="album", album="A", artist="B", sides=(spec_side(),)),
+        {"a": env},
+        below=G.BELOW,
+    )
+    found = plain.sides[0].tracks[0].end
+    side = spec_side()
+    held = P.SpecTrack(
+        number=2, title="Two", cat=60.0, start=found - 1.0, settled=P.HAND
+    )
+    side = P.SpecSide(
+        letter="a",
+        start=side.start,
+        end=side.end,
+        tracks=(side.tracks[0], held, *side.tracks[2:]),
+    )
+    plan, _ = FIT.fit_plan(
+        P.Spec(slug="album", album="A", artist="B", sides=(side,)),
+        {"a": env},
+        below=G.BELOW,
+    )
+    P.validate(plan)
+    first, second = plan.sides[0].tracks[:2]
+    assert second.start == found - 1.0
+    assert first.end == second.start
+
+
+def test_a_settled_track_on_a_forced_side_is_not_marked_as_placed_blind() -> None:
+    def placed(**kw: object) -> FIT.Fitted:
+        track = P.PlanTrack(number=1, title="t", start=0.0, end=10.0, cat=10.0, **kw)  # type: ignore[arg-type]
+        return FIT.Fitted(track=track, reason=FIT.FORCED + "ear")
+
+    held, blind = placed(settled=P.EAR), placed()
+    side = FIT.to_side("a", (held, blind))
+    assert [t.forced for t in side.tracks] == [False, True]
+    assert side.tracks[0].settled == P.EAR
+    assert not FIT.was_forced((held,))
+    assert FIT.was_forced((held, blind))

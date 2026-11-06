@@ -11,7 +11,7 @@ from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
-from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec
+from ripdoctor.core.plan import HAND, BadPlan, OldFormat, Plan, Spec
 from ripdoctor.core.xcorr import AlignError
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
@@ -138,6 +138,7 @@ def add(app: App, service: Service) -> None:
                         "end": round(t.end, 2),
                         "cat": t.cat,
                         "forced": t.forced,
+                        "settled": t.settled,
                     }
                     for t in side.tracks
                 ]
@@ -379,6 +380,9 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
                 "start": round(start, 2),
                 "end": round(end, 2),
                 "cat": t.cat,
+                # A person's boundary, carried. Not yet heard on this capture, so
+                # a check by ear does not come across as one.
+                **({"settled": HAND} if t.settled else {}),
             }
         )
     return {
