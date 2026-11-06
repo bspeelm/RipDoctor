@@ -367,3 +367,28 @@ def test_a_nudge_says_whose_it_becomes_and_is_flushed_rather_than_dropped() -> N
         start = js.index(caller)
         assert "await flushNudge();" in js[start : js.index("\n}", start)]
     assert "if (tpNudge && tpNudge.song !== num) flushNudge();" in js
+
+
+def test_an_archived_tape_is_not_offered_a_judgement_again_by_selecting_a_song() -> (
+    None
+):
+    """A row or N ran the toolbar's own update, which turned Accept and Skip back on."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function showTapeTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "const done = !!tape?.playlist.done" in body
+    for button in ("accept", "skip", "song"):
+        assert f'$("#tp-{button}").disabled = done' in body
+
+
+def test_what_needs_a_waveform_waits_for_one_rather_than_throwing() -> None:
+    """With none loaded, these reached into a side that was not there."""
+    js = (STATIC / "app.js").read_text()
+    for function, guard in (
+        ("tapeZoom", "if (!tpEd.side) return;"),
+        ("stepDoubt", "if (!tape || !tpEd.side) return;"),
+        ("tapeHearSilence", "if (tpEd.side) tpEd.fitRange("),
+    ):
+        body = re.search(rf"function {function}\(.*?\n\}}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert guard in body
+    body = re.search(r"function showTapeTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '["#tp-in", "#tp-out", "#tp-whole"]) $(id).disabled = !wave' in body

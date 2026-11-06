@@ -1276,7 +1276,7 @@ function archivedControls() {
   for (const id of ["#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-match", "#tp-rematch"])
     $(id).disabled = true;
   for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
-  for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = false;
+  for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = !tpEd.side;
 }
 
 // Doubts first, then what nobody has asked about, then what is already settled.
@@ -1438,6 +1438,7 @@ async function loadTapeWave(t, drawn) {
                 gaps: { band: { gaps: tapeGaps(t) } } },
               tapeTracks(tape));
     tapeReadout();
+    showTapeTools();
   } catch (e) {
     tpDrawn = null;
     waveSay(`no waveform: ${e.message}`, true);
@@ -1463,17 +1464,19 @@ function showTapeWave(t) {
 }
 
 function showTapeTools() {
-  const song = songOf(tpEd.sel?.track);
+  const done = !!tape?.playlist.done, wave = !!tpEd.side;
+  const song = wave ? songOf(tpEd.sel?.track) : null;
   const doubts = tape?.ear.filter((r) => r.doubtful).length ?? 0;
-  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = !doubts;
+  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = !doubts || !wave || done;
   $("#tp-next").textContent = doubts ? `Doubt → (${doubts})` : "No doubts";
-  for (const id of ["#tp-play"]) $(id).disabled = !tape?.audio;
+  $("#tp-play").disabled = !tape?.audio;
   $("#tp-hear").disabled = !tape?.audio || !song;
-  $("#tp-accept").disabled = !song || song.set_by === "ear";
+  $("#tp-accept").disabled = done || !song || song.set_by === "ear";
   $("#tp-accept").textContent = song?.heard ? "Take back" : "Accept";
-  $("#tp-skip").disabled = !song;
+  $("#tp-skip").disabled = done || !song;
   $("#tp-skip").textContent = song?.skip ? "Keep" : "Skip";
-  $("#tp-song").disabled = !song;
+  $("#tp-song").disabled = done || !song;
+  for (const id of ["#tp-in", "#tp-out", "#tp-whole"]) $(id).disabled = !wave;
 }
 
 function tapeReadout() {
@@ -1505,6 +1508,7 @@ function tapeSelect(num, edge, fit, picked = false) {
 }
 
 function stepDoubt(by) {
+  if (!tape || !tpEd.side) return;
   const doubts = tape.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
   if (!doubts.length) return;
   const here = tpEd.sel?.track ?? 0;
@@ -1540,7 +1544,7 @@ function tapeHearSelected() {
 
 function tapeHearSilence(lo, hi) {
   if (!tapeAudioReady()) return;
-  tpEd.fitRange(Math.max(0, lo - 4), hi + 4);
+  if (tpEd.side) tpEd.fitRange(Math.max(0, lo - 4), hi + 4);
   tpPlayer.stop();
   tpPlayer.toggle(Math.max(0, lo - 4));
 }
@@ -1650,6 +1654,7 @@ const tapeSkip = (song) => tapeJudge(() =>
   postJSON(`/api/tapes/${tape.id}/songs/${song.number}/skip`, { skip: !song.skip }));
 
 function tapeZoom(by) {
+  if (!tpEd.side) return;
   const span = (tpEd.t1 - tpEd.t0) * by;
   const sel = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
   tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
