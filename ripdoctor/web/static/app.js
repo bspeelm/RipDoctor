@@ -1210,6 +1210,7 @@ let tpSaving = false;                 // a list is on its way, so what the page 
 let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
 let tpAllAsk = false;                 // Albums is asking about filing all from the list
 let tpErrIsJobs = false;              // what the error line says came from a job
+let tpRailOn = null;                  // the step the rail last scrolled to
 let tpGone = false;                   // the server is not answering
 let tpMisses = 0;                     // heartbeats in a row with no answer
 
@@ -1322,6 +1323,7 @@ function showTape(t) {
   if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
   if (cutWouldWait(t)) $("#tp-cut").disabled = false;
   if (t.playlist.done) archivedControls();
+  showNext();
   autoPrepare(t);
   landOn(t);
 }
@@ -1604,6 +1606,34 @@ function stepArchive(t) {
   if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
   if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
   return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
+}
+
+// What is next is the first step not done, and the thing to press is its blue button.
+function stepNow() {
+  const id = TP_STEPS.find((s) => stepBox(s).dataset.kind !== "done");
+  if (!id) return null;
+  const button = [...stepBox(id).querySelectorAll(".tp-acts button")]
+    .find((b) => !b.hidden && !b.disabled && !b.classList.contains("ghost"));
+  return { id, button };
+}
+
+// The rail can be longer than the window, and the header is always on screen, so the next
+// action is in both. A step that has just become current is scrolled to, once, so a person
+// who scrolled the rail themselves is left where they are.
+function showNext() {
+  const now = stepNow();
+  const act = $("#tp-next-act");
+  const running = tapeWatching && !cutWouldWait(tape);
+  act.hidden = !now?.button || running;
+  act.textContent = now?.button?.textContent ?? "";
+  act.onclick = () => now?.button?.click();
+  const box = now && stepBox(now.id);
+  const word = box ? `${box.querySelector("b").textContent}: ${box.querySelector(".tp-state").textContent}` : "Done";
+  $("#tp-rail-bar").querySelector("span").textContent = word;
+  $("#tp-rail-bar").dataset.kind = box?.dataset.kind ?? "done";
+  if (!now || tpRailOn === now.id) return;
+  tpRailOn = now.id;
+  box.scrollIntoView({ block: "nearest" });
 }
 
 function showRail(t) {
@@ -4157,6 +4187,10 @@ function wire() {
   $("#tp-rematch").onclick = () => matchTape(true);
   $("#tp-next-album").onclick = stepAlbum;
   $("#tp-all-list").onclick = () => { tpAllAsk = true; showRail(tape); };
+  $("#tp-rail-bar").onclick = () => {
+    const open = $("#tp-rail").classList.toggle("open");
+    $("#tp-rail-bar").setAttribute("aria-expanded", open);
+  };
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;

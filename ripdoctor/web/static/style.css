@@ -138,12 +138,12 @@ body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 #tapeview{flex:1;min-height:0;display:grid;font-size:14px;
   grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
 #tapeview.no-rail{grid-template-columns:minmax(0,1fr)}
-#tp-rail{border-right:1px solid var(--line);padding:1.25rem 1rem;overflow-y:auto;
-  display:flex;flex-direction:column;gap:.25rem}
-#tp-rail h2{margin:0 0 .6rem .25rem;font-size:11px;font-weight:500;letter-spacing:.08em;
+#tp-rail{border-right:1px solid var(--line);padding:.65rem .75rem;overflow-y:auto;
+  display:flex;flex-direction:column;gap:.1rem}
+#tp-rail h2{margin:0 0 .3rem .25rem;font-size:11px;font-weight:500;letter-spacing:.08em;
   text-transform:uppercase;color:var(--dim)}
-.tp-step{--c:var(--ghost);display:grid;grid-template-columns:22px minmax(0,1fr);gap:.6rem;
-  padding:.6rem .4rem;border-radius:7px}
+.tp-step{--c:var(--ghost);display:grid;grid-template-columns:22px minmax(0,1fr);gap:.45rem;
+  padding:.4rem .4rem;border-radius:7px;flex:none}
 .tp-step[data-kind=done]{--c:var(--start)}
 .tp-step[data-kind=todo]{--c:var(--warn);background:var(--panel)}
 .tp-step[data-kind=ready],.tp-step[data-kind=run]{--c:var(--accent);background:var(--panel)}
@@ -154,17 +154,18 @@ body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 .tp-step[data-kind=done] .tp-mark{background:var(--c)}
 .tp-step[data-kind=done] .tp-mark::after{content:"\2713"}
 .tp-step[data-kind=fail] .tp-mark::after{content:"!";color:var(--c)}
-.tp-step-body{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.tp-step-body{display:flex;flex-direction:column;gap:.25rem;min-width:0}
 .tp-step-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
 .tp-step-head b{font-weight:500}
 .tp-state{font-size:12px;color:var(--c);white-space:nowrap}
-.tp-detail{margin:0;font-size:12.5px;line-height:1.45;color:var(--dim);overflow-wrap:anywhere}
+.tp-detail{margin:0;font-size:12.5px;line-height:1.35;color:var(--dim);overflow-wrap:anywhere}
 .tp-why{font-size:12px;color:var(--dim)}
 .tp-why summary{cursor:pointer}
 .tp-why p{margin:.25rem 0 0;white-space:pre-line;overflow-wrap:anywhere}
 .tp-acts{display:flex;flex-wrap:wrap;gap:.4rem}
 .tp-acts:not(:has(button:not([hidden]))){display:none}
-.tp-acts button{font-size:12.5px;padding:.3rem .65rem}
+.tp-acts button{font-size:12.5px;padding:.2rem .6rem}
+#tp-rail-bar{display:none}
 #tp-progress{display:flex;flex-direction:column;gap:.25rem;grid-column:2}
 #tp-progress .bar{flex:none}
 #tp-state{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}

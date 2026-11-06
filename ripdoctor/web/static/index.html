@@ -56,6 +56,7 @@
        the capture view but the stylesheet. ADR-063. -->
   <div id="tapeview" hidden>
     <aside id="tp-rail" aria-label="Pipeline">
+      <button type="button" id="tp-rail-bar" aria-expanded="false"><i></i><span></span></button>
       <h2>Pipeline</h2>
       <section class="tp-step" id="tp-st-recording" title="One uncut recording of the whole tape.">
         <i class="tp-mark"></i>
@@ -173,6 +174,7 @@
           <span class="spacer"></span>
           <button type="button" id="tp-remove" class="tp-quiet" title="moved aside, not deleted">Remove tape</button>
           <div id="tp-left"><i></i><span></span></div>
+          <button type="button" id="tp-next-act" hidden></button>
         </div>
         <div id="tapepane">
           <div id="tp-start" hidden>

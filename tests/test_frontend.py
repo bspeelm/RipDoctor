@@ -1022,3 +1022,37 @@ def test_opening_another_tape_left_the_first_one_s_job_on_its_rail() -> None:
     assert "if (tape?.id !== id) break;" in body
     after = body.split("stepIdle();")[1]
     assert after.index("tape?.id !== id") < after.index("await loadTapes(id)")
+
+
+def test_the_next_thing_to_press_could_be_off_the_end_of_the_rail() -> None:
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "showNext();" in shown
+    assert shown.index("archivedControls()") < shown.index("showNext();")
+    now = re.search(r"function stepNow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '.dataset.kind !== "done"' in now
+    assert '!b.classList.contains("ghost")' in now
+    nxt = re.search(r"function showNext\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "act.onclick = () => now?.button?.click();" in nxt
+    assert 'box.scrollIntoView({ block: "nearest" })' in nxt
+    assert 'id="tp-next-act"' in tape_markup()
+
+
+def test_on_a_phone_the_rail_was_a_long_way_above_a_doubtful_song() -> None:
+    """1,361 px of it, with nothing pointing to it. It is one line now, and stays."""
+    assert 'id="tp-rail-bar"' in tape_markup()
+    js = (STATIC / "app.js").read_text()
+    assert '$("#tp-rail").classList.toggle("open")' in js
+    css = (STATIC / "style.css").read_text()
+    narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
+    assert "#tp-rail:not(.open) > :not(#tp-rail-bar){display:none}" in narrow
+    assert "#tp-rail:not(.open){position:sticky;top:0" in narrow
+
+
+def test_a_finger_needs_forty_pixels_on_the_toolbar_and_a_row() -> None:
+    css = (STATIC / "style.css").read_text()
+    narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
+    assert ".tp-group button{min-height:40px;min-width:40px" in narrow
+    for row_button in (".tp-moves button", ".tp-rel-quiet button", ".tp-ask button"):
+        assert row_button in narrow
+    assert "min-height:40px;min-width:40px}" in narrow
