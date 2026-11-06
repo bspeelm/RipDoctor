@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 
+from ripdoctor.core import filing as F
 from ripdoctor.core import match as M
 from ripdoctor.core import tape as TP
 
@@ -387,19 +388,20 @@ def test_a_mismatch_refuses_the_cut_until_each_song_is_judged() -> None:
     assert TP.cut_refusal(judged) == ""
 
 
-def test_a_song_with_no_settled_release_refuses_the_cut() -> None:
+def test_a_song_with_no_settled_release_does_not_refuse_the_cut() -> None:
     tape = three()
     open_song = replace(tape.songs[0], settled_by="")
     tape = replace(tape, songs=(open_song, *tape.songs[1:]))
-    said = TP.cut_refusal(tape)
-    assert "song 1 (Song 1): no settled release" in said
+    assert TP.cut_refusal(tape) == ""
+    assert "song 1 (Song 1): no settled release" in F.file_refusal(tape, ())
 
 
-def test_hearing_a_doubt_leaves_an_unsettled_release_in_the_way() -> None:
+def test_hearing_a_doubt_leaves_only_filing_waiting_on_the_release() -> None:
     tape = one_doubt()
     open_song = replace(tape.songs[1], settled_by="")
     tape = TP.hear(replace(tape, songs=(tape.songs[0], open_song, tape.songs[2])), 2)
-    assert "no settled release" in TP.cut_refusal(tape)
+    assert TP.cut_refusal(tape) == ""
+    assert "no settled release" in F.file_refusal(tape, ())
 
 
 def test_a_skipped_song_needs_neither_an_ear_nor_a_release() -> None:

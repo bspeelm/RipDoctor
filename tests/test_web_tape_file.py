@@ -1836,11 +1836,7 @@ def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
     assert not file_it(app, tape, service)["error"]
     before = len(beet_of(service).imports)
     filed_at = songs(service, tape)[0].path
-    rows = [
-        {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
-        for s in songs(service, tape)
-    ]
-    assert post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows}).status == 200
+    assert send_csv(app, tape, service, TWO, confirm=True).status == 200
     assert {s.filing for s in songs(service, tape)} == {TP.PENDING}
     assert post(app, f"/api/tapes/{tape}/process", service).status == 202
     assert not job_of(app, tape, service)["error"]

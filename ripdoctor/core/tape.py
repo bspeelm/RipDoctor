@@ -57,6 +57,10 @@ class EarSet(ValueError):
     """The change would discard a boundary a person set."""
 
 
+class Locked(ValueError):
+    """The change would alter a song the library holds or may hold."""
+
+
 class ChoiceSet(EarSet):
     """The change would discard a release a person chose."""
 
@@ -629,12 +633,75 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
     return tuple(kept_as(s) for s in songs)
 
 
+def _said(song: Song) -> tuple[str, str, str, float]:
+    return song.title, song.artist, song.album, song.length
+
+
+def only_edits(tape: Tape, songs: tuple[Song, ...]) -> bool:
+    """Whether this list is the old one with rows changed where they stand. A row that
+    takes on what another row said is that row moved, whatever else changed: which audio
+    belongs to which song would be different, and no boundary can stay for that."""
+    if len(songs) != len(tape.songs):
+        return False
+    was = [_said(s) for s in tape.songs]
+    return not any(
+        _said(new) != _said(old) and _said(new) in was
+        for old, new in zip(tape.songs, songs, strict=True)
+    )
+
+
+def _redoubted(tape: Tape, song: Song) -> Song:
+    """Edges that stay, measured against a length that changed."""
+    if song.start is None or song.end is None:
+        return song
+    if song.set_by == EAR:
+        return _ear_song(song)
+    span = _judged(song.start, song.end, song.end - song.start - song.length)
+    return _placed_song(song, span, [g.quiet for g in tape.gaps])
+
+
+def _edited(tape: Tape, old: Song, new: Song) -> Song:
+    """What a song's own edit changes: never its boundaries. Other words are another
+    question to the catalogue, and another length unsettles only what it answered, since
+    a person's choice was theirs whatever the list says."""
+    if _said(new) == _said(old):
+        return old
+    held = edges_held(old)
+    if held:
+        raise Locked(f"its title, artist, album and length stay as they are: {held}")
+    reworded = (new.title, new.artist, new.album) != (old.title, old.artist, old.album)
+    song = replace(
+        old, title=new.title, artist=new.artist, album=new.album, length=new.length
+    )
+    if reworded or old.settled_by != PERSON:
+        song = replace(
+            song,
+            proposal=None,
+            settled_by="",
+            unconfirmed="",
+            filing=PENDING,
+            filing_note="",
+        )
+    return song if new.length == old.length else _redoubted(tape, song)
+
+
+def edited(tape: Tape, songs: tuple[Song, ...]) -> Tape:
+    """Rows changed where they stand. Every boundary stays, whoever set it."""
+    return replace(
+        tape,
+        songs=tuple(
+            _edited(tape, old, new) for old, new in zip(tape.songs, songs, strict=True)
+        ),
+    )
+
+
 def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
     """Take a new list. What was found for the old one no longer means anything."""
     if tape.has_ear:
         raise EarSet(
-            f"{tape.name} has boundaries set by ear, and a new list would lose them - "
-            "to start again, remove the tape"
+            f"{tape.name} has boundaries set by ear, and moving, adding or removing a "
+            "song would change which audio belongs to which song - to start again, "
+            "remove the tape"
         )
     return replace(
         tape,
@@ -1078,10 +1145,6 @@ def cut_refusal(tape: Tape) -> str:
         (
             "still in doubt - listen, then move it, accept it or skip it",
             [s for s in active if doubtful(s)],
-        ),
-        (
-            "no settled release - match the songs and settle each one",
-            [s for s in active if not s.settled_by],
         ),
     )
     said = [

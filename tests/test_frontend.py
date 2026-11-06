@@ -481,10 +481,10 @@ def test_a_row_s_words_go_through_the_list_route_with_what_it_warns() -> None:
     way past."""
     js = (STATIC / "app.js").read_text()
     assert "tapeEdited" not in js
-    body = re.search(r"async function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "await flushNudge();" in body
-    assert "A new list clears the boundaries" in body
-    assert "`/api/tapes/${tape.id}/songs`, { songs }" in body
+    assert "e.needsConfirm" in body and "confirm: true" in body
+    assert "postJSON(url, { songs })" in body
     assert '$("#tp-err").textContent = e.message' in body
 
 
@@ -521,3 +521,31 @@ def test_a_copy_found_at_lookup_says_where_it_is() -> None:
     js = (STATIC / "app.js").read_text()
     assert '"owned") return ["In your library", "good"]' in js
     assert "In your library: ${copy.album_artist} / ${copy.album}" in js
+
+
+def test_a_job_button_waits_for_the_edit_its_click_sent() -> None:
+    """A click on Match or Find blurred an edited field, and the list it saved raced the
+    job that was starting, which is how an edit's boundaries went with nobody asked."""
+    js = (STATIC / "app.js").read_text()
+    job = re.search(r"async function startTapeJob\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "await tpListSaved;" in job
+    for button in ("processTape", "matchTape"):
+        said = re.search(rf"const {button} = .*", js).group(0)  # type: ignore[union-attr]
+        assert "startTapeJob(" in said
+    send = re.search(r"async function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpListSaved = " in send
+    assert "saveList(songs, openAfter)" in send
+
+
+def test_a_file_chosen_over_boundaries_is_asked_about_too() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function sendTapeList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "e.needsConfirm" in body and "?confirm=1" in body
+
+
+def test_a_cut_is_not_said_to_wait_on_an_album_and_a_file_is() -> None:
+    js = (STATIC / "app.js").read_text()
+    waits = re.search(r"function cutWaits\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "settled_by" not in waits
+    step = re.search(r"function stepFile\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "!s.settled_by" in step

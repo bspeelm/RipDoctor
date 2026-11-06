@@ -139,25 +139,78 @@ def test_cut_is_refused_while_a_doubt_is_unheard_and_cuts_nothing(
     assert not job_of(app, tape, service)["error"]
 
 
-def test_cut_is_refused_while_a_match_is_unsettled_and_cuts_nothing(
+def test_cut_goes_ahead_with_albums_unsettled_while_file_refuses(
     service: Service,
 ) -> None:
+    """Cut once refused for want of an album it does not use, and nobody got past it."""
     app = build(service)
     tape = placed(app, service)
-    refused = cut(app, tape, service)
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert len(cuts_sent(service)) == 2
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["all_cut"] is True
+    assert "no settled release" in view["file_refusal"]
+    assert "song 1 (One), song 2 (Two)" in view["file_refusal"]
+    refused = post(app, f"/api/tapes/{tape}/file", service)
     assert refused.status == 409
     assert "no settled release" in refused.json()["error"]
-    assert "song 1 (One), song 2 (Two)" in refused.json()["error"]
-    assert cuts_sent(service) == []
 
 
-def test_the_view_says_why_a_tape_cannot_be_cut_yet(service: Service) -> None:
+def test_the_view_says_why_a_tape_cannot_be_filed_yet(service: Service) -> None:
     app = build(service)
     tape = placed(app, service)
     view = get(app, f"/api/tapes/{tape}", service).json()
-    assert "no settled release" in view["cut_refusal"]
+    assert view["cut_refusal"] == ""
+    assert "no settled release" in view["file_refusal"]
+    assert "not cut" in view["file_refusal"]
     settle_all(app, tape, service)
-    assert get(app, f"/api/tapes/{tape}", service).json()["cut_refusal"] == ""
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert "no settled release" not in view["file_refusal"]
+    assert "not cut" in view["file_refusal"]
+
+
+def test_a_doubt_refuses_the_cut_and_the_filing_with_it(service: Service) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    current = T.read(service.layout, tape)
+    doubted = (replace(current.songs[0], verdict=TP.DOUBT), current.songs[1])
+    T.save(service.layout, replace(current, songs=doubted))
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert "still in doubt" in view["cut_refusal"]
+    assert "still in doubt" in view["file_refusal"]
+
+
+def test_changing_a_release_after_the_cut_keeps_the_cut_and_files_the_new_one(
+    service: Service,
+) -> None:
+    """A cut is of audio and owes nothing to the album it is filed under."""
+    app = build(service)
+    tape = placed(app, service)
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    settle_all(app, tape, service)
+    choice = M.Choice(
+        release="rel-new",
+        group="g",
+        release_title="B Record",
+        album_artist="A Band",
+        date="1999",
+        status="Official",
+        track_title="One",
+        number=1,
+        disc=1,
+    )
+    current = T.read(service.layout, tape)
+    T.save(service.layout, TP.settle(current, 1, choice))
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["all_cut"] is True
+    assert view["file_refusal"] == ""
+    assert cut(app, tape, service).status == 202
+    done = job_of(app, tape, service)
+    assert not done["error"]
+    assert done["result"]["cut"] == []
+    assert set(done["result"]["kept"]) == {"song 1 (One)", "song 2 (Two)"}
 
 
 def test_the_job_reads_the_gate_again_rather_than_trusting_the_request(
@@ -165,7 +218,10 @@ def test_the_job_reads_the_gate_again_rather_than_trusting_the_request(
 ) -> None:
     app = build(service)
     tape = placed(app, service)
-    with pytest.raises(ValueError, match="no settled release"):
+    current = T.read(service.layout, tape)
+    doubted = (replace(current.songs[0], verdict=TP.DOUBT), current.songs[1])
+    T.save(service.layout, replace(current, songs=doubted))
+    with pytest.raises(ValueError, match="still in doubt"):
         TJ.cut(
             service.runner,
             service.layout,
@@ -574,7 +630,8 @@ def test_a_new_list_leaves_no_cut_behind_under_a_name_nothing_claims(
     current = T.read(service.layout, tape)
     open_to_change = tuple(replace(s, settled_by=M.CATALOGUE) for s in current.songs)
     T.save(service.layout, replace(current, songs=open_to_change))
-    assert send_csv(app, tape, service, TWO.replace(",Two,", ",Deux,")).status == 200
+    edited = TWO.replace(",Two,", ",Deux,")
+    assert send_csv(app, tape, service, edited, confirm=True).status == 200
     process(app, tape, service)
     settle_all(app, tape, service)
     assert cut(app, tape, service).status == 202

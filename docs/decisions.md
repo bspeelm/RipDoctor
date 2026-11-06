@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,503, and
-at 3,803 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,574, and
+at 3,874 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2193,6 +2193,16 @@ could put back an edge moved since. The edges route requires the two edges the s
 last saw, refuses with a plain reason if they are not the song's, and the page then asks
 again so its markers show the truth.
 
+**Editing a list.** A row changed where it stands keeps its boundaries, a person's above
+all. Another title, artist or album clears that song's answer so it is looked up again;
+another length measures the same edges again, and unsettles the catalogue's answer but not
+a person's. A song the library holds or may hold refuses both. Moving, adding or removing a
+song changes which audio belongs to which song: with any boundary a person set it is
+refused, and otherwise it clears the boundaries when said twice. A file sent as the list
+is always that second kind. A row taking on what another row said counts as moved. A list
+that would lose boundaries is refused until it says it knows, and a job waits for an edit
+its own click sent, so none goes by accident.
+
 **The way back from a filed song.** Remove that copy with beets, then load the list
 again. A new list is refused once any boundary on the tape is a person's, and then the
 only way is to remove the tape and start it over. A failed song beside a filed one can
@@ -2285,8 +2295,10 @@ measured.
 
 ### The cut
 
-It is refused, naming every song, while any song not skipped is in doubt, has no
-settled release or has no room between its edges. A song is written and tested in the
+It is refused, naming every song, while any song not skipped is in doubt or has no room
+between its edges. It does not wait for a release, since it uses none: that wait is what
+stopped a whole tape behind a table further down the page. A release chosen after the cut
+needs no new one, because a cut is of audio. A song is written and tested in the
 tape's `partial` directory and only then takes its name in `cuts`, and the record it
 gets holds the edges it was made from, so a moved boundary makes it out of date with
 nothing to keep in step. A failure is about that song: it is marked, the rest carry
@@ -2299,7 +2311,7 @@ at any point leaves a song that needs cutting.
 ### Filing
 
 **The filing job is refused** until the tape is cut and every song not skipped is
-settled. Songs on disk use their own numeric order, since a two-digit number under a
+settled, on top of all the cut asks. Songs on disk use their own numeric order, since a two-digit number under a
 text sort puts song 100 before song 11.
 
 **Filing is one import per album.** A song with a release is a pinned import: title

@@ -617,7 +617,8 @@ def test_a_tape_with_no_songs_cannot_be_matched(service) -> None:  # type: ignor
 def test_a_new_list_may_not_lose_a_choice_over_the_wire(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app, tape = doubtful(service, catalogue)
     post(app, f"/api/tapes/{tape}/songs/1/from-list", service)
-    got = post(app, f"/api/tapes/{tape}/songs", service, {"songs": [row("Other")]})
+    rows = [row("Other"), row("Another")]
+    got = post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows})
     assert got.status == 409
     assert "A Song" in got.json()["error"]
 

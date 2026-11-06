@@ -90,11 +90,13 @@ def a_new_tape(app, service: Service, name: str = "Mix: Vol. 1") -> str:  # type
     return made.json()["id"]
 
 
-def send_csv(app, tape: str, service: Service, text: str = CSV) -> H.Response:  # type: ignore[no-untyped-def]
+def send_csv(  # type: ignore[no-untyped-def]
+    app, tape: str, service: Service, text: str = CSV, *, confirm: bool = False
+) -> H.Response:
     return app.dispatch(
         H.Request.of(
             "POST",
-            f"/api/tapes/{tape}/list",
+            f"/api/tapes/{tape}/list{'?confirm=1' if confirm else ''}",
             headers=signed_in(service),
             body=text.encode(),
         )
@@ -212,9 +214,11 @@ def test_a_new_list_is_refused_over_an_ear_set_boundary(service: Service) -> Non
     saved = T.read(service.layout, tape)
     ear = replace(saved.songs[0], start=0.0, end=5.0, set_by=TP.EAR)
     T.save(service.layout, replace(saved, songs=(ear, saved.songs[1])))
-    assert (
-        post(app, f"/api/tapes/{tape}/songs", service, {"songs": BY_HAND}).status == 409
-    )
+    more = [*BY_HAND, {"title": "More", "artist": "A", "length": "3:00"}]
+    refused = post(app, f"/api/tapes/{tape}/songs", service, {"songs": more})
+    assert refused.status == 409
+    assert "which audio belongs to which song" in refused.json()["error"]
+    assert send_csv(app, tape, service, confirm=True).status == 409
     assert T.read(service.layout, tape).songs[0].set_by == TP.EAR
 
 

@@ -1396,12 +1396,10 @@ function cutWaits(t) {
   const unplaced = live.filter((s) => s.start == null || s.end == null).length;
   const noRoom = live.filter((s) => s.start != null && s.end != null && s.end <= s.start).length;
   const doubts = t.ear.filter((r) => r.doubtful).length;
-  const albums = live.filter((s) => !s.settled_by).length;
   return [
     unplaced ? "the boundaries" : "",
     noRoom ? counted(noRoom, "song with no room between its boundaries", "songs with no room between their boundaries") : "",
     doubts ? counted(doubts, "boundary to check", "boundaries to check") : "",
-    albums ? counted(albums, "album to choose", "albums to choose") : "",
   ].filter(Boolean);
 }
 
@@ -1442,6 +1440,8 @@ function stepFile(t) {
   $("#tp-file-songs").textContent = failed.length ? "File again" : "File";
   if (t.all_filed) return tpStep("file", "done", "Filed", "Every song is in the library.");
   if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
+  const albums = t.songs.filter((s) => !s.skip && !s.settled_by).length;
+  if (albums) return tpStep("file", "wait", "Waiting", `Waiting on ${t.all_cut ? "" : "the cut and "}${counted(albums, "album to choose", "albums to choose")}.`);
   if (refused) return tpStep("file", "wait", "Waiting", "Waiting on the cut.");
   return tpStep("file", "ready", "Ready", "Each album gets its own run through beets.");
 }
@@ -1607,16 +1607,29 @@ function fieldInput(label, name, value, wide) {
 // says about a list holds for each edit and the page never holds unsaved text.
 const listNow = () => tape.songs.map((s) => ({ title: s.title, artist: s.artist, album: s.album, length: s.length }));
 
+// What the route says decides whether anything is lost. A job button waits for this: a
+// click that blurs an edited field sends the edit first, and the job has to see it.
+let tpListSaved = Promise.resolve();
+
 async function sendList(songs, openAfter) {
+  let saved;
+  tpListSaved = new Promise((r) => { saved = r; });
+  try { return await saveList(songs, openAfter); } finally { saved(); }
+}
+
+async function saveList(songs, openAfter) {
   $("#tp-err").textContent = "";
   await flushNudge();
-  if (tape.songs.some((s) => s.start != null) && !tape.songs.some((s) => s.set_by === "ear")
-      && !confirm("A new list clears the boundaries found for this one, and what you marked heard. Save it?")) {
-    showSongs(tape);
-    return false;
-  }
+  const url = `/api/tapes/${tape.id}/songs`;
   try {
-    const after = await postJSON(`/api/tapes/${tape.id}/songs`, { songs });
+    let after;
+    try {
+      after = await postJSON(url, { songs });
+    } catch (e) {
+      if (!e.needsConfirm) throw e;
+      if (!confirm(`${e.message}. Save it?`)) { showSongs(tape); return false; }
+      after = await postJSON(url, { songs, confirm: true });
+    }
     tpOpen = openAfter;
     showTape(after);
     await loadTapes(tape.id);
@@ -2293,6 +2306,7 @@ function wireTapeWave() {
 // ---- jobs and arrivals
 
 async function startTapeJob(path, body) {
+  await tpListSaved;
   $("#tp-err").textContent = "";
   await flushNudge();
   try {
@@ -2311,8 +2325,15 @@ function archiveTape() {
 
 async function sendTapeList(file) {
   $("#tp-err").textContent = "";
+  const url = `/api/tapes/${tape.id}/list`;
   try {
-    showTape(await pushChunk(`/api/tapes/${tape.id}/list`, file));
+    try {
+      showTape(await pushChunk(url, file));
+    } catch (e) {
+      if (!e.needsConfirm) throw e;
+      if (!confirm(`${e.message}. Load it?`)) return;
+      showTape(await pushChunk(`${url}?confirm=1`, file));
+    }
     await loadTapes(tape.id);
     status(`${tape.songs.length} songs read from ${file.name}`);
   } catch (e) { $("#tp-err").textContent = e.message; }
@@ -2365,21 +2386,8 @@ async function cancelTapeUpload() {
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
-async function processTape() {
-  $("#tp-err").textContent = "";
-  try {
-    await postJSON(`/api/tapes/${tape.id}/process`, {});
-    watchTape();
-  } catch (e) { $("#tp-err").textContent = e.message; }
-}
-
-async function matchTape(again) {
-  $("#tp-err").textContent = "";
-  try {
-    await postJSON(`/api/tapes/${tape.id}/match`, { again });
-    watchTape();
-  } catch (e) { $("#tp-err").textContent = e.message; }
-}
+const processTape = () => startTapeJob(`/api/tapes/${tape.id}/process`, {});
+const matchTape = (again) => startTapeJob(`/api/tapes/${tape.id}/match`, { again });
 
 const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
@@ -2565,6 +2573,7 @@ async function pushChunk(url, blob) {
   if (!r.ok) {
     const e = new Error((body && body.error) || `chunk failed: ${r.status}`);
     e.status = r.status;
+    e.needsConfirm = !!body?.needs_confirm;
     throw e;
   }
   return body;

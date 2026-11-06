@@ -205,11 +205,32 @@ def add(app: App, service: Service) -> None:
         T.save(layout, changed)
         return H.ok(view(changed))
 
-    def with_songs(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
+    def with_list(
+        tape: TP.Tape, songs: tuple[TP.Song, ...], confirmed: bool
+    ) -> H.Response:
+        """A list that loses boundaries is said twice, because finding them again can
+        take minutes, and any that a person set are refused however often it is said."""
         not_archived(tape)
         try:
-            return kept(TP.relist(tape, songs))
+            changed = TP.relist(tape, songs)
         except TP.EarSet as e:
+            raise H.HttpError(409, str(e)) from e
+        if any(s.start is not None for s in tape.songs) and not confirmed:
+            return H.ok(
+                {
+                    "error": "this clears the boundaries found for this list, and what "
+                    "you marked heard - they are found again from the audio",
+                    "needs_confirm": True,
+                },
+                409,
+            )
+        return kept(changed)
+
+    def with_edits(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
+        not_archived(tape)
+        try:
+            return kept(TP.edited(tape, songs))
+        except TP.Locked as e:
             raise H.HttpError(409, str(e)) from e
 
     @app.route("GET", "/api/tapes")
@@ -248,18 +269,24 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/tapes/([^/]+)/songs")
     @settled
     def songs(r: H.Request, tape: TP.Tape) -> H.Response:
-        """The whole list by hand; adding, editing and reordering all send this."""
+        """The whole list by hand; adding, editing and reordering all send this. A row
+        changed where it stands keeps its boundaries; anything else is a new list."""
+        body = r.json()
         try:
-            return with_songs(tape, TP.songs_from(r.json().get("songs")))
+            songs = TP.songs_from(body.get("songs"))
         except TP.BadList as e:
             raise H.HttpError(400, str(e)) from e
+        if TP.only_edits(tape, songs):
+            return with_edits(tape, songs)
+        return with_list(tape, songs, body.get("confirm") is True)
 
     @app.route("POST", "/api/tapes/([^/]+)/list")
     @settled
     def from_csv(r: H.Request, tape: TP.Tape) -> H.Response:
         """The body is the file. It pairs with this tape because it was sent here."""
         try:
-            return with_songs(tape, TP.parse_list(r.body.decode("utf-8")))
+            songs = TP.parse_list(r.body.decode("utf-8"))
+            return with_list(tape, songs, r.query.get("confirm") == "1")
         except UnicodeDecodeError as e:
             raise H.HttpError(400, "that list is not UTF-8 - save it as UTF-8") from e
         except TP.BadList as e:

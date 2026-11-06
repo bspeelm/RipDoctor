@@ -585,18 +585,25 @@ def begun(tape: Tape, numbers: Collection[int]) -> Tape:
 
 
 def file_refusal(tape: Tape, on_disk: Collection[str]) -> str:
-    """Why this tape may not be filed yet, naming every song, or nothing."""
-    waiting = cut_refusal(tape)
-    if waiting:
-        return waiting
+    """Why this tape may not be filed yet, naming every song, or nothing. A cut needs no
+    release, and filing needs both."""
     count = len(tape.songs)
-    uncut = [
-        s for s in tape.songs if not s.skip and cut_status(s, count, on_disk) != CUT
+    active = [s for s in tape.songs if not s.skip]
+    groups = (
+        (
+            "no settled release - choose one, or file it from your list",
+            [s for s in active if not s.settled_by],
+        ),
+        (
+            "not cut - cut them first",
+            [s for s in active if cut_status(s, count, on_disk) != CUT],
+        ),
+    )
+    said = [
+        f"{', '.join(label(s) for s in songs)}: {why}" for why, songs in groups if songs
     ]
-    if uncut:
-        names = ", ".join(label(s) for s in uncut)
-        return f"{tape.name} cannot be filed yet. {names}: not cut - cut them first"
-    return ""
+    filing = f"{tape.name} cannot be filed yet. {'; '.join(said)}" if said else ""
+    return " ".join(filter(None, (cut_refusal(tape), filing)))
 
 
 def choice_refusal(song: Song) -> str:
