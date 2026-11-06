@@ -580,8 +580,7 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(503, str(e)) from e
         except (OSError, ToolFailed, RuntimeError) as e:
             # Some files may have taken it by now, so what they hold is asked again.
-            library = service.settings.library
-            TJ.covers_known(service.runner, importer, layout, tape.id, library)
+            T.save(layout, still_lacking(importer, tape, song))
             raise H.HttpError(409, f"the cover was not set: {e}") from e
 
     def given_cover(
@@ -610,13 +609,22 @@ def add(app: App, service: Service) -> None:
         done = RA.installed(service, folder, image, only=files, cover_name=name)
         if not done.embedded:
             raise H.HttpError(502, f"the cover did not embed: {'; '.join(done.failed)}")
+        if done.embedded < len(files):
+            kept_asking = view_saved(still_lacking(importer, tape, song))
+            return H.ok({**kept_asking, "cover": done.as_dict()})
         why = importer.set_art(service.runner, album, str(done.cover))
         said = {**done.as_dict(), "note": why}
-        if done.failed:
-            library = service.settings.library
-            TJ.covers_known(service.runner, importer, layout, tape.id, library)
-            return H.ok({**view(T.read(layout, tape.id)), "cover": said})
         return H.ok({**view_saved(TF.cover_given(tape, files)), "cover": said})
+
+    def still_lacking(importer: IMP.Beets, tape: TP.Tape, song: TP.Song) -> TP.Tape:
+        """Some files took a cover and some did not. The album row is given none, so the
+        next upload is a whole install again, and the song it was given for keeps the
+        offer, whichever of the album's files it was that failed."""
+        library = service.settings.library
+        TJ.covers_known(service.runner, importer, layout, tape.id, library)
+        current = T.read(layout, tape.id)
+        missing = {s.number for s in current.songs if s.no_cover} | {song.number}
+        return TF.with_cover_known(current, missing)
 
     def view_saved(changed: TP.Tape) -> dict[str, Any]:
         T.save(layout, changed)

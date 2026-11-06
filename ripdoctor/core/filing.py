@@ -705,7 +705,8 @@ def person_owns(tape: Tape, number: int) -> Tape:
 
 def begun(tape: Tape, numbers: Collection[int]) -> Tape:
     """These songs are going to beets. One found in the library after a restart, with
-    this still set, got there by this tape, unlike a song it merely already owned."""
+    this still set, got there by this tape and is filed, unlike a song it merely already
+    owned."""
     return replace(
         tape,
         songs=tuple(
@@ -777,7 +778,7 @@ def outcomes(tape: Tape) -> list[dict[str, Any]]:
             "note": s.filing_note,
             "unconfirmed": s.unconfirmed,
             "settled_by": s.settled_by,
-            "no_cover": s.no_cover,
+            "no_cover": s.no_cover and s.filing == FILED,
         }
         for s in ordered
     ]

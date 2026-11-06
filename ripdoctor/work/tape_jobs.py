@@ -401,7 +401,7 @@ class _Filing:
         rows = self.read_back(run, song)
         paths = F.recovered(song, rows, taken=taken, track=track.number)
         if len(paths) == 1:
-            self.complete(song, F.ALREADY, paths[0])
+            self.complete(song, F.FILED, paths[0])
             return True
         if paths:
             self.tell(song, F.UNKNOWN, note=_which(paths))
@@ -435,7 +435,7 @@ class _Filing:
             elif said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY and song.import_begun:
-                self.complete(song, said.action, said.path, said.note)
+                self.complete(song, F.FILED, said.path, said.note)
             else:
                 self.tell(
                     song,
@@ -457,9 +457,10 @@ class _Filing:
         return self.sited(self.rows(query))
 
     def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
-        """A song this tape's own import filed. Beets rewrites what it files at the
-        writer's umask, so the modes come back last, before the outcome is recorded.
-        A folder it joined can hold what is not this tape's to change. ADR-056."""
+        """A song this tape's own import filed, this run or one a restart interrupted.
+        Beets rewrites what it files at the writer's umask, so the modes come back last,
+        before the outcome is recorded. A folder it joined can hold what is not this
+        tape's to change. ADR-056."""
         said = [*notes, *self.repaired(song, path), self.with_modes(path)]
         self.tell(song, state, path, "; ".join(n for n in said if n))
         self.covers(song, path)

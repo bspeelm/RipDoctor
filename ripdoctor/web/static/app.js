@@ -1491,15 +1491,18 @@ const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
 function stepFile(t) {
   const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
   const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).map((o) => o.number).sort((a, b) => a - b) : [];
+  // Stopped on its way to beets: the row says not confirmed, and only File again answers.
+  const unsure = t.songs.filter((s) => s.import_begun && s.filing === "pending").map((s) => s.number);
   const refused = !!t.file_refusal;
   tpAction("#tp-file-songs", !t.playlist.done && !t.all_filed, !refused, refused);
-  $("#tp-file-songs").textContent = failed.length ? "File again" : "File";
+  $("#tp-file-songs").textContent = failed.length || unsure.length ? "File again" : "File";
   const coverless = t.filing.filter((o) => o.no_cover).map((o) => o.number).sort((a, b) => a - b);
   if (t.all_filed) {
     return tpStep("file", "done", "Filed", `Every song is in the library.${coverless.length
       ? ` ${songsNamed(coverless)} found no cover.` : ""}`);
   }
   if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
+  if (unsure.length) return tpStep("file", "todo", `${unsure.length} not confirmed`, `${songsNamed(unsure)} may have reached the library. File again looks before it imports anything.`);
   const albums = t.songs.filter((s) => !s.skip && !s.settled_by).length;
   if (albums) return tpStep("file", "wait", "Waiting", `Waiting on ${t.all_cut ? "" : "the cut and "}${counted(albums, "album to choose", "albums to choose")}.`);
   if (refused) return tpStep("file", "wait", "Waiting", "Waiting on the cut.");

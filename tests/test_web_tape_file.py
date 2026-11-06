@@ -1288,7 +1288,7 @@ def test_a_restart_mid_run_keeps_what_was_recorded_and_finds_what_beets_took(
     assert not file_it(app, tape, service)["error"]
     assert runner.imports == []
     one, two = songs(service, tape)
-    assert (one.filing, two.filing) == (F.FILED, F.ALREADY)
+    assert (one.filing, two.filing) == (F.FILED, F.FILED)
     assert Path(two.path).is_file()
 
 
@@ -1304,7 +1304,7 @@ def test_a_song_recovered_after_a_restart_gets_its_modes_back(
 
     runner.dies.clear()
     assert not file_it(app, tape, service)["error"]
-    assert songs(service, tape)[0].filing == F.ALREADY
+    assert songs(service, tape)[0].filing == F.FILED
     assert not songs(service, tape)[0].import_begun
     for found in (tmp_path / "lib" / "rel-1").glob("*.flac"):
         assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
@@ -1378,7 +1378,7 @@ def test_a_read_back_that_cannot_answer_is_unknown_and_the_retry_only_reads_back
     assert len(imports_of(service)) == 1
     assert runner.rows == rows
     for song in songs(service, tape):
-        assert (song.filing, song.import_begun) == (F.ALREADY, False)
+        assert (song.filing, song.import_begun) == (F.FILED, False)
         assert (
             stat.S_IMODE(Path(song.path).stat().st_mode) == service.settings.file_mode
         )
@@ -1418,7 +1418,7 @@ def test_an_import_that_times_out_is_unknown_and_never_imported_over(
     runner.imports.clear()
     assert not file_it(app, tape, service)["error"]
     assert runner.imports == []
-    assert [s.filing for s in songs(service, tape)] == [F.ALREADY, F.ALREADY]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
 
 
 def test_a_retry_told_there_is_no_row_files_the_song_as_usual(service: Service) -> None:
@@ -1541,7 +1541,7 @@ def test_a_song_only_the_pre_check_recognises_after_its_import_began_gets_its_mo
     where.chmod(0o600)
     T.save(service.layout, F.begun(T.read(service.layout, tape), {1}))
     assert not file_it(app, tape, service)["error"]
-    assert songs(service, tape)[0].filing == F.ALREADY
+    assert songs(service, tape)[0].filing == F.FILED
     assert stat.S_IMODE(where.stat().st_mode) == service.settings.file_mode
 
 
@@ -1722,7 +1722,7 @@ def test_a_recovered_song_gets_the_art_a_restart_kept_from_it(
     runner.dies.clear()
     runner.art = "/lib/rel-1/cover.jpg"
     assert not file_it(app, tape, service)["error"]
-    assert songs(service, tape)[0].filing == F.ALREADY
+    assert songs(service, tape)[0].filing == F.FILED
     assert f"path:{songs(service, tape)[0].path}" in [c[-1] for c in embeds_of(service)]
 
 
@@ -1964,7 +1964,7 @@ def test_a_song_not_confirmed_keeps_its_release_until_a_read_back_answers(
     imported = len(runner.imports)
     runner.ls_fails = False
     assert not file_it(app, tape, service)["error"]
-    assert songs(service, tape)[0].filing == F.ALREADY
+    assert songs(service, tape)[0].filing == F.FILED
     assert len(runner.imports) == imported
 
 
@@ -2173,7 +2173,7 @@ def test_a_song_lost_at_beets_cannot_be_moved_and_file_again_finds_the_library_s
     assert "press File again" in refused.json()["error"]
     assert not file_it(app, tape, service)["error"]
     two = songs(service, tape)[1]
-    assert (two.filing, two.path) == (F.ALREADY, filed.path)
+    assert (two.filing, two.path) == (F.FILED, filed.path)
     assert not two.import_begun
     assert len(beet_of(service).imports) == imports
 
@@ -2396,6 +2396,78 @@ def test_a_cover_that_could_not_set_a_mode_is_still_a_cover_and_says_so(
     assert answer.status == 200, answer.text
     assert "its modes could not be set" in answer.json()["cover"]["failed"][0]
     assert not any(s.no_cover for s in songs(service, tape))
+
+
+def no_embedding_in(service: Service, path: str) -> None:
+    runner = beet_of(service)
+    original = runner.run
+
+    def refused(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if (
+            args[0] == "metaflac"
+            and args[-1] == path
+            and any(a.startswith("--import-picture-from=") for a in args)
+        ):
+            raise OSError("read-only file system")
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    runner.run = refused  # type: ignore[method-assign]
+
+
+def test_a_cover_only_some_files_took_could_not_be_tried_again(
+    service: Service,
+) -> None:
+    """The album row was given the art, so the next upload was told it had one already,
+    and a rebuild then stopped offering it for the file still without."""
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    no_embedding_in(service, songs(service, tape)[1].path)
+    answer = covered(service, tape)
+    assert answer.status == 200, answer.text
+    assert answer.json()["cover"]["failed"]
+    assert not beet_of(service).art
+    assert songs(service, tape)[0].no_cover is True
+
+    runner = beet_of(service)
+    runner.run = type(runner).run.__get__(runner)  # type: ignore[method-assign]
+    again = covered(service, tape)
+    assert again.status == 200, again.text
+    assert again.json()["cover"]["embedded"] == 2
+    assert beet_of(service).art
+    assert not any(s.no_cover for s in songs(service, tape))
+
+
+def test_an_interrupted_song_found_again_was_offered_a_cover_upload_then_refused_it(
+    service: Service,
+) -> None:
+    """Its outcome called it already there, so the row offered Upload and the route said
+    it was not this tape's to change. The tape's own import made it."""
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    beet_of(service).dies.add("rel-1")
+    with pytest.raises(Gone):
+        file_it(app, tape, service)
+    beet_of(service).dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    offered = [o for o in view["filing"] if o["no_cover"]]
+    assert offered and all(o["state"] == F.FILED for o in offered)
+    assert covered(service, tape).status == 200
+
+
+def test_an_old_document_s_recovered_song_is_not_offered_what_the_route_refuses(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    was = replace(current.songs[0], filing=F.ALREADY, no_cover=True)
+    T.save(service.layout, replace(current, songs=(was, *current.songs[1:])))
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert not next(o for o in view["filing"] if o["number"] == 1)["no_cover"]
 
 
 def test_a_folder_a_cover_cannot_be_written_in_is_a_plain_refusal_and_not_a_500(

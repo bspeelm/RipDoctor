@@ -814,3 +814,12 @@ def test_the_page_never_restarts_a_tape_whose_job_ended_in_error() -> None:
     assert "if (j.error) tpStopped.add(id); else tpStopped.delete(id);" in watched
     saved = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tpStopped.delete(tape.id);" in saved
+
+
+def test_the_rail_said_file_ready_beside_a_row_saying_not_confirmed() -> None:
+    js = (STATIC / "app.js").read_text()
+    word = re.search(r"function releaseWord\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"Not confirmed"' in word and "song.import_begun" in word
+    step = re.search(r"function stepFile\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "s.import_begun" in step
+    assert step.index("unsure.length) return tpStep") < step.index('"Ready"')
