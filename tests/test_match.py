@@ -1293,3 +1293,37 @@ def test_a_comma_credit_is_not_agreed_by_a_name_it_only_shares_a_word_with() -> 
         [edition(artist="Tyler Childers", credit=("Tyler Childers",))],
     )
     assert got.status == M.REVIEW
+
+
+@pytest.mark.parametrize("title", ["Live Forever", "Mix It Up"])
+def test_a_remix_album_was_excused_by_a_word_in_a_title_that_names_no_remix(
+    title: str,
+) -> None:
+    remix = edition(title=title, album="Remixed", secondary=("Remix",))
+    got = M.propose(wanted(title=title, album="A Record"), [remix])
+    assert got.status == M.REVIEW
+    assert "remix album" in got.reason
+
+
+@pytest.mark.parametrize(
+    ("title", "said"),
+    [
+        ("Song (feat. Live Band)", "live, 2004"),
+        ("Song (feat. The Mix Masters)", "club mix"),
+    ],
+)
+def test_a_guest_s_name_excused_the_version_the_catalogue_calls_a_recording(
+    title: str, said: str
+) -> None:
+    track = M.CatalogueTrack(title, 1, 1, 200.0, "r", title, said, ("A Band",), 1)
+    found = M.Edition("rel", "g", "A Record", "A Band", "2000", "Official", (track,))
+    got = M.propose(M.Wanted(title, "A Band", "A Record", 200.0), [found])
+    assert got.status == M.REVIEW
+    assert said in got.reason
+
+
+def test_a_version_the_list_says_in_its_own_clause_still_excuses_itself() -> None:
+    track = M.CatalogueTrack("Song (Live)", 1, 1, 200.0, "r", "Song (Live)", "live")
+    found = M.Edition("rel", "g", "A Record", "A Band", "2000", "Official", (track,))
+    got = M.propose(M.Wanted("Song (Live)", "A Band", "A Record", 200.0), [found])
+    assert got.status == M.MATCHED

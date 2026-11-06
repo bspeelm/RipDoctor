@@ -73,6 +73,7 @@ _VERSION = re.compile(
     re.I,
 )
 _VERSION_PART = re.compile(r"[(\[]([^)\]]*)[)\]]|\s-\s(.*)$")
+_GUEST_CLAUSE = re.compile(rf"\s*{_GUEST}", re.I)
 _THE = re.compile(r"^the\s+")
 _SUFFIX = re.compile(r"\s*(?:\(.*\)|\[.*\]|\s-\s.*)\s*$")
 # Catalogued as one of these, a release is still that primary kind of record.
@@ -396,8 +397,10 @@ def _track(wanted: Wanted, edition: Edition) -> tuple[int, CatalogueTrack | None
 
 def _version_part(title: str) -> str:
     """What a title says of its version: a bracketed or dash-led clause. Elsewhere the
-    same word is only a word, as in "Live Forever", and excuses no live recording."""
-    return " ".join(a or b for a, b in _VERSION_PART.findall(fold(title)))
+    same word is only a word, as in "Live Forever", and excuses no live recording, and
+    so is one naming a guest, as in (feat. Live Band), which is who and not which."""
+    clauses = (a or b for a, b in _VERSION_PART.findall(fold(title)))
+    return " ".join(c for c in clauses if not _GUEST_CLAUSE.match(c))
 
 
 def _version(wanted: Wanted, *texts: str) -> str:
@@ -416,7 +419,7 @@ def _unnamed_remix(wanted: Wanted, edition: Edition, track: CatalogueTrack) -> b
     if "Remix" not in edition.secondary:
         return False
     titles = (wanted.title, track.title, track.recording_title)
-    return not any(_VERSION.search(fold(t)) for t in titles)
+    return not any(_VERSION.search(_version_part(t)) for t in titles)
 
 
 @dataclass(frozen=True, slots=True)
