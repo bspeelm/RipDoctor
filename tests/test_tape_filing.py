@@ -589,6 +589,17 @@ def test_a_move_that_would_lay_a_filed_song_elsewhere_is_refused() -> None:
         TP.set_edges(tape, 2, 102.0, 190.0)
 
 
+def test_a_failed_song_beside_a_filed_one_is_told_what_it_can_still_do() -> None:
+    """Pulling its end into its own music would take the start of the filed song with
+    it, so the honest answers are the silence between them, a skip or starting over."""
+    tape = three_placed(s2=F.FAILED, s3=F.FILED)
+    with pytest.raises(TP.BadEdge, match="skip this song or start the tape over"):
+        TP.set_edges(tape, 2, 102.0, 195.0)
+    assert TP.set_edges(tape, 2, 102.0, 203.0).songs[1].end == 203.0
+    assert TP.skip(tape, 2).songs[1].skip
+    assert TP.cut_refusal(TP.skip(tape, 2)) == ""
+
+
 def test_a_move_that_leaves_a_filed_neighbour_where_it_is_goes_through() -> None:
     tape = three_placed(s3=F.FILED)
     moved = TP.set_edges(tape, 2, 102.0, 202.5)

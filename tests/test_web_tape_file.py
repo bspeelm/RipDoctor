@@ -32,7 +32,7 @@ from tests.test_web_tape_cut import (
     placed,
     settle_all,
 )
-from tests.test_web_tapes import a_tape_runner, seeing
+from tests.test_web_tapes import a_tape_runner, seeing, send_csv
 
 TG_TITLE = "TITLE"
 
@@ -1818,3 +1818,52 @@ def test_a_song_lost_at_beets_with_nothing_in_the_library_files_and_is_not_a_dea
     two = songs(service, tape)[1]
     assert (two.filing, two.import_begun) == (F.FILED, False)
     assert two.path
+
+
+def test_the_advice_on_a_filed_song_s_boundary_can_be_followed_to_a_new_cut_of_it(
+    service: Service,
+) -> None:
+    """It told a person to load the list again, which is refused once a boundary is
+    theirs. This follows what it says now, from the refusal to the new file."""
+    app = build(service)
+    tape = placed(app, service)
+    settle_all(app, tape, service)
+    url = f"/api/tapes/{tape}/songs/2/edges"
+    assert post(app, url, service, seeing(service, tape, 2, 6.5, 12.0)).status == 200
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    pin(service, tape, 1, "rel-1")
+    pin(service, tape, 2, "rel-2")
+    assert not file_it(app, tape, service)["error"]
+    filed = songs(service, tape)[1]
+
+    refused = post(app, url, service, seeing(service, tape, 2, 6.5, 11.0))
+    assert refused.status == 409
+    said = refused.json()["error"]
+    assert "remove that copy with beets" in said
+    assert "remove the tape and start it over" in said
+    relisted = send_csv(app, tape, service, TWO)
+    assert relisted.status == 409
+    assert "remove the tape" in relisted.json()["error"]
+
+    beet = beet_of(service)
+    imports = len(beet.imports)
+    Path(filed.path).unlink()
+    beet.rows = [r for r in beet.rows if r["path"] != filed.path]
+    assert post(app, f"/api/tapes/{tape}/remove", service).status == 200
+
+    again = placed(app, service)
+    settle_all(app, again, service)
+    url = f"/api/tapes/{again}/songs/2/edges"
+    assert post(app, url, service, seeing(service, again, 2, 6.5, 11.0)).status == 200
+    assert cut(app, again, service).status == 202
+    assert not job_of(app, again, service)["error"]
+    pin(service, again, 1, "rel-1")
+    pin(service, again, 2, "rel-2")
+    assert not file_it(app, again, service)["error"]
+    two = songs(service, again)[1]
+    assert (two.filing, two.start, two.end) == (F.FILED, 6.5, 11.0)
+    assert Path(two.path).is_file()
+    one = songs(service, again)[0]
+    assert one.filing == F.ALREADY, "the copy nobody removed is not filed twice"
+    assert len(beet.imports) == imports + 1

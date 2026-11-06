@@ -624,7 +624,8 @@ def relist(tape: Tape, songs: tuple[Song, ...]) -> Tape:
     """Take a new list. What was found for the old one no longer means anything."""
     if tape.has_ear:
         raise EarSet(
-            f"{tape.name} has boundaries set by ear, and a new list would lose them"
+            f"{tape.name} has boundaries set by ear, and a new list would lose them - "
+            "to start again, remove the tape"
         )
     return replace(
         tape,
@@ -859,7 +860,9 @@ def edges_held(song: Song) -> str:
         return ""
     return (
         f"{label(song)} is already in the library, so its boundaries stay as they are "
-        "- to cut it again, remove that copy with beets and load the list again"
+        "- to cut it differently, remove that copy with beets, then load the list "
+        "again, or if any boundary on this tape is yours, remove the tape and start it "
+        "over"
     )
 
 
@@ -937,7 +940,11 @@ def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
     moved = place(placed, music)
     for was, now in zip(tape.songs, moved.songs, strict=True):
         if (was.start, was.end) != (now.start, now.end) and (held := edges_held(was)):
-            raise BadEdge(f"that would move a song beside it: {held}")
+            raise BadEdge(
+                f"that would move a song beside it: {held}. Keep this edge in the "
+                "silence between them, and if it belongs anywhere else, skip this song "
+                "or start the tape over"
+            )
     return moved
 
 
