@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,843, and
-at 4,143 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,863, and
+at 4,163 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2303,7 +2303,8 @@ offered for this song. That counts as settled and names its album artist, album,
 release; File then finds it again and the playlist points at it. A doubt's best guess proves
 nothing by its id. A row that only agrees on title, artist and length can be a live album
 of the same length, so it is put to a person, with Use-copy to hand, whatever the lookup
-said. A failed lookup never settles and stays to be retried. A library that cannot be read is said
+said. A failed lookup never settles and stays to be retried. A copy found at lookup and gone at File
+fails with that reason and asks for an album again, rather than filing from the list. A library that cannot be read is said
 on the song and stops nothing, and File still asks. What the library holds is kept with
 the proposal, which is what ranks an edition it has and marks an option.
 

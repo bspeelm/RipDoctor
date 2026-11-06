@@ -404,7 +404,12 @@ class _Filing:
             said = F.precheck(
                 song, self.sited(by_id), self.sited(by_name), self.taken(song)
             )
-            if said.action == F.FILE:
+            if F.found_owned(song) and said.action != F.ALREADY:
+                self.tape = F.copy_gone(self.tape, song)
+                T.save(self.layout, self.tape)
+                self.unanswered.discard(song.number)
+                self.job.finished += 1
+            elif said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY and song.import_begun:
                 self.complete(song, said.action, said.path, said.note)

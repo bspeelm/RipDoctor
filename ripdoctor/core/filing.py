@@ -361,6 +361,31 @@ def at_lookup(
     return made, ""
 
 
+def found_owned(song: Song) -> bool:
+    """A lookup said the library had this. Nothing about it was ever chosen to be filed,
+    so if that stops being true it is a person's question again."""
+    return bool(song.proposal and song.proposal.status == OWNED)
+
+
+def copy_gone(tape: Tape, song: Song) -> Tape:
+    """Failed, and choosing an album again, because filing it from the list or from the
+    lookup's guess is not what anybody was asked."""
+    where = song.proposal.copy.path if song.proposal and song.proposal.copy else ""
+    said = (
+        f"the copy found in your library{f' at {where}' if where else ''} is not there "
+        "any more, so this was not filed - choose an album for it"
+    )
+    told = recorded(tape, song.number, FAILED, note=said)
+
+    def asked(other: Song) -> Song:
+        if other.number != song.number or other.proposal is None:
+            return other
+        made = replace(other.proposal, status=REVIEW, reason=said, copy=None)
+        return replace(other, proposal=made, settled_by="")
+
+    return replace(told, songs=tuple(asked(s) for s in told.songs))
+
+
 def _beside_an_album(song: Song, choice: Choice) -> tuple[Held, Choice] | None:
     """The album held and the release of it that has this song, whichever of that
     release or its single is chosen. None when the choice is what the library holds."""

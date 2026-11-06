@@ -3,6 +3,7 @@ and a library's rows. ADR-063."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -701,3 +702,45 @@ def test_a_copy_found_at_lookup_is_found_again_at_file_and_written_to_the_playli
     assert [s.path for s in songs] == [str(one), str(two)]
     playlist = get(app, f"/api/tapes/{tape}", service).json()["playlist"]
     assert Path(playlist["path"]).read_text(encoding="utf-8").count(".flac") == 2
+
+
+@pytest.mark.parametrize("by_id", [True, False])
+def test_a_copy_found_at_lookup_and_gone_at_file_goes_back_to_choosing_an_album(
+    service: Service, catalogue: Catalogue, by_id: bool
+) -> None:
+    """It went on to file silently from the list, under whatever album the list said."""
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("One", 5), ("Two", 5)])
+    ]
+    gone = owned_row(
+        service, "One", length="0:05", mb_trackid="rec-r-1", mb_albumid="r"
+    )
+    owned_row(service, "Two", length="0:05", mb_trackid="rec-r-2", mb_albumid="r")
+    app = build(service)
+    tape = placed(app, service)
+    looked_up(app, service, tape)
+    if not by_id:
+        current = T.read(service.layout, tape)
+        one = current.songs[0]
+        by_name = replace(one, proposal=replace(one.proposal, choice=None))  # type: ignore[arg-type]
+        T.save(service.layout, replace(current, songs=(by_name, current.songs[1])))
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+
+    beet = beet_of(service)
+    beet.rows = [r for r in beet.rows if r["path"] != str(gone)]
+    gone.unlink()
+    assert post(app, f"/api/tapes/{tape}/file", service).status == 202
+    assert "did not file" in job_of(app, tape, service)["error"]
+    assert not [c for c in beet.calls if "import" in c]
+
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    one = T.read(service.layout, tape).songs[0]
+    assert one.filing == F.FAILED
+    assert "is not there any more" in one.filing_note
+    assert "choose an album" in one.filing_note
+    assert one.settled_by == ""
+    assert one.proposal is not None and one.proposal.status == M.REVIEW
+    assert one.proposal.copy is None
+    assert "no settled release" in view["file_refusal"]
+    assert view["songs"][1]["filing"] == F.ALREADY
