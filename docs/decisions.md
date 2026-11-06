@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 12,048, and
-at 4,348 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 12,211, and
+at 4,511 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2138,12 +2138,22 @@ stops neither. Everything is saved as it is known and what is done is not done a
 running it after an interruption finishes it, and a lookup asks only about songs with no
 answer. A failed lookup is left for Look again. A run that failed is kept in the document
 as `prepare_failed`, or every look at the page and every restart would start it again, and
-it waits until a person presses a step's button or edits the list.
+it waits until a person presses a step's button, edits the list or sends audio. Nothing
+restarts after any job on the tape that ended in error, whatever the document managed to
+keep: the server holds the run back while that error stands, and the page keeps its own
+note of it, since a disk that refused the note would otherwise mean a run on every look.
 
-**Nothing automatic gets in a person's way.** The job does not start while something a person
-pressed is unanswered, since it would hold the tape and that press would be refused. A cut
-needs nothing a lookup finds, so during an automatic lookup Cut stays on and runs as soon as
-the lookup ends.
+**Nothing automatic gets in a person's way.** What a person does to a row runs beside a job
+that only asks the catalogue, automatic or Look again. A queue on the page was the other way
+to do this, and lost to it: a person's edit would have waited minutes on a long tape, and been
+lost with the tab. So the job saves one song at a time, and it and a row's request each take a
+per-tape lock for a read, change and save and for nothing longer. The job reads the tape again
+for every song. An edit is asked about in its turn, an answer overtaken by an edit is dropped,
+a moved song is found by what it says, and a person's choice stays. Boundaries are laid on the
+list as it stands by then, not as it stood when measuring began. A job a person pressed still
+refuses, and says which, and what could not be saved stays on the row and goes when it ends. A
+cut needs nothing a lookup finds, so during an automatic lookup Cut stays on and runs as soon
+as the lookup ends.
 
 **Spans are cross-checked against list lengths, in list order.** A fit cannot
 detect wrong order on its own: the album flow's fit passed a list out of order
@@ -2169,14 +2179,36 @@ with only its own actions and one line of plain state, with anything longer one 
 away. The waveform stays in view while the table scrolls, because a row is how a long tape
 is got around. A song's row opens to edit it, to choose its album and to say where it went.
 The same songs in three tables, with every control on every row, was what this replaced.
-Nothing the page holds is unsaved: a field saves when it is left, and a question that would
-lose boundaries is asked in the row that raised it and goes when another row opens. What is
-being typed, and the focus, survive a redraw from a job or from the save of the field before.
-It opens on the first song that needs its person, so nobody hunts for where to start.
+Pressing a row opens it, pressing it again leaves it open, and it has a Close of its own.
+Nothing the page holds is unsaved: a field saves when it is left, once, and a question that
+would lose boundaries is asked in the row that raised it and goes when another row opens. What
+is being typed, and the focus, survive a redraw, and a redraw is never taken for leaving: a
+browser reports an input taken off the page as left, and that is how half a title reached the
+server and cleared a song's lookup. A row is known by a key the page keeps, because its place
+changes when a song moves, and what is pressed or typed on it goes by that key, one thing at a
+time. An edit behind a move once landed on whichever row had arrived at the old place, and lost
+a song. A move pressed twice moves twice, and never undoes itself. It opens on the first song
+that needs its person, so nobody hunts for where to start.
 
-**A lost connection is said.** A job's progress is only read, so with the server gone the
-page says it cannot be reached and keeps asking, which can do nothing twice. It comes back by
-itself, and a server that restarted says so by no longer knowing the job.
+**The next thing to press is on the screen.** The current step is scrolled to when it changes,
+and its blue button is also in the header, which the rail's length cannot push away. At 900 px
+every step fits. A step that is waiting keeps its button, off, and says why on the step rather
+than in a tooltip. On a phone the rail is one line that stays at the top and opens, because it
+was 1,361 px above a doubtful song with nothing pointing to it.
+
+**A hundred songs with no match** would be two hundred clicks. One action on the Albums step
+files them all from the list, after one question in the rail saying what counts: a song with
+no match at all and an album to file it under, counted as the page saw them, so nothing is
+settled that the person was not told about. A song with options to choose stays a person's
+choice, and one with no album stays too, since File would only refuse it.
+
+**A lost connection is said.** While the page is looked at it asks the server every few
+seconds, and two misses say it cannot be reached. A request that fails to get there says the
+same one thing, in place of a browser's own words, and it goes by itself when the server
+answers. What could not be saved meanwhile stays on its row and is sent then. A job's progress
+is only read, so that asking can do nothing twice. A server that no longer knows a job has
+forgotten it, half an hour after it ended or by restarting, and the page says so without
+guessing which.
 
 **The waveform is a rip's editor,** the same `Editor` and `Player` on a canvas of the
 tape's page, with the tape's own envelope and its uncut FLAC served directly. A
@@ -2244,9 +2276,10 @@ its own click sent, so none goes by accident.
 
 **The way back from a filed song.** Remove that copy with beets, then load the list
 again. Until then a new list is refused, however often it is said: it would forget the song
-is there and with it the lock on its boundaries and release. The route asks beets about each
-finished song's path, and a song beets cannot answer for stays held, as does one not
-confirmed, which File again answers. A new list is also refused once any boundary on the tape
+is there and with it the lock on its boundaries and release. The route asks beets about every
+finished song's path in one query, and a song beets cannot answer for stays held, as does one
+not confirmed, which File again answers. A person's boundary refuses the list whatever beets
+says, so that is checked first, and running out of time is said at once. A new list is also refused once any boundary on the tape
 is a person's, and then the only way is to remove the tape and start it over. A failed song beside a filed one moves
 freely up to the filed song's edge. There is no third way, and this record does not add
 one.
@@ -2282,13 +2315,14 @@ and its track can disagree, and the difference is often the version. Another ver
 a net over free text: words like live, acoustic, remix, edit, mix or tribute in the
 recording's disambiguation, and in the release's title or disambiguation unless the list
 names that release, none of them said in the version part of the list's title, its
-parenthetical or dash suffix: Live Forever excuses no live recording. A guest clause holding
-one of those words is a version, so (feat. X Remix) is not the title without it, to the
-match or to the library's pre-check, while who to search for and the lead still drop it. It
+parenthetical or dash suffix: Live Forever excuses no live recording. A guest clause is no
+version part, so (feat. Live Band) excuses nothing either, though one holding one of those
+words is still not the title without it, to the match or to the library's pre-check, while who
+to search for and the lead drop it. It
 catches what it catches. A release with a secondary type other than Remix or Mixtape/Street,
 which rank as their primary type, needs the list to name exactly it, and a live one also
 needs that name to say live. A Remix release the list does not name also needs a version word
-in the list's title or the track's. The lead is compared whole, so a shared word is no
+in the version part of the list's title or the track's. The lead is compared whole, so a shared word is no
 agreement, a leading The aside, against each name as credited and as the artist is known; a
 whole credit holding a comma is that name, and otherwise a list crediting several names
 outright needs all of them. Various Artists agrees with nobody. Two tracks a list
@@ -2327,26 +2361,30 @@ of an album, and then a later one is chosen: the right recording on a less apt r
 
 **The library first.** Each song is checked at lookup by the same pre-check File uses,
 against the rows by its artist and any row with the chosen recording. It is `owned` with
-nobody looking only on a recording id: the one a match chose, or a row's that the catalogue
-offered for this song. That counts as settled and names its album artist, album, path and
-release; File then finds it again and the playlist points at it. A doubt's best guess proves
-nothing by its id. A row that only agrees on title, artist and length can be a live album
-of the same length, so it is put to a person, with Use-copy to hand, whatever the lookup
-said. A failed lookup never settles and stays to be retried. A copy found at lookup and gone at File
+nobody looking only on the recording id a match chose. That counts as settled and names its
+album artist, album, path and release; File then finds it again and the playlist points at it.
+Everything else on offer was held back for a reason, so its id proves nothing: with a studio
+take of 230 s, a list saying 200 s and a live album of 201 s in the library, that album's own
+id was among the options. A row that agrees on title, artist and length, whatever id it has,
+is put to a person, with Use-copy to hand, whatever the lookup said. A failed lookup never settles and stays to be retried. A copy found at lookup and gone at File
 fails with that reason and asks for an album again, rather than filing from the list. A library that cannot be read is said
 on the song and stops nothing, and File still asks. What the library holds is kept with
 the proposal, which is what ranks an edition it has and marks an option. An owned song needs
-no cut and asks nobody to check its boundaries, and a cut of it that failed stops nothing. If
-the copy is gone at File, the song goes back to choosing an album and needs a cut like any
-other.
+no cut and asks nobody to check its boundaries, and a cut of it that failed stops nothing. The
+same goes for a copy a person chose to use. If the copy is gone at File, the song goes back to
+choosing an album and needs a cut like any other, with the audio sent then if none came before:
+finding boundaries lays it among the songs that stay. A library with nothing in it at all is
+off its mount, not out of copies, so those songs stay as they were and File says so.
 
 **Beside an edition already held.** A release of an album the library has as another
 edition is put as a choice, in what each answer does to a person's folders, because a note
 in the catalogue's terms was read and not understood: you have the 13-track album, this
 song is only on the 35-track version, so add it to that folder as its track number, or file
-it as a single in its own. The folder is promised only where beets' album path has no
-`%aunique` and the album artist is the same, which is read once per lookup job and kept on
-the proposal; with no answer the words say what is true either way. It is said to sit beside
+it as a single in its own. The folder is promised only where the album artist and the album's title
+are the same and beets' album path has folders of just `$albumartist` and `$album`, read once
+per lookup job and kept on the proposal. A `%aunique` there makes a folder of its own. A year, a
+disc, a function or a path chosen by a query cannot be foretold, and a release by Various Artists
+takes the `comp` path instead, so those, like no answer, get the words that are true either way. It is said to sit beside
 a track of the same number only when the library has one, and the second is offered if the search showed the same recording
 as a single. It informs and gates nothing. An album the catalogue also files as a
 compilation shows as an album when the list names it, which changes no ranking.
@@ -2409,9 +2447,11 @@ with no album fails rather than being given one. Another album row is said on th
 song's outcome, not refused.
 
 **One import at a time.** What a pinned run answers rests on what the library held when it
-was read, so a process-wide lock is held from that read to the end of the import, shared
-with a record's imports. A held lock waits and says so; after two hours it gives up with a
-plain reason and nothing imported.
+was read, so a process-wide lock is held from the song's pre-check to the end of the import,
+shared with a record's imports: with the pre-check outside it, two jobs filing one recording
+both found nothing and both imported it. A held lock waits and says so, and goes back to saying
+what the job is doing once the wait is over; after two hours it gives up with a plain reason
+and nothing imported.
 
 **A tape's filing cannot delete filed audio.** Replace is never sent, because ADR-060 makes it
 delete the filed audio. A `duplicate_action` in a person's beets configuration answers
@@ -2476,6 +2516,8 @@ album row both, and only two answers of none are called no cover: a library that
 answer is not told it has none. One upload goes through the record flow's own install, then
 sets the album row's art, so a later song joining it gets the art too. It is only for a song
 this tape filed that is missing a cover, and every file beets lists has to be in the library.
+If only some of those files take it, the album row is given no art and the song keeps the
+offer, so that another upload is a whole install and not told the album already has one.
 It takes the album row's files and not the folder's, because a folder can hold another edition whose tracks a
 person was promised would not change, and it sets the modes of those files and the cover and
 nothing else. A failure before the art is in is a plain refusal; one after it is said on the
@@ -2487,7 +2529,9 @@ song filed before it was asked.
 read-back that cannot answer records `unknown`. The mark that a song went to beets
 stays until the library really answers, and while it is set a retry reads back before
 anything else, accepting a row with the recording id or, with none, a length that
-agrees with the list or with the cut. Only an answer of no row lets it import again.
+agrees with the list or with the cut. Only an answer of no row lets it import again. A song
+found that way is `filed`, because this tape's import made it, and the rail says it is not
+confirmed for as long as its row does.
 
 **Relative rows.** Merging into an album whose library rows hold relative paths
 crashed, in a simulation. Such rows are converted first, in a one-off step on a
@@ -2502,8 +2546,10 @@ its release too, until a read-back answers: the library may hold a copy, and ano
 choice would look for another recording, find no row and import a second one. So does a
 song sent to beets with no answer yet, which filing again answers. A song whose filing
 failed can still be changed. Skipping a filed song takes it out of the playlist and
-leaves its copy alone. Finding boundaries again lays every song not set by ear, so it is
-refused while the library holds or may hold a song, and the job that would run it says so.
+leaves its copy alone. Finding boundaries again leaves a person's edges and those a library's
+copy was cut from, and lays the rest around them. A song found in the library has no edges of
+its own and is laid like any other. With every song held there is nothing to lay, and it is
+refused, and the job that would run it says so.
 
 ### The playlist
 

@@ -147,6 +147,20 @@ put back a list that has changed since
 goes away while a job runs the page says so and carries on when it is back
 (`test_with_the_server_gone_the_page_kept_saying_working_and_now_says_so`).
 
+What you do to a row runs beside an automatic lookup, which reads the tape again for every song
+(`test_an_edit_during_a_lookup_was_refused_and_lost_and_now_lands`,
+`test_a_choice_during_a_lookup_is_not_overwritten_by_the_answer_it_overtook`). A field saves
+once, when you leave it (`test_a_redraw_saved_half_typed_text_because_a_removed_input_counts_as_left`),
+and what you press on a row follows that song if it moves
+(`test_an_edit_behind_a_move_landed_on_the_row_that_arrived_at_its_old_place`). Songs with no
+match at all can be filed from the list in one action, which says what it counts
+(`test_a_hundred_songs_with_no_match_cost_two_hundred_clicks`). A lost connection is one plain
+message that clears itself (`test_nothing_was_said_of_a_lost_connection_until_a_press_gave_failed_to_fetch`).
+A copy in the library is only taken as the song on the recording a match chose, and any other that
+agrees is yours to confirm (`test_a_live_album_of_the_list_s_length_was_owned_with_nobody_asked`).
+A tape with a song filed can still place the rest
+(`test_every_song_owned_and_a_copy_gone_at_file_was_a_dead_end`).
+
 A filed song with no cover says so, and one uploaded image is embedded and set as its
 album's art (`test_a_filed_song_with_no_cover_says_so_and_one_with_a_cover_does_not`,
 `test_one_upload_embeds_and_sets_the_album_s_art_for_all_its_songs`). Only a song this tape
