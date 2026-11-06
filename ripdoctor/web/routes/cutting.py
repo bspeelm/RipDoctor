@@ -18,6 +18,7 @@ from ripdoctor.core.plan import (
     PlanTrack,
     as_it_stands,
     cut_refusal,
+    letter_of,
     validate,
 )
 from ripdoctor.store import cache as C
@@ -61,6 +62,17 @@ def _plan(service: Service, slug: str) -> Any:
     return plan
 
 
+def _sides_of(service: Service, slug: str, plan: Any) -> dict[str, str]:
+    """Where each side is, one by one: a re-rip puts one in raw and leaves the rest."""
+    try:
+        return {
+            side.file: str(service.layout.side_file(slug, letter_of(side.file)))
+            for side in plan.sides
+        }
+    except FileNotFoundError as e:
+        raise H.HttpError(409, str(e)) from e
+
+
 def add(app: App, service: Service) -> None:
     layout = service.layout
 
@@ -75,8 +87,11 @@ def add(app: App, service: Service) -> None:
         refused = cut_refusal(as_it_stands(plan, C.stamps_of(layout, slug)))
         if refused:
             raise H.HttpError(409, refused)
-        source = layout.album_dir(slug)
         dest = layout.review_dir(slug)
+        # Before anything is cleared: a side that cannot be found costs nobody
+        # the cut they already have.
+        where = _sides_of(service, slug, plan)
+        cuts = plan_cuts(plan, where.__getitem__, str(dest))
 
         def work(job: Job) -> dict[str, Any]:
             dest.mkdir(parents=True, exist_ok=True)
@@ -86,7 +101,6 @@ def add(app: App, service: Service) -> None:
             # which turns the next good import into a reported failure.
             for stale in dest.glob("*.flac"):
                 stale.unlink()
-            cuts = plan_cuts(plan, str(source), str(dest))
             job.total = len(cuts)
             bad = []
             for cut in cuts:
@@ -117,7 +131,7 @@ def add(app: App, service: Service) -> None:
         """One clip per boundary, with a tick at the instant being judged."""
         slug = slug_of(r)
         plan = _plan(service, slug)
-        source = layout.album_dir(slug)
+        sources = _sides_of(service, slug, plan)
         dest = layout.clips_dir(slug)
 
         def work(job: Job) -> dict[str, Any]:
@@ -133,7 +147,7 @@ def add(app: App, service: Service) -> None:
                 job.step(f"track {track.number} {edge}", "building")
                 tick_one(
                     service.runner,
-                    str(source / file),
+                    sources[file],
                     at,
                     str(dest / _clip_name(n, track, edge)),
                 )

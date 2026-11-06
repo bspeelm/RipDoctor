@@ -616,6 +616,63 @@ def test_a_plan_with_no_mark_reaches_the_page_as_nobody_having_settled_it(
     assert back["tracks_by_side"]["a"][0]["settled"] == ""
 
 
+def with_two_sides_in_two_places(service: Service) -> Service:
+    """A re-rip of one side of a filed record: raw holds it, archive holds the rest."""
+    raw, archived = service.layout.raw / "album", service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-b.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    assert not (raw / "side-b.flac").exists()
+    body = a_plan_body()
+    body["sides"].append(
+        {
+            "letter": "b",
+            "tracks": [{"number": 2, "title": "Two", "start": 1.0, "end": 9.0}],
+        }
+    )
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    service.runner = Cutting()
+    return service
+
+
+def inputs_of(service: Service) -> set[str]:
+    """Each side ffmpeg was pointed at, as its directory's kind and its name."""
+    calls = service.runner.calls  # type: ignore[attr-defined]
+    named = [Path(c[c.index("-i") + 1]) for c in calls if "-i" in c]
+    return {
+        f"{p.parent.parent.name}/{p.name}" for p in named if p.name.startswith("side-")
+    }
+
+
+def test_a_cut_finds_each_side_where_it_is(tmp_path: Path) -> None:
+    """It looked in raw for all of them, so a record with one side re-ripped failed
+    halfway, having already written the first side's tracks."""
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    body = post(build(service), "/api/split/album", service).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["tracks"] == 2
+    assert inputs_of(service) == {"raw/side-a.flac", "archive/side-b.flac"}
+
+
+def test_tick_clips_find_each_side_where_it_is(tmp_path: Path) -> None:
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    body = post(build(service), "/api/clips/album", service).json()
+    assert not body["error"], body["error"]
+    assert inputs_of(service) == {"raw/side-a.flac", "archive/side-b.flac"}
+
+
+def test_a_cut_of_a_side_nowhere_on_disk_says_so_and_keeps_the_last_cut(
+    tmp_path: Path,
+) -> None:
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    (service.layout.archive / "album" / "side-b.flac").unlink()
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    r = post(build(service), "/api/split/album", service)
+    assert r.status == 409 and "no side 'b'" in r.json()["error"]
+    assert (review / "01 One.flac").is_file()
+
+
 def test_splitting_without_a_plan_is_a_404(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     assert post(build(service), "/api/split/album", service).status == 404

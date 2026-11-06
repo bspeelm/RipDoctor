@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ripdoctor.audio.runner import Runner, ToolFailed
@@ -41,12 +42,19 @@ class Cut:
     dest: str
 
 
-def plan_cuts(plan: Plan, source_dir: str, dest_dir: str) -> list[Cut]:
-    """Every track in a plan, paired with its source side and its filename."""
+def plan_cuts(
+    plan: Plan, source_dir: str | Callable[[str], str], dest_dir: str
+) -> list[Cut]:
+    """Every track in a plan, paired with its source side and its filename.
+
+    A record's sides need not share a directory, so `source_dir` can be asked side by
+    side. ADR-046.
+    """
+    at = source_dir if callable(source_dir) else lambda file: f"{source_dir}/{file}"
     return [
         Cut(
             track=t,
-            source=f"{source_dir}/{side.file}",
+            source=at(side.file),
             dest=f"{dest_dir}/{track_filename(t.number, t.title)}",
         )
         for side in plan.sides
