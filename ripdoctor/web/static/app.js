@@ -1198,6 +1198,7 @@ function openImport() {
   $("#imp-err").textContent = "";
   $("#imp-outwrap").hidden = true;
   $("#imp-done").hidden = true;
+  $("#imp-pick").hidden = false;
   $("#imp-go").hidden = true;
   $("#imp-next").hidden = true;
   $("#imp-go").hidden = false;
@@ -1332,6 +1333,7 @@ async function runImport() {
                            "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
     $("#imp-done").hidden = false;
+    $("#imp-pick").hidden = true;      // every choice in it has been acted on
     showTranscript(r);   // collected all along, and hidden on every path
     $("#imp-go").hidden = true;
     $("#imp-close").textContent = "Not yet";
@@ -1397,10 +1399,11 @@ function renderReleaseList(box, releases, onPick, { requireDurations = true } = 
       `${Math.round(r.total / 60)} min`);
     // MusicBrainz keeps pressing qualifiers here, not in the title — without it
     // a widely reissued record returns dozens of rows that all read the same
-    const label = r.title + (r.disambiguation ? `  \u00b7 ${r.disambiguation}` : "");
+    const label = [r.title, r.disambiguation, r.date || "----", r.country || "--", r.formats.join(",")]
+      .filter(Boolean).join(" \u00b7 ");
     const dead = requireDurations && r.durations === 0;
-    const b = el("button", dead ? "nodur" : (r.vinyl ? "vinyl" : ""),
-      `${r.date || "----"}  ${r.country || "--"}  ${(r.formats.join(",") + "          ").slice(0, 14)}  ${r.tracks} tracks  ${dur}   ${label}`);
+    const b = el("button", dead ? "nodur" : (r.vinyl ? "vinyl" : ""));
+    b.append(el("span", null, label), el("span", null, `${r.tracks} tracks \u00b7 ${dur}`));
     b.type = "button";
     b.disabled = dead;
     if (dead) b.title = "no track durations in MusicBrainz — nothing to fit against";

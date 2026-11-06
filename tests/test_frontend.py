@@ -1527,3 +1527,54 @@ def test_starting_over_is_offered_unticked_and_names_how_many() -> None:
     assert '$("#fp-over").checked = false' in asked
     assert "also replace the boundaries I set, on ${counted(marks" in asked
     assert 'start_over: $("#fp-over").checked' in js
+
+
+IMPORT_PANELS = (
+    "imp-fromplan",  # tag from the plan
+    "imp-mbid",
+    "imp-nocat",  # no release pinned
+    "imp-artist",
+    "imp-album",
+    "imp-search",
+    "imp-results",
+    "imp-relabel-wrap",
+    "imp-relabel",
+    "imp-stale-wrap",
+    "imp-stale-clear",
+    "imp-replace-wrap",  # already in the library
+    "imp-replace",
+    "imp-dupes",
+    "imp-go",
+    "imp-next",
+    "imp-err",
+    "imp-done",
+    "imp-summary",
+    "imp-art-wrap",
+    "imp-art-fetch",
+    "imp-art-upload",
+    "imp-art-skip",
+    "imp-outwrap",  # the transcript
+    "imp-out",
+)
+
+
+def test_the_import_dialog_keeps_every_safety_panel_it_ever_had() -> None:
+    """The drawing it is styled from has none of them. ADR-048 holds regardless."""
+    start = markup().index('<dialog id="impdlg"')
+    dialog = markup()[start : markup().index("</dialog>", start)]
+    missing = [name for name in IMPORT_PANELS if f'id="{name}"' not in dialog]
+    assert not missing, missing
+    dupes = dialog[dialog.index('id="imp-dupes"') :]
+    for choice in ('value="replace"', 'value="keep"', 'value="merge"'):
+        assert choice in dupes
+
+
+def test_no_dialog_sets_a_floor_wider_than_a_phone() -> None:
+    """The import measured 704 px on a 390 screen, from min-widths set in rem."""
+    css = (STATIC / "style.css").read_text()
+    width = "width:min(var(--dlg),calc(100vw - 2rem))"
+    assert width in re.search(r"(?m)^dialog\{.*?\}", css, re.S).group(0)  # type: ignore[union-attr]
+    for rule in re.findall(r"#\w*dlg\{[^}]*\}", css):
+        assert "min-width" not in rule, rule
+    phone = css[css.index("@media (max-width:48rem)") :]
+    assert ".dlg-search{grid-template-columns:minmax(0,1fr)}" in phone

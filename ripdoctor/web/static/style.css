@@ -444,30 +444,46 @@ label.autostop input{width:auto;flex:none;margin:0}
 #ripsides .row button,#orphans .row button{flex:none}
 
 
-dialog{background:var(--panel);color:var(--fg);border:1px solid var(--line);
-  border-radius:10px;padding:1.25rem;min-width:34rem;max-width:44rem}
+/* A width rather than a floor, so a phone gets the screen less its margins. */
+dialog{--dlg:35rem;width:min(var(--dlg),calc(100vw - 2rem));max-width:none;
+  max-height:calc(100dvh - 2rem);overflow:auto;margin:8vh auto auto;
+  background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:22px}
 dialog::backdrop{background:rgba(0,0,0,.55)}
-dialog h3{margin:0 0 .75rem;font-size:1rem;font-weight:600}
-dialog form{display:flex;flex-direction:column;gap:.6rem}
-dialog .row{display:flex;gap:.5rem}
-#fp-results{max-height:16rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
-#fp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
-  font-weight:500;text-align:left;padding:.4rem .6rem;font:12px/1.4 ui-monospace,monospace}
-#fp-results button:hover{border-color:var(--accent)}
-#fp-results .vinyl{border-left:3px solid var(--start)}
-#fp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
-#fp-report{margin:0;max-height:14rem;overflow:auto;background:#0f1114;padding:.5rem;
-  border-radius:6px;font:11px/1.4 ui-monospace,monospace;color:var(--dim)}
+dialog h3{margin:0;font-size:16px;font-weight:600}
+dialog form,#autostopdlg{gap:14px}
+dialog form,#autostopdlg[open]{display:flex;flex-direction:column}
+dialog p{margin:0;line-height:1.5}
+dialog p.dim{font-size:13px;color:#a3a9b0}
+dialog label{font-size:11.5px}
+dialog input,dialog select{min-width:0}
+dialog code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+dialog label.inline{gap:8px;font-size:12.5px;color:#a3a9b0}
+dialog input[type=checkbox]{accent-color:var(--accent);flex:none}
+dialog .row{display:flex;flex-wrap:wrap;gap:8px}
+.dlg-acts{justify-content:flex-end}
+/* The names and the button that searches them, on one line where there is room. */
+.dlg-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end}
+.dlg-search button{white-space:nowrap;min-height:2.3rem}
+dialog .err:empty{display:none}
+.dlg-pre{margin:0;overflow:auto;background:#0f1114;padding:10px;border-radius:6px;
+  font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.releases{display:flex;flex-direction:column;gap:4px;max-height:16rem;overflow:auto}
+.releases:empty{display:none}
+.releases button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;flex:none;width:100%;
+  padding:8px 10px;background:#14161a;color:var(--fg);border:1px solid var(--line);
+  border-left:3px solid var(--line);border-radius:5px;text-align:left;
+  font:500 12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.releases button:hover{border-color:var(--accent)}
+.releases button > span:last-child{color:var(--dim)}
+.releases .vinyl{border-left-color:var(--start)}
+.releases .nodur{opacity:.45;border-left-color:var(--end);cursor:not-allowed}
+#fp-report{max-height:14rem;font-size:11px;color:var(--dim)}
 
-#imp-out{margin:0;max-height:22rem;overflow:auto;background:#0f1114;padding:.5rem;
-  border-radius:6px;font:11px/1.45 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
-#impdlg{min-width:44rem;max-width:60rem}
-#impdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+#imp-out{max-height:22rem;font-size:11px}
+#impdlg{--dlg:40rem}
 
-#arc-plan{margin:0;max-height:20rem;overflow:auto;background:#0f1114;padding:.6rem;
-  border-radius:6px;font:11px/1.5 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
-#arcdlg{min-width:40rem}
-#arcdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+#arc-plan{max-height:220px}
 .ok{color:var(--start)}
 
 #orphans{border:1px solid var(--warn);border-radius:8px;padding:.6rem;margin-bottom:.6rem;
@@ -476,11 +492,12 @@ dialog .row{display:flex;gap:.5rem}
   letter-spacing:.04em}
 #orphans .row{margin-top:.4rem}
 
-#imp-done h4{margin:0 0 .3rem;font-size:.8rem;color:var(--start);
-  text-transform:uppercase;letter-spacing:.04em}
-#imp-done{border:1px solid var(--start);border-radius:8px;padding:.7rem}
-#imp-done p{margin:.2rem 0}
-#imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#imp-pick{display:flex;flex-direction:column;gap:14px}
+#imp-done{display:flex;flex-direction:column;gap:14px}
+#imp-done-box{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--start);border-radius:8px}
+#imp-done h4{margin:0;font-size:11px;font-weight:600;color:var(--start);
+  text-transform:uppercase;letter-spacing:.06em}
+#imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
 #imp-outwrap summary{cursor:pointer;color:var(--dim);font-size:.8rem;padding:.2rem 0}
 
 #rip-listen.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
@@ -489,17 +506,12 @@ dialog .row{display:flex;gap:.5rem}
 .vol{flex-direction:row;align-items:center;margin-left:auto}
 .vol input[type=range]{width:5.5rem;accent-color:var(--accent);padding:0;background:none;border:0}
 button.tiny{padding:.15rem .5rem;font-weight:700}
-table.keys{border-collapse:collapse;font-size:12px}
-table.keys td{padding:.22rem .6rem .22rem 0;vertical-align:top}
+table.keys{border-collapse:collapse;font-size:13px;color:#a3a9b0}
+table.keys td{padding:4.5px 16px 4.5px 0;vertical-align:baseline}
+table.keys td:last-child{padding-right:0}
 table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
-#helpdlg{min-width:34rem}
-
-#imp-results{max-height:12rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
-#imp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
-  font-weight:500;text-align:left;padding:.35rem .6rem;font:12px/1.4 ui-monospace,monospace}
-#imp-results button:hover{border-color:var(--accent)}
-#imp-results .vinyl{border-left:3px solid var(--start)}
-#imp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
+table.keys kbd{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);padding:1px 6px}
+#helpdlg{--dlg:40rem}
 
 #md-note{font-size:12px;line-height:1.4;margin:0;color:var(--ghost)}
 #art-state{font-size:12.5px;line-height:1.4}
@@ -507,16 +519,17 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
 
 /* auto-stop warning: a 20 s decision, so the countdown is the loudest thing in
    the box and the safe answer is the default button */
-#autostopdlg{min-width:30rem;max-width:34rem}
-#autostopdlg #as-count{margin:.25rem 0 .75rem;font-size:2.4rem;text-align:center}
-#autostopdlg .row{flex-wrap:wrap}
+#autostopdlg{--dlg:32.5rem}
+#autostopdlg #as-count{padding:6px 0;font-size:44px;text-align:center}
 
 /* replacing a library album deletes files, so the offer looks like a warning
    and the paths that would go are shown, not summarised */
 .warn{border:1px solid #6a4a2a;background:#241c14;border-radius:8px;
-  padding:.6rem .75rem;display:flex;flex-direction:column;gap:.35rem}
-.warn b{color:#e0a24a}
-#imp-replace-what{color:var(--fg);word-break:break-all}
+  padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.warn b{color:#e0a24a;font-size:13px}
+.warn .hint{font-size:12px;color:#a3a9b0}
+.warn .mono{white-space:pre-wrap;overflow-wrap:anywhere}
+#imp-replace-what{color:var(--fg)}
 
 /* monitor volume sits in the button grid; the peak-hold line is the number you
    set gain against, so it gets weight the transient meter does not */
@@ -572,6 +585,17 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   #readout > *,#readout > #ro-track{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
   #lower{grid-template-columns:minmax(0,1fr)}
   #cut-table{overflow-x:visible}
+  dialog{margin:1rem auto auto;padding:16px}
+  dialog input,dialog select{min-height:40px;font-size:16px}
+  dialog button,dialog summary{min-height:40px}
+  dialog label.inline{min-height:40px;font-size:13px}
+  .dlg-search{grid-template-columns:minmax(0,1fr)}
+  dialog .row > button{flex:1 1 auto}
+  .releases{max-height:none}
+  .releases button{grid-template-columns:minmax(0,1fr)}
+  .warn button{width:100%}
+  table.keys td{padding-right:10px}
+  table.keys td:first-child{white-space:normal;min-width:4.5rem}
   #cut-table-head{min-width:0}
   #cut-table-head button,#album-panel .row button,#logbar button{min-height:40px}
   #logbar #logwhat{display:none}

@@ -616,7 +616,7 @@
         <tr><td>wheel</td><td>zoom about the cursor</td></tr>
         <tr><td>strip</td><td>the bar under the waveform is the whole side &mdash; click or drag to jump</td></tr>
       </table>
-      <div class="row"><button id="help-close" type="button">Close</button></div>
+      <div class="row dlg-acts"><button id="help-close" class="ghost" type="button">Close</button></div>
     </form>
   </dialog>
 
@@ -628,15 +628,19 @@
         the plan for the whole album, not just the side you are viewing.</p>
       <p class="dim" id="fp-again" hidden></p>
       <label id="fp-over-row" class="inline" hidden title="for starting over on the same audio: every track is fitted again, and what you set or checked goes"><input type="checkbox" id="fp-over"> <span id="fp-over-what"></span></label>
-      <label>Artist <input id="fp-artist" required></label>
-      <label>Album <input id="fp-album" required></label>
-      <div class="row"><button id="fp-search" type="button">Search MusicBrainz</button>
-        <button type="button" class="ghost" id="fp-cancel">Cancel</button>
-        <button type="button" id="fp-done" hidden>Done</button></div>
-      <div id="fp-results"></div>
+      <div class="dlg-search">
+        <label>Artist <input id="fp-artist" required></label>
+        <label>Album <input id="fp-album" required></label>
+        <button id="fp-search" type="button">Search MusicBrainz</button>
+      </div>
+      <div id="fp-results" class="releases"></div>
       <p class="err" id="fp-err"></p>
       <label id="fp-force-row" class="inline" hidden title="each track takes its catalogue duration from the side start; nothing is stretched to fit"><input type="checkbox" id="fp-force"> place a side the gaps will not fit from the catalogue alone, and check it by ear</label>
-      <pre id="fp-report" hidden></pre>
+      <pre id="fp-report" class="dlg-pre" hidden></pre>
+      <div class="row dlg-acts">
+        <button type="button" class="ghost" id="fp-cancel">Cancel</button>
+        <button type="button" id="fp-done" hidden>Done</button>
+      </div>
     </form>
   </dialog>
 
@@ -646,6 +650,7 @@
       <p class="dim">Moves the cut tracks out of <code>review/</code> into the
         library, tagged from the plan you saved. The release below is the one it
         will match against; the transcript afterwards says what it did.</p>
+      <div id="imp-pick">
       <label class="inline"><input type="checkbox" id="imp-fromplan">
         Ignore the catalogue &mdash; tag from the saved plan</label>
       <label>Release id <input id="imp-mbid" spellcheck="false" placeholder="pick one below, or paste an id"></label>
@@ -658,12 +663,12 @@
           after the import offers it. To match instead, search below and pick a
           release.</p>
       </div>
-      <div class="row">
-        <label style="flex:1">Artist <input id="imp-artist"></label>
-        <label style="flex:1">Album <input id="imp-album"></label>
-        <button type="button" id="imp-search" class="ghost" style="align-self:end">Search</button>
+      <div class="dlg-search">
+        <label>Artist <input id="imp-artist"></label>
+        <label>Album <input id="imp-album"></label>
+        <button type="button" id="imp-search" class="ghost">Search</button>
       </div>
-      <div id="imp-results"></div>
+      <div id="imp-results" class="releases"></div>
       <div id="imp-relabel-wrap" class="warn" hidden>
         <b>That release has a different tracklist to the one this cut was named from.</b>
         <p class="hint">Re-labelling applies the new release's titles, numbers and
@@ -697,15 +702,13 @@
             <option value="merge">Merge &mdash; add these tracks to the one already there</option>
           </select></label>
       </div>
-      <div class="row">
-        <button type="button" id="imp-go">Import into the library</button>
-        <button type="button" id="imp-next" hidden>Archive rip &rarr;</button>
-        <button type="button" class="ghost" id="imp-close">Close</button>
       </div>
       <p class="err" id="imp-err"></p>
       <div id="imp-done" hidden>
-        <h4>Imported</h4>
-        <p id="imp-summary"></p>
+        <div id="imp-done-box">
+          <h4>Imported</h4>
+          <p id="imp-summary"></p>
+        </div>
         <div id="imp-art-wrap" class="warn" hidden>
           <b>This album went into the library with no cover art.</b>
           <p class="hint">A player set to read <b>embedded</b> art shows nothing
@@ -725,7 +728,12 @@
           clears the working copies.</p>
       </div>
       <details id="imp-outwrap" hidden><summary>details</summary>
-        <pre id="imp-out"></pre></details>
+        <pre id="imp-out" class="dlg-pre"></pre></details>
+      <div class="row dlg-acts">
+        <button type="button" class="ghost" id="imp-close">Close</button>
+        <button type="button" id="imp-go">Import into the library</button>
+        <button type="button" id="imp-next" hidden>Archive rip &rarr;</button>
+      </div>
     </form>
   </dialog>
 
@@ -751,12 +759,12 @@
         folder and the analysis cache. <b>Nothing in <code>archive/</code> is ever
         deleted</b>: the raw sides are what make a re-split possible without
         playing the record again.</p>
-      <pre id="arc-plan"></pre>
-      <div class="row">
-        <button type="button" id="arc-go">Archive and clean up</button>
-        <button type="button" class="ghost" id="arc-close">Close</button>
-      </div>
+      <pre id="arc-plan" class="dlg-pre"></pre>
       <p class="err" id="arc-err"></p>
+      <div class="row dlg-acts">
+        <button type="button" class="ghost" id="arc-close">Close</button>
+        <button type="button" id="arc-go">Archive and clean up</button>
+      </div>
     </form>
   </dialog>
 
