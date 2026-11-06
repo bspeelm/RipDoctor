@@ -28,6 +28,8 @@ from ripdoctor.core.filing import (
     JOIN,
     NEW_ALBUM,
     Row,
+    Run,
+    joining,
     row_length,
     term,
 )
@@ -252,6 +254,18 @@ PINNED_ANSWERS = {
 }
 
 
+# With lookup off beets has no step that acts on a merge, and goes on to keep both.
+NO_RELEASE_TO_MERGE = (
+    "merging needs a release: with none, beets has nothing to match the album against "
+    "and files another album entry. Choose Keep both for that, or pin a release"
+)
+SKIP_ANY_OTHER = b"A\nS\n"
+REMATCHED = (
+    "merged into the album already filed: beets matched its tracks to this release "
+    "again, which rewrites their tags and album gain"
+)
+
+
 def answers(duplicates: str, *, matching: bool) -> bytes:
     """Every answer beets may ask for, in the order it asks.
 
@@ -452,6 +466,9 @@ class Beets:
         dir_mode: int = 0o775,
     ) -> Outcome:
         self._refuse_off_its_mount(runner, library)
+        if duplicates == "merge" and not mbid:
+            raise ImportFailed(NO_RELEASE_TO_MERGE)
+        how = self._merging(runner, library, mbid, plan.album, duplicates)
         cleared = 0
         # Only with the acknowledgement: "replace" alone is a default, not a
         # licence to delete. ADR-060.
@@ -464,8 +481,8 @@ class Beets:
             # all. The plan is what is known, so it is written first. ADR-049.
             T.write_plan_tags(runner, plan, review)
         result = runner.run(
-            self._argv(self._import(review, mbid)),
-            stdin=answers(duplicates, matching=bool(mbid)),
+            self._argv(self._import(review, mbid), self._config_for(how)),
+            stdin=_merge_answers(how) or answers(duplicates, matching=bool(mbid)),
             timeout=3600,
         )
         output = _plain(result.text + result.err)
@@ -499,7 +516,9 @@ class Beets:
             notes.append(f"set {fixed} files' modes")
         if cleared:
             notes.append(f"removed {cleared} files of the copy already filed")
-        notes.extend(too_many(count, sum(len(s.tracks) for s in plan.sides)))
+        notes.extend(self._merged(runner, library, mbid, how))
+        if duplicates != "merge":
+            notes.extend(too_many(count, sum(len(s.tracks) for s in plan.sides)))
         spare = self.unregistered(runner, library, plan.artist, plan.album, mbid=mbid)
         if spare:
             notes.append(
@@ -507,6 +526,53 @@ class Beets:
                 f"starting {spare[0].name}. Whatever serves it will show them."
             )
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
+
+    def _merging(
+        self, runner: Runner, root: str, release: str, album: str, duplicates: str
+    ) -> str:
+        """How Merge can honestly be done, or nothing when it was not asked for. Beets
+        merges every row of an album's name onto the release, so that happens only when
+        all of them are it. Beside another edition this joins its row by hand. Nothing
+        held is nothing to add to, and another edition held is refused, since merging
+        renames, renumbers and retags it. ADR-054."""
+        if duplicates != "merge":
+            return ""
+        own = self._held(runner, root, [f"mb_albumid:{release}"], 300.0)
+        if own:
+            title = own[0].album
+            run = Run(release, "", title, ())
+            return joining(run, self.album_rows(runner, root, title))
+        if album and self.album_rows(runner, root, album):
+            raise ImportFailed(
+                f"the library holds another edition of {album}, and merging would "
+                "rename, renumber and retag it. Choose Keep both, which leaves it "
+                "as it is"
+            )
+        return NEW_ALBUM
+
+    def _config_for(self, how: str) -> str:
+        return self.no_art if how == ADDING else ""
+
+    def _merged(self, runner: Runner, root: str, release: str, how: str) -> list[str]:
+        """What a merge did, said. One beets did itself has rewritten its album's files
+        and worked out its gain; one by hand still has to."""
+        if how == JOIN:
+            return [REMATCHED]
+        if how != ADDING:
+            return []
+        try:
+            album, _, apart = self.join_release(runner, root, release)
+        except (ImportFailed, ToolMissing) as e:
+            return [f"these stayed a separate album entry beside that row: {e}"]
+        if apart:
+            return ["these stayed a separate album entry, in a folder of their own"]
+        why = (
+            self.album_gain(runner, album)
+            if "replaygain" in self.plugins(runner)
+            else ""
+        )
+        said = "joined the row already there, and no other edition's tracks changed"
+        return [said, *([f"its album gain was not refreshed: {why}"] if why else [])]
 
     def propose(self, runner: Runner, directory: str) -> tuple[str, str]:
         """What beets would make of an album that arrived already tagged.
@@ -535,9 +601,12 @@ class Beets:
         """Import an album that arrived already cut, pinned to the agreed
         release so the run that commits cannot choose a different one."""
         self._refuse_off_its_mount(runner, library)
+        how = self._merging(runner, library, mbid, "", duplicates)
         result = runner.run(
-            self._argv(["import", "--search-id", mbid, directory]),
-            stdin=answers(duplicates, matching=True),
+            self._argv(
+                ["import", "--search-id", mbid, directory], self._config_for(how)
+            ),
+            stdin=_merge_answers(how) or answers(duplicates, matching=True),
             timeout=3600,
         )
         output = _plain(result.text + result.err)
@@ -559,7 +628,9 @@ class Beets:
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
-        notes.extend(too_many(count, len(tracks)))
+        notes.extend(self._merged(runner, library, mbid, how))
+        if duplicates != "merge":
+            notes.extend(too_many(count, len(tracks)))
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def file_tape_run(
@@ -857,7 +928,10 @@ class Beets:
         where, _count = self.locate(runner, library, artist, album, mbid=mbid)
         if where is None or not where.is_dir():
             return []
-        known = set(self._paths(runner, _query(album, mbid) or [], library))
+        # By the folder and not the record: another edition can share it, and that is
+        # in the library. A path ending in a comma cannot be asked about at all.
+        here = [] if str(where).endswith(",") else [f"path:{where}"]
+        known = set(self._paths(runner, here or _query(album, mbid) or [], library))
         return sorted(p for p in where.glob("*.flac") if p not in known)
 
     def all_stale(self, runner: Runner, library: str = "") -> tuple[int, int]:
@@ -931,6 +1005,14 @@ class Beets:
             for fields in _fields(result.text)
             if len(fields) == _HELD.count(_SEP) + 1
         )
+
+
+def _merge_answers(how: str) -> bytes:
+    """Nothing when no merge was asked for. A question a merge with nothing to add to
+    did not foresee is Skip, which leaves every file where it is."""
+    if not how:
+        return b""
+    return SKIP_ANY_OTHER if how == NEW_ALBUM else PINNED_ANSWERS[how]
 
 
 def holds_nothing(library: str) -> bool:

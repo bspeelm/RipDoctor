@@ -1187,6 +1187,11 @@ function showCatalogueState() {
   // Left readable rather than removed: which release it would have used is
   // worth seeing while deciding not to use it.
   for (const id of ["#imp-mbid", "#imp-search"]) $(id).disabled = byPlan;
+  const noRelease = byPlan || !$("#imp-mbid").value.trim();
+  const merge = $('#imp-dupes option[value="merge"]');
+  merge.disabled = noRelease;
+  $("#imp-nomerge").hidden = !noRelease;
+  if (noRelease && $("#imp-dupes").value === "merge") $("#imp-dupes").value = "keep";
 }
 
 // The release the import will actually use. Empty is a decision here, not an

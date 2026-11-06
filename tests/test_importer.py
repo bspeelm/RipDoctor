@@ -1123,3 +1123,136 @@ def test_the_override_that_fetches_no_art_changes_nothing_else(tmp_path: Path) -
     beets = I.Beets.with_override(tmp_path)
     said = Path(beets.no_art).read_text()
     assert said == I.OVERRIDE + "fetchart:\n  auto: no\n"
+
+
+# --------------------------------------------------- what Merge is allowed to do
+
+
+def merge_row(release: str, album: str = "A Record", title: str = "One") -> str:
+    path = f"/music/A Band/{album}/{title}.flac"
+    return SEP.join((title, "A Band", album, "3:00", path, "", "1", release))
+
+
+def merging(review: Path, own: list[str], named: list[str]) -> FakeRunner:
+    """A library holding `own` by the release asked about, and `named` by album name."""
+    fake = Moving(review, installed={"beet", "metaflac"})
+    fake.expect("mb_albumid:rel", stdout="\n".join(own).encode())
+    fake.expect(
+        lambda a: "ls" in a and "album::" in " ".join(a),
+        stdout="\n".join(named).encode(),
+    )
+    return fake  # type: ignore[return-value]
+
+
+def fed_to_the_import(fake: FakeRunner) -> bytes | None:
+    return next(f for c, f in zip(fake.calls, fake.fed, strict=True) if "import" in c)
+
+
+def test_merge_with_no_release_once_kept_both_and_called_it_merged(
+    tmp_path: Path,
+) -> None:
+    """With lookup off beets has no step that acts on the answer, so `M` made another
+    album row, and with `%aunique` another folder."""
+    review = Path(a_review(tmp_path))
+    fake = Moving(review, installed={"beet", "metaflac"})
+    with pytest.raises(I.ImportFailed, match="needs a release"):
+        I.Beets().apply(fake, a_plan(), str(review), str(tmp_path), duplicates="merge")
+    assert not [c for c in fake.calls if "import" in c]
+    assert list(review.glob("*.flac"))
+
+
+def test_merge_once_stopped_at_the_second_apply_and_now_answers_it(
+    tmp_path: Path,
+) -> None:
+    """Merging matches afresh, so `A`, `M` ran out of input and nothing was filed."""
+    (tmp_path / "A Band").mkdir()
+    review = Path(a_review(tmp_path))
+    held = [merge_row("rel")]
+    fake = merging(review, held, held)
+    done = I.Beets().apply(
+        fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
+    )
+    assert fed_to_the_import(fake) == b"A\nM\nA\n"
+    assert any("matched" in n and "again" in n for n in done.notes)
+    assert not any("earlier copy" in n for n in done.notes)
+
+
+def test_merge_never_runs_where_another_edition_would_be_rewritten(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "A Band").mkdir()
+    review = Path(a_review(tmp_path))
+    fake = merging(review, [], [merge_row("rel-other")])
+    with pytest.raises(I.ImportFailed, match="Keep both"):
+        I.Beets().apply(
+            fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
+        )
+    assert not [c for c in fake.calls if "import" in c]
+
+
+def test_merge_with_nothing_held_declines_an_edition_only_beets_can_see(
+    tmp_path: Path,
+) -> None:
+    """A release can be titled otherwise than the plan, so a question nobody foresaw is
+    answered with Skip, which leaves every file as it is, and never with Merge."""
+    (tmp_path / "A Band").mkdir()
+    review = Path(a_review(tmp_path))
+    fake = merging(review, [], [])
+    I.Beets().apply(
+        fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
+    )
+    assert fed_to_the_import(fake) == b"A\nS\n"
+
+
+def test_merge_beside_another_edition_joins_its_row_and_names_no_other(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "A Band").mkdir()
+    review = Path(a_review(tmp_path))
+    held = [merge_row("rel")]
+    fake = merging(review, held, [*held, merge_row("rel-other", title="Two")])
+    fake.expect(lambda a: "-a" in a and "ls" in a, stdout=b"2\n3\n")
+    fake.expect("album_id:2", stdout=b"/music/A Band/A Record/One.flac\n")
+    beets = I.Beets.with_override(tmp_path / "state")
+    done = beets.apply(
+        fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
+    )
+    assert fed_to_the_import(fake) == b"A\nK\n"
+    assert fake.argv_for("import")[2] == beets.no_art
+    assert any("the row already there" in n for n in done.notes)
+
+
+def test_an_album_that_arrived_cut_merges_by_the_same_rule(tmp_path: Path) -> None:
+    (tmp_path / "A Band").mkdir()
+    held = [merge_row("rel")]
+    fake = FakeRunner(installed={"beet"})
+    fake.expect("mb_albumid:rel", stdout="\n".join(held).encode())
+    fake.expect("album::", stdout="\n".join(held).encode())
+    I.Beets().take(
+        fake, str(tmp_path), str(tmp_path), mbid="rel", tracks=(), duplicates="merge"
+    )
+    assert fed_to_the_import(fake) == b"A\nM\nA\n"
+
+
+def test_another_edition_in_the_folder_was_once_called_not_in_the_library(
+    tmp_path: Path,
+) -> None:
+    album = tmp_path / "A Band" / "A Record"
+    album.mkdir(parents=True)
+    (album / "01 Mine.flac").write_bytes(b"fLaC")
+    (album / "01 Other.flac").write_bytes(b"fLaC")
+    (album / "02 Stray.flac").write_bytes(b"fLaC")
+    fake = FakeRunner().expect(
+        lambda a: "ls" in a and a[-1] == "mb_albumid:rel",
+        stdout=f"A Record{SEP}{album / '01 Mine.flac'}".encode(),
+    )
+    fake.expect(
+        lambda a: "ls" in a and a[-1] == f"path:{album}",
+        stdout="\n".join(
+            f"A Record{SEP}{album / n}" for n in ("01 Mine.flac", "01 Other.flac")
+        ).encode(),
+    )
+    spare = I.Beets().unregistered(
+        fake, str(tmp_path), "A Band", "A Record", mbid="rel"
+    )
+    assert [p.name for p in spare] == ["02 Stray.flac"]

@@ -1754,6 +1754,18 @@ acknowledges a duplicate is then asked what to do with it, because replacing,
 keeping both and merging are three different intentions and none of them is
 safe to assume.
 
+**Merge says what it does, and does only that.** Measured on 2.1.0, `A`, `M` ran out of input
+at the second apply a merge asks for, so a pinned Merge filed nothing, and with no release `M`
+meant keep both: lookup off has no step that acts on it, so a second album row, in a folder
+`Album [2]` under `%aunique`, and the owned tracks byte-identical. So with no release Merge is
+not offered and is refused, because the dialog cannot tell a person what beets will not do. With
+one it answers `A`, `M`, `A` when every row of the album is that release, and says that wrote
+their tags again. Beside another edition it joins that release's row by hand, as ADR-063 does for a
+tape, and those tracks do not change. With another edition held and none of this release, it
+refuses before anything runs, because merging renames, renumbers and retags it: Keep both is the
+way in. A release titled otherwise than the plan can hide an edition from that check, so with
+nothing held the answer to a question nobody foresaw is Skip. The ceiling moves 12,635 → 12,700.
+
 **An empty release id means no release.** The route read the dialog's field and
 fell back to the spec when it was blank. A first pass writes a release into the
 spec, so after one has run the field could not be cleared — clearing it put the

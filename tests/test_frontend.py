@@ -1705,3 +1705,16 @@ def test_a_warning_about_an_overlap_goes_when_the_overlap_does() -> None:
     helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'else if (saidOverlap) status("no tracks overlap now");' in helper
     assert "saidOverlap = !!over.length;" in helper
+
+
+def test_merge_is_not_offered_where_beets_has_nothing_to_merge_by() -> None:
+    """With no release, `M` made a second album entry under an option saying it added
+    to the one already there."""
+    js = (STATIC / "app.js").read_text()
+    state = js[js.index("function showCatalogueState()") :]
+    state = state[: state.index("\n}\n")]
+    assert "merge.disabled = noRelease" in state
+    assert '$("#imp-nomerge").hidden = !noRelease' in state
+    assert 'imp-dupes").value = "keep"' in state
+    dialog = markup()[markup().index('id="imp-nomerge"') :]
+    assert "another album entry" in dialog[: dialog.index("</p>")]
