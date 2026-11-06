@@ -455,7 +455,7 @@ async function openAlbum(slug) {
   loadReview();
   refreshAlignButton();
   refreshArchiveButton();
-  refreshCutRail();
+  refreshCutRail();             // the encode may have taken minutes
   markDirty(false);
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
          !!unprepared);
@@ -483,6 +483,7 @@ function showRecord() {
   loadPunchTracks();            // Punch follows the selection too
   cutAsked = { review: null, arc: null };
   showCutRail();
+  refreshCutRail();             // none of it waits on an encode either
 }
 
 function renderSideTabs() {
