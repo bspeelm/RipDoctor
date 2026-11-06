@@ -912,7 +912,8 @@ def test_nothing_was_said_of_a_lost_connection_until_a_press_gave_failed_to_fetc
     assert "if (e.status)" in fail and "lostContact()" in fail
     start = js.index("// ---" + "-" * 65 + " tapes")
     tapes = js[start : js.index("// ---" + "-" * 65 + " modes", start)]
-    assert '$("#tp-err").textContent = e.message;' not in tapes
+    assert tapes.count('$("#tp-err").textContent = e.message;') == 1
+    assert '$("#tp-err").textContent = e.message;' in fail
     beat = re.search(r"async function heartbeat\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'document.body.dataset.mode !== "tapes"' in beat
     assert "if (tpGone) regained();" in beat

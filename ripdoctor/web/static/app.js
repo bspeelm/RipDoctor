@@ -2914,7 +2914,7 @@ const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", 
 // An answer has a status, whatever it says. Anything else never got there, and that is
 // one message, which goes by itself, in place of a browser's words for it that stay.
 function tpFail(e) {
-  if (e.status) tpFail(e);
+  if (e.status) $("#tp-err").textContent = e.message;
   else lostContact();
 }
 
