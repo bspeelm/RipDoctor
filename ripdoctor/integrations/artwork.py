@@ -27,7 +27,12 @@ from pathlib import Path
 
 from ripdoctor.audio.runner import Runner
 from ripdoctor.integrations.musicbrainz import Fetcher, LookupFailed
-from ripdoctor.integrations.tagger import embed_art, has_art, set_modes
+from ripdoctor.integrations.tagger import (
+    embed_art,
+    has_art,
+    set_file_modes,
+    set_modes,
+)
 
 ARCHIVE = "https://coverartarchive.org"
 
@@ -280,7 +285,13 @@ def install(
             failed.append(f"{track.name}: {e}")
     # Embedding rewrites every track, and the cover is written here too, so
     # both land at the writer's umask and undo what the import set. ADR-056.
-    set_modes(directory, file_mode, dir_mode)
+    if only is None:
+        set_modes(directory, file_mode, dir_mode)
+    else:
+        try:
+            set_file_modes([*tracks, cover], file_mode)
+        except OSError as e:  # the art is in by now, which a refusal would deny
+            failed.append(f"its modes could not be set: {e}")
     return Installed(cover, final, done, tuple(failed), len(tracks))
 
 

@@ -9,6 +9,7 @@ report what is there so the archive gate has something to check.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,6 +81,17 @@ def set_modes(where: Path, file_mode: int, dir_mode: int) -> int:
     where.chmod(dir_mode)
     changed = 0
     for p in where.iterdir():
+        if p.is_file():
+            p.chmod(file_mode)
+            changed += 1
+    return changed
+
+
+def set_file_modes(files: Iterable[Path], file_mode: int) -> int:
+    """These files and nothing beside them, where a folder also holds what is not this
+    caller's to change. Returns how many were set."""
+    changed = 0
+    for p in files:
         if p.is_file():
             p.chmod(file_mode)
             changed += 1

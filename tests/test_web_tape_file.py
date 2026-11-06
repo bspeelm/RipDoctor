@@ -2248,6 +2248,67 @@ def test_a_cover_for_a_shared_folder_leaves_the_other_album_alone(
     assert beet_of(service).art.startswith(str(folder / "cover-"))
 
 
+def test_a_cover_changed_the_mode_of_a_neighbour_s_file_and_touches_only_its_own(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    folder = Path(one.path).parent
+    neighbour = folder / "99 Neighbour.flac"
+    neighbour.write_bytes(b"theirs")
+    neighbour.chmod(0o600)
+    their_cover = folder / "cover.jpg"
+    their_cover.write_bytes(b"their cover")
+    their_cover.chmod(0o640)
+    folder.chmod(0o2775)
+    assert covered(service, tape).status == 200
+    mode = service.settings.file_mode
+    assert stat.S_IMODE(neighbour.stat().st_mode) == 0o600
+    assert stat.S_IMODE(their_cover.stat().st_mode) == 0o640
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o2775
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == mode
+    assert stat.S_IMODE(Path(two.path).stat().st_mode) == mode
+    assert stat.S_IMODE(Path(beet_of(service).art).stat().st_mode) == mode
+
+
+def test_a_cover_that_could_not_set_a_mode_is_still_a_cover_and_says_so(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The art was in the files when the chmod failed: a 500 there left it embedded
+    with the song still saying it had none."""
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+
+    def refused(*_: object) -> None:
+        raise PermissionError("not the owner")
+
+    monkeypatch.setattr(Path, "chmod", refused)
+    answer = covered(service, tape)
+    assert answer.status == 200, answer.text
+    assert "its modes could not be set" in answer.json()["cover"]["failed"][0]
+    assert not any(s.no_cover for s in songs(service, tape))
+
+
+def test_a_folder_a_cover_cannot_be_written_in_is_a_plain_refusal_and_not_a_500(
+    service: Service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+
+    def refused(*_: object, **__: object) -> None:
+        raise PermissionError("no write access")
+
+    monkeypatch.setattr("ripdoctor.web.routes.art.ART.install", refused)
+    answer = covered(service, tape)
+    assert answer.status == 409
+    assert "the cover was not set: no write access" in answer.json()["error"]
+    assert all(s.no_cover for s in songs(service, tape))
+
+
 def test_an_image_that_is_not_one_is_refused_and_the_song_still_says_no_cover(
     service: Service,
 ) -> None:

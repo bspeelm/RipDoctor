@@ -561,6 +561,11 @@ def add(app: App, service: Service) -> None:
             ) from e
         except IMP.ImportFailed as e:
             raise H.HttpError(503, str(e)) from e
+        except (OSError, ToolFailed, RuntimeError) as e:
+            # Some files may have taken it by now, so what they hold is asked again.
+            library = service.settings.library
+            TJ.covers_known(service.runner, importer, layout, tape.id, library)
+            raise H.HttpError(409, f"the cover was not set: {e}") from e
 
     def given_cover(
         importer: IMP.Beets, tape: TP.Tape, song: TP.Song, image: bytes
@@ -583,6 +588,10 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(502, f"the cover did not embed: {'; '.join(done.failed)}")
         why = importer.set_art(service.runner, album, str(done.cover))
         said = {**done.as_dict(), "note": why}
+        if done.failed:
+            library = service.settings.library
+            TJ.covers_known(service.runner, importer, layout, tape.id, library)
+            return H.ok({**view(T.read(layout, tape.id)), "cover": said})
         return H.ok({**view_saved(TF.cover_given(tape, files)), "cover": said})
 
     def view_saved(changed: TP.Tape) -> dict[str, Any]:
