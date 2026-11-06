@@ -28,7 +28,7 @@ from tests.test_web_precut import upload as upload_album
 from tests.test_web_routes import get, post
 from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed, settle_all
 from tests.test_web_tape_file import Beet, cut_tape, file_it, holds, pinned
-from tests.test_web_tapes import a_service, a_tape_runner
+from tests.test_web_tapes import a_service, a_tape_runner, save_list
 
 KEYS = (
     "title",
@@ -1064,7 +1064,7 @@ def test_an_archived_tape_takes_no_new_audio_or_list(service: Service) -> None:
         app, f"/api/tapes/{tape}/upload/begin", service, {"name": "a", "size": 1}
     )
     assert begun.status == 409 and "archived" in begun.json()["error"]
-    listed = post(app, f"/api/tapes/{tape}/songs", service, {"songs": []})
+    listed = save_list(app, tape, service, [])
     assert listed.status == 409 and "archived" in listed.json()["error"]
 
 

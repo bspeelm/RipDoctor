@@ -90,6 +90,13 @@ def a_new_tape(app, service: Service, name: str = "Mix: Vol. 1") -> str:  # type
     return made.json()["id"]
 
 
+def save_list(app, tape: str, service: Service, rows: object, **more: object):  # type: ignore[no-untyped-def]
+    """A hand list, sent as a page does: saying which list it was made from."""
+    seen = get(app, f"/api/tapes/{tape}", service).json()["list_seen"]
+    body = {"songs": rows, "seen": seen, **more}
+    return post(app, f"/api/tapes/{tape}/songs", service, body)
+
+
 def send_csv(  # type: ignore[no-untyped-def]
     app, tape: str, service: Service, text: str = CSV, *, confirm: bool = False
 ) -> H.Response:
@@ -151,7 +158,7 @@ def test_a_csv_and_a_list_by_hand_write_the_same_document(service: Service) -> N
 
     assert send_csv(app, tape, service).status == 200
     from_file = document.read_text()
-    answer = post(app, f"/api/tapes/{tape}/songs", service, {"songs": BY_HAND})
+    answer = save_list(app, tape, service, BY_HAND)
     assert answer.status == 200, answer.text
     assert document.read_text() == from_file
 
@@ -166,7 +173,7 @@ def test_a_list_from_a_csv_stays_editable(service: Service) -> None:
         loaded[1],
         loaded[0],
     ]
-    answer = post(app, f"/api/tapes/{tape}/songs", service, {"songs": edited})
+    answer = save_list(app, tape, service, edited)
     assert [(s["number"], s["title"]) for s in answer.json()["songs"]] == [
         (1, "Three"),
         (2, 'Two, Part "B"'),
@@ -201,10 +208,28 @@ def test_a_list_that_is_not_utf8_says_so(service: Service) -> None:
     assert "UTF-8" in refused.json()["error"]
 
 
+def test_a_stale_page_reverted_a_row_and_is_refused_with_nothing_changed(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = a_new_tape(app, service)
+    send_csv(app, tape, service)
+    seen = get(app, f"/api/tapes/{tape}", service).json()["list_seen"]
+    newer = [{**BY_HAND[0], "title": "Newer"}, BY_HAND[1]]
+    assert save_list(app, tape, service, newer).status == 200
+    held = T.read(service.layout, tape)
+    for said in ({"seen": seen}, {}):
+        old = post(app, f"/api/tapes/{tape}/songs", service, {"songs": BY_HAND, **said})
+        assert old.status == 409
+        assert old.json()["stale"] is True
+        assert "has changed since this page loaded it" in old.json()["error"]
+    assert T.read(service.layout, tape) == held
+
+
 def test_a_hand_list_of_the_wrong_shape_is_a_refusal(service: Service) -> None:
     app = build(service)
     tape = a_new_tape(app, service)
-    assert post(app, f"/api/tapes/{tape}/songs", service, {"songs": "x"}).status == 400
+    assert save_list(app, tape, service, "x").status == 400
 
 
 def test_a_new_list_is_refused_over_an_ear_set_boundary(service: Service) -> None:
@@ -215,7 +240,7 @@ def test_a_new_list_is_refused_over_an_ear_set_boundary(service: Service) -> Non
     ear = replace(saved.songs[0], start=0.0, end=5.0, set_by=TP.EAR)
     T.save(service.layout, replace(saved, songs=(ear, saved.songs[1])))
     more = [*BY_HAND, {"title": "More", "artist": "A", "length": "3:00"}]
-    refused = post(app, f"/api/tapes/{tape}/songs", service, {"songs": more})
+    refused = save_list(app, tape, service, more)
     assert refused.status == 409
     assert "which audio belongs to which song" in refused.json()["error"]
     assert send_csv(app, tape, service, confirm=True).status == 409
@@ -286,7 +311,7 @@ def test_a_length_too_large_to_hold_is_a_400(service: Service) -> None:
     app = build(service)
     tape = a_new_tape(app, service)
     song = {"title": "O", "artist": "A", "album": "R", "length": 10**400}
-    refused = post(app, f"/api/tapes/{tape}/songs", service, {"songs": [song]})
+    refused = save_list(app, tape, service, [song])
     assert refused.status == 400
     assert "length" in refused.json()["error"]
 
@@ -391,7 +416,7 @@ def test_a_list_that_does_not_fit_is_saved_as_a_mismatch(service: Service) -> No
     app = build(service)
     tape = a_new_tape(app, service)
     songs = [{"title": "Long", "artist": "A", "album": "R", "length": "9:00"}]
-    post(app, f"/api/tapes/{tape}/songs", service, {"songs": songs})
+    save_list(app, tape, service, songs)
     upload(app, tape, service)
     result = process(app, tape, service)
     assert result["mismatch"]
@@ -404,7 +429,7 @@ def test_a_song_spanning_a_silence_carries_its_reason_in_the_document(
     app = build(service)
     tape = a_new_tape(app, service)
     songs = [{"title": "Whole", "artist": "A", "album": "R", "length": "0:10"}]
-    post(app, f"/api/tapes/{tape}/songs", service, {"songs": songs})
+    save_list(app, tape, service, songs)
     upload(app, tape, service)
     result = process(app, tape, service)
     assert result["songs"][0]["verdict"] == TP.DOUBT
@@ -449,7 +474,7 @@ def test_a_change_under_way_refuses_a_job_and_another_change(service: Service) -
     tape = a_ready_tape(app, service)
     with service.jobs.claim(T.key_of(tape), "a change"):
         assert post(app, f"/api/tapes/{tape}/process", service).status == 409
-        changed = post(app, f"/api/tapes/{tape}/songs", service, {"songs": BY_HAND})
+        changed = save_list(app, tape, service, BY_HAND)
         assert changed.status == 409
     process(app, tape, service)
 
@@ -464,9 +489,7 @@ def test_a_list_changed_just_before_a_job_starts_was_lost_and_is_now_used(
     def after_a_change(*args):  # type: ignore[no-untyped-def]
         monkeypatch.setattr(service.jobs, "start", start)
         new = [{**BY_HAND[0], "title": "Newer"}, BY_HAND[1]]
-        assert (
-            post(app, f"/api/tapes/{tape}/songs", service, {"songs": new}).status == 200
-        )
+        assert save_list(app, tape, service, new).status == 200
         return start(*args)
 
     monkeypatch.setattr(service.jobs, "start", after_a_change)
@@ -530,7 +553,7 @@ def test_a_restart_finds_the_tape_and_can_process_it_again(
     assert found["songs"][0]["verdict"] == TP.AGREES
 
     edited = [{**BY_HAND[0], "length": "0:06"}, BY_HAND[1]]
-    post(app, f"/api/tapes/{tape}/songs", after, {"songs": edited})
+    save_list(app, tape, after, edited)
     again = process(app, tape, after)
     assert again["songs"][0]["delta"] == -1.0
     assert not any(c[0] == "flac" for c in after.runner.calls)  # type: ignore[attr-defined]

@@ -16,7 +16,7 @@ from ripdoctor.web.routes import build
 from ripdoctor.web.service import Service
 from tests.test_web_routes import a_service, get, post
 from tests.test_web_tape_cut import TWO, placed
-from tests.test_web_tapes import a_tape_runner, seeing, send_csv
+from tests.test_web_tapes import a_tape_runner, save_list, seeing, send_csv
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def rows_of(service: Service, tape: str) -> list[dict[str, Any]]:
 
 
 def send(app, service: Service, tape: str, rows: list[dict[str, Any]], **more: object):  # type: ignore[no-untyped-def]
-    return post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows, **more})
+    return save_list(app, tape, service, rows, **more)
 
 
 def edges(service: Service, tape: str) -> list[tuple[float | None, float | None]]:

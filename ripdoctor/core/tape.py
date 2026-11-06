@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 import math
 import re
 import unicodedata
@@ -636,6 +638,13 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
 
 def _said(song: Song) -> tuple[str, str, str, float]:
     return song.title, song.artist, song.album, song.length
+
+
+def list_digest(tape: Tape) -> str:
+    """The list as it stands, which a save names as what it was made from: a whole list
+    sent from a page left open would otherwise put back whatever has changed since."""
+    said = json.dumps([_said(s) for s in tape.songs], ensure_ascii=False)
+    return hashlib.sha256(said.encode()).hexdigest()[:16]
 
 
 def only_edits(tape: Tape, songs: tuple[Song, ...]) -> bool:

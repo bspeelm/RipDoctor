@@ -16,7 +16,7 @@ from ripdoctor.web.service import Service
 from tests.test_web_routes import a_service, get, post
 from tests.test_web_tape_cut import TWO, Cutting, cuts_sent, placed
 from tests.test_web_tape_match import Catalogue, Clock, an_edition
-from tests.test_web_tapes import a_new_tape, a_tape_runner, send_csv, upload
+from tests.test_web_tapes import a_new_tape, a_tape_runner, save_list, send_csv, upload
 
 
 def both_songs() -> list[dict[str, object]]:
@@ -215,7 +215,7 @@ def test_a_text_edit_owes_a_lookup_and_nothing_else(
         for s in before.songs
     ]
     rows[1]["album"] = "Another Record"
-    assert post(app, f"/api/tapes/{tape}/songs", service, {"songs": rows}).status == 200
+    assert save_list(app, tape, service, rows).status == 200
     assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is True
     catalogue.calls.clear()
     assert not prepared(app, service, tape)["error"]

@@ -20,7 +20,7 @@ from tests.test_web_routes import a_service, get, post
 from tests.test_web_tape_cut import Cutting, cut, job_of, placed
 from tests.test_web_tape_file import Beet
 from tests.test_web_tape_match import Catalogue, Clock, an_edition, row, statuses
-from tests.test_web_tapes import a_tape_runner
+from tests.test_web_tapes import a_tape_runner, save_list
 
 
 def a_release(
@@ -82,10 +82,7 @@ def beet_of(service: Service) -> Beet:
 
 def a_tape(app, service: Service, *rows: dict[str, str]) -> str:  # type: ignore[no-untyped-def]
     tape = post(app, "/api/tapes", service, {"name": "Mix"}).json()["id"]
-    assert (
-        post(app, f"/api/tapes/{tape}/songs", service, {"songs": list(rows)}).status
-        == 200
-    )
+    assert save_list(app, tape, service, list(rows)).status == 200
     return tape
 
 

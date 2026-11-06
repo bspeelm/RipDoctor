@@ -484,7 +484,7 @@ def test_a_row_s_words_go_through_the_list_route_with_what_it_warns() -> None:
     body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "await flushNudge();" in body
     assert "e.needsConfirm" in body and "confirm: true" in body
-    assert "postJSON(url, { songs })" in body
+    assert "{ songs, seen }" in body
     assert '$("#tp-err").textContent = e.message' in body
 
 
@@ -537,9 +537,9 @@ def test_a_job_button_waits_for_the_edit_its_click_sent() -> None:
     for button in ("processTape", "matchTape"):
         said = re.search(rf"const {button} = .*", js).group(0)  # type: ignore[union-attr]
         assert "startTapeJob(" in said
-    send = re.search(r"async function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    send = re.search(r"function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tpListSaved = " in send
-    assert "saveList(songs, openAfter, sure)" in send
+    assert "saveList(build()" in send
 
 
 def test_a_file_chosen_over_boundaries_is_asked_about_too() -> None:
@@ -682,3 +682,21 @@ def test_a_note_choice_said_twice_still_sends_its_recording() -> None:
 def test_find_again_is_not_offered_while_it_would_be_refused() -> None:
     source = (STATIC / "app.js").read_text()
     assert "!canFind || !!t.place_refusal" in source
+
+
+def test_a_second_field_saved_quickly_is_built_from_what_the_first_left() -> None:
+    """A list built when the field was left was stale by the time the one before it had
+    answered, and would be refused."""
+    js = (STATIC / "app.js").read_text()
+    send = re.search(r"function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpListSaved.then(() => saveList(build()" in send
+    field = re.search(r"function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "sendList(() => {" in field
+    assert "listNow()" in field.split("sendList(() => {")[1]
+
+
+def test_a_stale_list_loads_the_tape_as_it_stands_and_says_why() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (e.stale)" in body
+    assert "await reloadTape();" in body

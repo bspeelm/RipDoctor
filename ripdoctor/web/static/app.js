@@ -22,6 +22,7 @@ async function api(path, opts = {}) {
     const e = new Error(body?.error || `${r.status} ${r.statusText}`);
     e.status = r.status;
     e.needsConfirm = !!body?.needs_confirm;
+    e.stale = !!body?.stale;
     throw e;
   }
   return body;
@@ -1661,30 +1662,40 @@ const listNow = () => tape.songs.map((s) => ({ title: s.title, artist: s.artist,
 // click that blurs an edited field sends the edit first, and the job has to see it.
 let tpListSaved = Promise.resolve();
 
-async function sendList(songs, openAfter, sure = false) {
-  let saved;
-  tpListSaved = new Promise((r) => { saved = r; });
-  try { return await saveList(songs, openAfter, sure); } finally { saved(); }
+// One at a time, each built from the tape the last one left, since the route refuses a
+// list made from one it no longer holds. `seen` is for a list asked about earlier.
+function sendList(build, openAfter, sure = false, seen = null) {
+  const turn = tpListSaved.then(() => saveList(build(), openAfter, sure, seen ?? tape.list_seen));
+  tpListSaved = turn.catch(() => false);
+  return turn;
 }
 
-async function saveList(songs, openAfter, sure) {
+async function saveList(songs, openAfter, sure, seen) {
   $("#tp-err").textContent = "";
   waveSay("");
   await flushNudge();
   const url = `/api/tapes/${tape.id}/songs`;
   try {
-    const after = sure ? await postJSON(url, { songs, confirm: true }) : await postJSON(url, { songs });
+    const after = await postJSON(url, sure ? { songs, seen, confirm: true } : { songs, seen });
     tpOpen = openAfter;
     tpRows.clear();
     showTape(after);
     await loadTapes(tape.id);
     return true;
   } catch (e) {
-    if (e.needsConfirm) tpListAsk = { said: e.message, songs, openAfter };
+    if (e.stale) {
+      tpListAsk = null;
+      await reloadTape();
+    }
+    if (e.needsConfirm) tpListAsk = { said: e.message, songs, openAfter, seen };
     else $("#tp-err").textContent = e.message;
     showSongs(tape);
     return false;
   }
+}
+
+async function reloadTape() {
+  try { showTape(await api(`/api/tapes/${tape.id}`)); } catch { /* the reason being said still stands, and the page keeps what it last knew */ }
 }
 
 // Asked in the row that pressed it: the answer belongs beside the button.
@@ -1697,34 +1708,41 @@ function askView(said, yes, onYes, onNo) {
 }
 
 function listAskView() {
-  const { said, songs, openAfter } = tpListAsk;
+  const { said, songs, openAfter, seen } = tpListAsk;
   const plain = said.charAt(0).toUpperCase() + said.slice(1);
   return askView(`${plain}.`, "Go ahead", async () => {
     tpListAsk = null;
     const draft = tpDraft;
     tpDraft = null;
-    if (!await sendList(songs, openAfter, true)) { tpDraft = draft; showTape(tape); }
+    if (!await sendList(() => songs, openAfter, true, seen)) { tpDraft = draft; showTape(tape); }
   }, () => { tpListAsk = null; showSongs(tape); });
 }
 
 function editField(song, input) {
-  const songs = listNow();
-  const name = input.dataset.field;
-  songs[song.number - 1][name] = input.value;
-  sendList(songs, song.number);
+  const name = input.dataset.field, value = input.value;
+  sendList(() => {
+    const songs = listNow();
+    songs[song.number - 1][name] = value;
+    return songs;
+  }, song.number);
 }
 
 function moveSong(song, by) {
-  const songs = listNow(), to = song.number - 1 + by;
-  if (to < 0 || to >= songs.length) return;
-  songs.splice(to, 0, songs.splice(song.number - 1, 1)[0]);
-  sendList(songs, to + 1);
+  const to = song.number - 1 + by;
+  if (to < 0 || to >= tape.songs.length) return;
+  sendList(() => {
+    const songs = listNow();
+    songs.splice(to, 0, songs.splice(song.number - 1, 1)[0]);
+    return songs;
+  }, to + 1);
 }
 
 function removeSong(song) {
-  const songs = listNow();
-  songs.splice(song.number - 1, 1);
-  sendList(songs, null);
+  sendList(() => {
+    const songs = listNow();
+    songs.splice(song.number - 1, 1);
+    return songs;
+  }, null);
 }
 
 function edgesFromRow(song, box) {
@@ -2167,7 +2185,7 @@ async function addDraft() {
   const number = tape.songs.length + 1;
   const draft = tpDraft;
   tpDraft = null;
-  if (!await sendList([...listNow(), draft], number)) { tpDraft = draft; showTape(tape); }
+  if (!await sendList(() => [...listNow(), draft], number)) { tpDraft = draft; showTape(tape); }
 }
 
 function showSongs(t) {

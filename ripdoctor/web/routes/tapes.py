@@ -173,6 +173,7 @@ def add(app: App, service: Service) -> None:
             "job": None if job is None else job.as_dict(),
             "chunk": CHUNK,
             "all_settled": TP.all_settled(tape),
+            "list_seen": TP.list_digest(tape),
             "prepare_needed": wanted_ready(tape),
             "place_refusal": TP.place_refusal(tape),
             "ear": ear_rows(tape),
@@ -280,12 +281,19 @@ def add(app: App, service: Service) -> None:
     @settled
     def songs(r: H.Request, tape: TP.Tape) -> H.Response:
         """The whole list by hand; adding, editing and reordering all send this. A row
-        changed where it stands keeps its boundaries; anything else is a new list."""
+        changed where it stands keeps its boundaries; anything else is a new list.
+        `seen` is the digest of the list the sender last had."""
         body = r.json()
         try:
             songs = TP.songs_from(body.get("songs"))
         except TP.BadList as e:
             raise H.HttpError(400, str(e)) from e
+        if body.get("seen") != TP.list_digest(tape):
+            said = (
+                f"the list on {tape.name} has changed since this page loaded it, and "
+                "nothing was saved - here it is as it stands now"
+            )
+            return H.ok({"error": said, "stale": True}, 409)
         if TP.only_edits(tape, songs):
             return with_edits(tape, songs)
         return with_list(tape, songs, body.get("confirm") is True)
