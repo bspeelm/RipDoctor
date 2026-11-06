@@ -1199,6 +1199,16 @@ let tpJobStep = null;                 // the rail's step a running job belongs t
 let tpLanded = null;                  // the tape a song has been selected on
 let tpListAsk = null;                 // a list waiting to be said twice
 const tpRows = new Map();             // what a row remembers across a redraw of the table
+let tpKeys = [];                      // each row's key, by place, which a move carries along
+let tpKeyed = null;                   // the list those keys are for
+let tpNewKey = 0;
+const tpUnsent = new Map();           // "key/field" -> text sent and not yet known to be saved
+let tpHeldBack = false;               // the last save neither landed nor was refused
+let tpRedrawing = false;              // inputs leaving the page now are not a person leaving them
+let tpWatchOp = "";                   // the job being watched
+let tpSaving = false;                 // a list is on its way, so what the page holds is about to change
+let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
+const tpFail = (e) => { $("#tp-err").textContent = e.message; };
 
 const mss = (seconds) => {
   const whole = Math.round(seconds);
@@ -1234,7 +1244,7 @@ async function loadTapes(keep) {
 async function openTape(id) {
   try {
     await flushNudge();
-    if (tape?.id !== id) { tpOpen = null; tpDraft = null; tpLanded = null; tpListAsk = null; tpRows.clear(); }
+    if (tape?.id !== id) { tpOpen = null; tpDraft = null; tpLanded = null; tpListAsk = null; tpRows.clear(); tpKeyed = null; tpUnsent.clear(); }
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
     else if (!$("#tp-err").textContent) $("#tp-err").textContent = tape.job?.error || tape.prepare_failed;
@@ -1257,9 +1267,20 @@ function showNaming(on) {
   if (on) $("#tp-name").focus();
 }
 
+// A row's place changes when a song moves, so what was pressed or typed on a row is held
+// by its key until its turn comes. These are the page's: the server knows only places.
+function keyRows(t) {
+  if (tpSaving || (tpKeyed === t.list_seen && tpKeys.length === t.songs.length)) return;
+  tpKeys = t.songs.map(() => ++tpNewKey);
+  tpKeyed = t.list_seen;
+}
+const keyOf = (number) => tpKeys[number - 1];
+const numberOf = (key) => tpKeys.indexOf(key) + 1;
+
 function showTape(t) {
   tape = t;
   if (t) remember("rd-tape", t.id);
+  if (t) keyRows(t);
   const naming = !t || tpNaming;
   $("#tp-new-form").hidden = !naming;
   $("#tp-new-cancel").hidden = !t;
@@ -1678,14 +1699,15 @@ function fieldInput(label, name, value, wide) {
 
 // Edits are the whole list by hand, to the route that takes it, so what the route
 // says about a list holds for each edit and the page never holds unsaved text.
-const listNow = () => tape.songs.map((s) => ({ title: s.title, artist: s.artist, album: s.album, length: s.length }));
+const listNow = () => tape.songs.map((s, i) => ({ key: tpKeys[i], title: s.title, artist: s.artist, album: s.album, length: s.length }));
 
 // What the route says decides whether anything is lost. A job button waits for this: a
 // click that blurs an edited field sends the edit first, and the job has to see it.
 let tpListSaved = Promise.resolve();
 
 // One at a time, each built from the tape the last one left, since the route refuses a
-// list made from one it no longer holds. `seen` is for a list asked about earlier.
+// list made from one it no longer holds. `seen` is for a list asked about earlier. The
+// open row stays the open row wherever this leaves it, unless `openAfter` names another.
 function sendList(build, openAfter, sure = false, seen = null) {
   tpActing += 1;
   const turn = tpListSaved.then(() => saveList(build(), openAfter, sure, seen ?? tape.list_seen));
@@ -1693,26 +1715,45 @@ function sendList(build, openAfter, sure = false, seen = null) {
   return turn;
 }
 
-async function saveList(songs, openAfter, sure, seen) {
+// Everything a row sends takes its turn with the rest, or a press would meet the save a
+// click just caused, or be built from a song's place before a move.
+function rowTurn(work) {
+  tpActing += 1;
+  const turn = tpListSaved.then(work);
+  tpListSaved = turn.catch(() => false).finally(() => { tpActing -= 1; });
+  return turn;
+}
+
+async function saveList(rows, openAfter, sure, seen) {
   $("#tp-err").textContent = "";
   waveSay("");
   await flushNudge();
   const url = `/api/tapes/${tape.id}/songs`;
+  const songs = rows.map(({ key, ...song }) => song);
+  tpHeldBack = false;
+  tpSaving = true;
   try {
     const after = await postJSON(url, sure ? { songs, seen, confirm: true } : { songs, seen });
-    tpOpen = openAfter;
+    const open = openAfter ?? keyOf(tpOpen);
+    tpSaving = false;
+    tpSaves += 1;
+    tpKeys = rows.map((r) => r.key);
+    tpKeyed = after.list_seen;
+    tpOpen = numberOf(open) || null;
     tpRows.clear();
     tpStopped.delete(tape.id);
     showTape(after);
     await loadTapes(tape.id);
     return true;
   } catch (e) {
+    tpSaving = false;
     if (e.stale) {
       tpListAsk = null;
       await reloadTape();
     }
-    if (e.needsConfirm) tpListAsk = { said: e.message, songs, openAfter, seen, row: tpOpen };
-    else $("#tp-err").textContent = e.message;
+    tpHeldBack = e.busy || !e.status;
+    if (e.needsConfirm) tpListAsk = { said: e.message, songs: rows, openAfter, seen, row: tpOpen };
+    else tpFail(e);
     showSongs(tape);
     return false;
   }
@@ -1742,54 +1783,80 @@ function listAskView() {
   }, () => { tpListAsk = null; showSongs(tape); });
 }
 
-function editField(song, input) {
+// Once, when the person has left the field with something different in it. What a refusal
+// turned down goes back to the truth; what could not be asked yet stays on the row and is
+// sent again when it can be.
+async function editField(key, input) {
   const name = input.dataset.field, value = input.value;
+  const held = `${key}/${name}`;
   input.dataset.saved = value;
-  sendList(() => {
+  tpUnsent.set(held, value);
+  const saved = await sendList(() => {
     const songs = listNow();
-    songs[song.number - 1][name] = value;
+    const row = songs.find((s) => s.key === key);
+    if (row) row[name] = value;
     return songs;
-  }, song.number);
+  });
+  if (!saved && tpHeldBack) { showSongs(tape); return; }
+  tpUnsent.delete(held);
+  if (!saved) showSongs(tape);
 }
 
-function moveSong(song, by) {
-  const to = song.number - 1 + by;
-  if (to < 0 || to >= tape.songs.length) return;
-  sendList(() => {
-    const songs = listNow();
-    songs.splice(to, 0, songs.splice(song.number - 1, 1)[0]);
-    return songs;
-  }, to + 1);
+function leftField(key, input) {
+  if (!tpRedrawing && input.value !== input.dataset.saved) editField(key, input);
 }
 
-function removeSong(song) {
-  sendList(() => {
-    const songs = listNow();
-    songs.splice(song.number - 1, 1);
-    return songs;
-  }, null);
+function sendUnsent() {
+  for (const [held, value] of [...tpUnsent]) {
+    const [key, field] = held.split("/");
+    editField(Number(key), { dataset: { field }, value });
+  }
 }
 
-function edgesFromRow(song, box) {
+// By the key: pressed twice, or behind a save, it goes on moving the song it was pressed
+// for, where a place would swap whichever song had just arrived there.
+function moveSong(key, by) {
+  sendList(() => {
+    const songs = listNow();
+    const from = songs.findIndex((s) => s.key === key);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= songs.length) return songs;
+    songs.splice(to, 0, songs.splice(from, 1)[0]);
+    return songs;
+  });
+}
+
+function removeSong(key) {
+  sendList(() => listNow().filter((s) => s.key !== key));
+}
+
+function edgesFromRow(key, box) {
   const edge = (name) => box.querySelector(`input[data-edge=${name}]`).value.trim();
   if (!edge("start") || !edge("end")) {
     waveSay("");
-    $("#tp-err").textContent = `song ${song.number}: both edges need a number of seconds - a blank one is not 0`;
+    $("#tp-err").textContent = `song ${numberOf(key)}: both edges need a number of seconds - a blank one is not 0`;
     showSongs(tape);
     return;
   }
   const [start, end] = [Number(edge("start")), Number(edge("end"))];
-  saveTapeEdges(song.number, start, end);
+  rowTurn(() => saveTapeEdges(numberOf(key), start, end));
 }
 
 function edgeInput(song, name, label, box) {
   const wrap = el("label", null, label);
   const input = el("input");
+  const key = keyOf(song.number);
   input.type = "number"; input.step = "0.01"; input.min = "0";
   input.dataset.edge = name;
   input.dataset.field = name;
   input.value = song[name];
-  input.onchange = () => { input.dataset.saved = input.value; edgesFromRow(song, box); };
+  const leave = () => {
+    if (tpRedrawing || input.value === input.dataset.saved) return;
+    input.dataset.saved = input.value;
+    edgesFromRow(key, box);
+  };
+  input.onblur = leave;
+  input.onkeydown = (e) => { if (e.key === "Enter") leave(); };
   wrap.append(input);
   return wrap;
 }
@@ -1806,12 +1873,18 @@ function smallButton(text, title, act, cls = "ghost tiny") {
 // Answers replace the page's rows, and a pending nudge belongs to the row it left. A
 // refusal that only wants saying twice is handed back, to be asked where it was pressed.
 async function settleSong(send, onAsk) {
-  $("#tp-err").textContent = "";
-  await flushNudge();
-  try { showTape(await send({})); } catch (e) {
-    if (e.needsConfirm && onAsk) onAsk(e);
-    else $("#tp-err").textContent = e.message;
-  }
+  return rowTurn(async () => {
+    $("#tp-err").textContent = "";
+    await flushNudge();
+    try {
+      const after = await send({});
+      tpSaves += 1;
+      showTape(after);
+    } catch (e) {
+      if (e.needsConfirm && onAsk) onAsk(e);
+      else tpFail(e);
+    }
+  });
 }
 
 const SHOWN_OPTIONS = 4;
@@ -1824,10 +1897,10 @@ function farWords(song, o) {
 
 function chooseRelease(song, release, o, more = {}) {
   const state = rowState(song.number);
-  const url = `/api/tapes/${tape.id}/songs/${song.number}/release`;
+  const key = keyOf(song.number);
   state.ask = null;
   state.open = false;
-  return settleSong((extra) => postJSON(url, { release, ...more, ...extra }), (e) => {
+  return settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`, { release, ...more, ...extra }), (e) => {
     state.ask = { release, said: (o && farWords(song, o)) || `${e.message}.`, more };
     showSongs(tape);
   });
@@ -1865,10 +1938,11 @@ function optionLine(song, o, kind) {
     el("span", "tp-opt-lib", o.in_library ? "In your library" : ""));
   box.append(go);
   if (state.ask?.release === o.release && (state.ask.more?.recording ?? "") === (o.recording ?? "")) {
+    const key = keyOf(song.number);
     box.append(askView(state.ask.said, "Use it", () => {
       const { more } = state.ask;
       state.ask = null;
-      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/release`,
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
         { release: o.release, ...more, ...extra, confirm: true }));
     }, () => { state.ask = null; showSongs(tape); }));
   }
@@ -1889,7 +1963,7 @@ async function runSearch(song, title, artist) {
     showTape(await api(`/api/tapes/${tape.id}`));
   } catch (e) {
     state.said = "";
-    $("#tp-err").textContent = e.message;
+    tpFail(e);
     showSongs(tape);
   }
 }
@@ -1929,10 +2003,11 @@ function byIdForm(song) {
     () => chooseRelease(song, id.value, null, { track: track.value })));
   const state = rowState(song.number);
   if (state.ask && !state.ask.said.endsWith("anyway?")) {
+    const key = keyOf(song.number);
     by.append(askView(state.ask.said, "Use it", () => {
       const { release, more } = state.ask;
       state.ask = null;
-      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/release`,
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
         { release, ...more, ...extra, confirm: true }));
     }, () => { state.ask = null; showSongs(tape); }));
   }
@@ -1942,7 +2017,7 @@ function byIdForm(song) {
 function releaseOptions(song, rel) {
   const change = el("div", "tp-release");
   const state = rowState(song.number);
-  const fromList = `/api/tapes/${tape.id}/songs/${song.number}/from-list`;
+  const key = keyOf(song.number);
   const current = song.proposal?.choice;
   const others = rel?.options ?? [];
   const isCurrent = (c) => current && c.release === current.release && c.recording === current.recording;
@@ -1972,7 +2047,7 @@ function releaseOptions(song, rel) {
   const quiet = el("div", "tp-rel-quiet");
   if (song.settled_by || !others.length || song.proposal) {
     quiet.append(smallButton("File from my list", "tag this song from the list, with no release",
-      () => settleSong(() => postJSON(fromList, {})), "tp-quiet"));
+      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/from-list`, {})), "tp-quiet"));
   }
   quiet.append(smallButton("Use a release id", "name a release the search did not find",
     () => { state.byId = !state.byId; showSongs(tape); }, "tp-quiet"));
@@ -2010,9 +2085,10 @@ function editionNoteView(song, note) {
   box.append(choices);
   const asked = note.choices.find((c) => c.release === state.ask?.release);
   if (asked) {
+    const key = keyOf(song.number);
     box.append(askView(state.ask.said, "Use it", () => {
       state.ask = null;
-      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/release`,
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
         { release: asked.release, recording: asked.recording, ...extra, confirm: true }));
     }, () => { state.ask = null; showSongs(tape); }));
   }
@@ -2068,8 +2144,9 @@ function releaseBlock(song, t) {
 // The playlist is written from what filing recorded, so once anything is filed it is
 // told straight away.
 function useCopyButton(o) {
+  const key = keyOf(o.number);
   return smallButton("Use it", "this is the song, and it needs no filing", async () => {
-    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${o.number}/use-copy`, { path: o.unconfirmed }));
+    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/use-copy`, { path: o.unconfirmed }));
     const started = tape.filing.some((f) => f.state !== "pending" && f.state !== "skipped");
     if (!$("#tp-err").textContent && started) writePlaylist();
   }, "tiny");
@@ -2126,9 +2203,12 @@ function songOpenView(song, row, t) {
   td.colSpan = 7;
   const box = el("div", "tp-open-box");
   const fields = el("div", "tp-fields");
+  const key = keyOf(song.number);
+  tr.dataset.key = key;
   const edit = (label, name, value, wide) => {
     const [wrap, input] = fieldInput(label, name, value, wide);
-    input.onchange = () => editField(song, input);
+    input.onblur = () => leftField(key, input);
+    input.onkeydown = (e) => { if (e.key === "Enter") leftField(key, input); };
     fields.append(wrap);
   };
   edit("Title", "title", song.title, true);
@@ -2139,11 +2219,12 @@ function songOpenView(song, row, t) {
     fields.append(edgeInput(song, "start", "Start (s)", box), edgeInput(song, "end", "End (s)", box));
   }
   const moves = el("div", "tp-moves");
-  moves.append(smallButton("↑", "move up", () => moveSong(song, -1)),
-               smallButton("↓", "move down", () => moveSong(song, 1)),
-               smallButton("Remove", "take off the list", () => removeSong(song), "ghost tiny tp-danger"));
+  moves.append(smallButton("↑", "move up", () => moveSong(key, -1)),
+               smallButton("↓", "move down", () => moveSong(key, 1)),
+               smallButton("Remove", "take off the list", () => removeSong(key), "ghost tiny tp-danger"));
   fields.append(moves);
   box.append(fields);
+  if ([...tpUnsent.keys()].some((held) => held.startsWith(`${key}/`))) box.append(el("p", "dim", unsentWords()));
   if (tpListAsk?.row === song.number) box.append(listAskView());
 
   const said = song.reason || (row?.doubtful ? MISMATCH_SAYS : "");
@@ -2209,10 +2290,10 @@ function startDraft() {
 }
 
 async function addDraft() {
-  const number = tape.songs.length + 1;
+  const key = ++tpNewKey;
   const draft = tpDraft;
   tpDraft = null;
-  if (!await sendList(() => [...listNow(), draft], number)) {
+  if (!await sendList(() => [...listNow(), { ...draft, key }], key)) {
     tpDraft = draft;
     if (tpListAsk) tpListAsk.row = "draft";
     showTape(tape);
@@ -2222,12 +2303,15 @@ async function addDraft() {
 // A redraw rebuilds every input, so what is being typed goes back afterwards: a job's
 // progress or the save of the field before must not take it. A field is unsaved from
 // the first key to when it is left, which sends it, and a refusal then shows the truth.
+// Taking a focused input off the page makes a browser say it was left, which it was not,
+// so `tpRedrawing` says otherwise for that moment.
 function typedInRows() {
   const typed = [];
   for (const input of $("#tp-rows").querySelectorAll("tr[data-open] input[data-field]")) {
     const focused = document.activeElement === input;
     if (focused || input.value !== input.dataset.saved) {
-      typed.push({ row: input.closest("tr").dataset.open, field: input.dataset.field, value: input.value, focused,
+      const row = input.closest("tr");
+      typed.push({ row: row.dataset.key ?? row.dataset.open, field: input.dataset.field, value: input.value, focused,
                    at: focused && input.type === "text" ? [input.selectionStart, input.selectionEnd] : null });
     }
   }
@@ -2236,8 +2320,14 @@ function typedInRows() {
 
 function putBackTyped(typed) {
   for (const input of $("#tp-rows").querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
+  for (const [held, value] of tpUnsent) {
+    const [key, field] = held.split("/");
+    const input = $("#tp-rows").querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
+    if (input) input.value = value;
+  }
   for (const was of typed) {
-    const input = $("#tp-rows").querySelector(`tr[data-open="${was.row}"] input[data-field="${was.field}"]`);
+    const row = was.row === "draft" ? `[data-open="draft"]` : `[data-key="${was.row}"]`;
+    const input = $("#tp-rows").querySelector(`tr${row} input[data-field="${was.field}"]`);
     if (!input) continue;
     input.value = was.value;
     if (!was.focused) continue;
@@ -2258,7 +2348,9 @@ function showSongs(t) {
     if (tpOpen === song.number) rows.push(songOpenView(song, row, t));
   }
   if (tpDraft) rows.push(draftRowView());
+  tpRedrawing = true;
   $("#tp-rows").replaceChildren(...rows);
+  tpRedrawing = false;
   $("#tp-add").hidden = !!tpDraft;
   putBackTyped(typed);
   $("#tp-rows").querySelector(".tp-ask")?.scrollIntoView({ block: "nearest" });
@@ -2318,7 +2410,7 @@ async function loadTapeWave(t, drawn) {
 }
 
 function showTapeWave(t) {
-  tpEd.frozen = tapeWatching || t.playlist.done;
+  tpEd.frozen = tapeHeld() || t.playlist.done;
   const drawn = t.waveform ? `${t.id}/${t.created}` : null;
   if (drawn !== tpDrawn) {
     tpPlayer.stop();
@@ -2501,7 +2593,7 @@ async function saveTapeEdges(num, start, end) {
     if (tpEd.sel?.track === num) tapeSelect(num, tpEd.sel.edge, false, tpPicked?.track === num);
     waveSay(moveSaid(after, num));
   } catch (e) {
-    tpEd.frozen = tapeWatching || !!tape?.playlist.done;
+    tpEd.frozen = tapeHeld() || !!tape?.playlist.done;
     if (tape) tpEd.setTracks(tapeTracks(tape));
     tapeReadout();
     // What this page believed may be what was wrong, so the markers show the truth.
@@ -2517,7 +2609,8 @@ function tapeEdgeDropped(num, edge, landed) {
     return;
   }
   const t = tpEd.tracks.find((x) => x.number === num);
-  saveTapeEdges(num, t.start, t.end);
+  const key = keyOf(num);
+  rowTurn(() => saveTapeEdges(numberOf(key), t.start, t.end));
 }
 
 function dropNudge() {
@@ -2555,7 +2648,7 @@ function nudgeTapeEdge(t, edge, by) {
   const seen = tpNudge?.song === t.number ? tpNudge.seen : [song.start, song.end];
   dropNudge();
   tpNudge = { tape: tape.id, song: t.number, seen, start: t.start, end: t.end };
-  tpNudge.timer = setTimeout(flushNudge, 500);
+  tpNudge.timer = setTimeout(() => rowTurn(flushNudge), 500);
   waveSay(`Song ${t.number} becomes yours when this saves, and nothing will move it after that.`);
 }
 
@@ -2592,10 +2685,14 @@ function tapeJudge(send) {
     return after;
   });
 }
-const tapeAccept = (song) => tapeJudge(() =>
-  postJSON(`/api/tapes/${tape.id}/songs/${song.number}/heard`, { heard: !song.heard }));
-const tapeSkip = (song) => tapeJudge(() =>
-  postJSON(`/api/tapes/${tape.id}/songs/${song.number}/skip`, { skip: !song.skip }));
+function tapeAccept(song) {
+  const key = keyOf(song.number);
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard }));
+}
+function tapeSkip(song) {
+  const key = keyOf(song.number);
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip }));
+}
 
 function tapeZoom(by) {
   if (!tpEd.side) return;
@@ -2691,7 +2788,7 @@ async function postTapeJob(path, body) {
   try {
     await postJSON(path, body);
     watchTape();
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 function cutTape() {
@@ -2776,6 +2873,16 @@ async function cancelTapeUpload() {
 const processTape = () => startTapeJob(`/api/tapes/${tape.id}/process`, {});
 const matchTape = (again) => startTapeJob(`/api/tapes/${tape.id}/match`, { again });
 
+// A job that only asks the catalogue saves a song at a time, so a person can carry on
+// beside it. Any other holds the tape, and a marker is not to be moved.
+const ASKS_AS_IT_GOES = ["prepare", "match"];
+const tapeHeld = () => tapeWatching && !ASKS_AS_IT_GOES.includes(tpWatchOp);
+
+function unsentWords() {
+  if (tapeHeld()) return "Not saved yet: it saves when this job finishes.";
+  return "Not saved yet: it saves when the server can be reached.";
+}
+
 const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
 function serverGone() {
@@ -2807,6 +2914,8 @@ async function watchTape() {
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
+      tpWatchOp = j.op;
+      if (!tpNudge && tape?.id === id) tpEd.frozen = tapeHeld() || tape.playlist.done;
       const stepNow = JOB_STEP[j.phase] ?? JOB_STEP[j.op];
       const moved = stepNow && tpJobStep !== stepNow;
       if (moved) {
@@ -2817,7 +2926,12 @@ async function watchTape() {
       // What a job finds is saved as it goes, so the rows and the other steps can show it.
       if ((moved || (tpJobStep === "albums" && j.finished !== answered)) && tape?.id === id) {
         answered = j.finished;
-        try { showTape(await api(`/api/tapes/${id}`)); } catch { /* the job is what is being watched, and it says the rest */ }
+        // A person may be saving beside this, and an older answer must not undo what theirs left.
+        try {
+          const saves = tpSaves;
+          const fresh = await api(`/api/tapes/${id}`);
+          if (saves === tpSaves && !tpSaving) showTape(fresh);
+        } catch { /* the job is what is being watched, and it says the rest */ }
       }
       if (j.total) setBar(j.finished / j.total, "#tp-bar");
       const doing = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
@@ -2841,11 +2955,13 @@ async function watchTape() {
       : e.message;
   } finally {
     tapeWatching = false;
+    tpWatchOp = "";
     tpJobStep = null;
     stepIdle();
   }
   await loadTapes(id);
   cutAfterLookup(id);
+  if (tape?.id === id) sendUnsent();
 }
 
 async function removeTape() {

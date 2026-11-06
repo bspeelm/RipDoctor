@@ -485,7 +485,7 @@ def test_a_row_s_words_go_through_the_list_route_with_what_it_warns() -> None:
     assert "await flushNudge();" in body
     assert "e.needsConfirm" in body and "confirm: true" in body
     assert "{ songs, seen }" in body
-    assert '$("#tp-err").textContent = e.message' in body
+    assert "tpFail(e)" in body
 
 
 def test_a_row_says_where_a_filed_song_went_and_the_column_says_what_became_of_it() -> (
@@ -823,3 +823,73 @@ def test_the_rail_said_file_ready_beside_a_row_saying_not_confirmed() -> None:
     step = re.search(r"function stepFile\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "s.import_begun" in step
     assert step.index("unsure.length) return tpStep") < step.index('"Ready"')
+
+
+def test_a_redraw_saved_half_typed_text_because_a_removed_input_counts_as_left() -> (
+    None
+):
+    """Partial text went to the server, past the job's end, and cleared its lookup."""
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function showSongs\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    on = shown.index("tpRedrawing = true;")
+    assert (
+        on
+        < shown.index("replaceChildren(...rows)")
+        < shown.index("tpRedrawing = false;")
+    )
+    left = re.search(r"function leftField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "!tpRedrawing && input.value !== input.dataset.saved" in left
+    opened = re.search(r"function songOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "input.onblur = () => leftField(key, input)" in opened
+    assert "onchange" not in opened
+    edge = re.search(r"function edgeInput\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpRedrawing" in edge and "onchange" not in edge
+
+
+def test_a_save_that_could_not_be_asked_yet_stays_on_the_row_and_goes_again() -> None:
+    """A refused save left unsaved text on the screen with no way to send it again."""
+    js = (STATIC / "app.js").read_text()
+    field = re.search(r"async function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpUnsent.set(held, value)" in field
+    assert "if (!saved && tpHeldBack)" in field
+    assert field.index("tpHeldBack") < field.index("tpUnsent.delete(held)")
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpHeldBack = e.busy || !e.status;" in body
+    watched = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "sendUnsent();" in watched
+    assert "e.busy = !!body?.busy;" in js
+
+
+def test_an_edit_behind_a_move_landed_on_the_row_that_arrived_at_its_old_place() -> (
+    None
+):
+    """With One, Two, Three: up on Three, then an edit to its title, gave
+    [One, Three, Three (edit)], and Two was gone."""
+    js = (STATIC / "app.js").read_text()
+    field = re.search(r"async function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "songs.find((s) => s.key === key)" in field
+    assert "song.number" not in field
+    move = re.search(r"function moveSong\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "songs.findIndex((s) => s.key === key)" in move
+    assert "song.number" not in move
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpKeys = rows.map((r) => r.key);" in body
+    assert "rows.map(({ key, ...song }) => song)" in body
+
+
+def test_what_a_row_presses_goes_after_a_save_and_to_the_place_its_song_is_now() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    settle = re.search(r"async function settleSong\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "rowTurn(" in settle
+    for name in ("tapeAccept", "tapeSkip", "chooseRelease"):
+        body = re.search(rf"function {name}\(.*?\n\}}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert "numberOf(key)" in body and "song.number}/" not in body
+
+
+def test_an_older_answer_does_not_undo_a_save_beside_a_lookup() -> None:
+    js = (STATIC / "app.js").read_text()
+    watched = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (saves === tpSaves && !tpSaving) showTape(fresh);" in watched
+    assert "tpEd.frozen = tapeHeld()" in watched
