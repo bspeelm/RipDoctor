@@ -1334,9 +1334,11 @@ def test_the_record_s_keys_did_not_stay_on_the_other_pages() -> None:
 
 
 def test_enter_on_a_control_presses_it_only_if_the_keyboard_went_there() -> None:
+    """Asked with `:focus-visible`, Chromium said yes for the key being pressed, and
+    Enter after a mouse press on Next moved on a track instead of checking this one."""
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function enterIsTheControls\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert ':focus-visible")) return true;' in body
+    assert "if (control !== pressedControl) return true;" in body
     assert "e.preventDefault();" in body and "control.blur();" in body
     keys = key_listener()
     assert keys.index("enterIsTheControls(e)") < keys.index("tapeKey(e)")

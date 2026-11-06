@@ -4513,6 +4513,7 @@ function wire() {
   $("#cut-zoom-side").onclick = () => ed.fit();
   showCutTools();
   wireTrackPresses();
+  wirePressedControl();
   wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();
@@ -4813,11 +4814,19 @@ function wire() {
 }
 
 // Enter on a control reached from the keyboard presses that control. One that only kept the
-// focus after a mouse press lets go of it, or the key would press it again.
+// focus after a mouse press lets go of it, or the key would press it again. `:focus-visible`
+// cannot tell them apart here, since a browser turns it on for the key being asked about.
+const CONTROLS = "button,a[href],summary";
+let pressedControl = null;
+function wirePressedControl() {
+  addEventListener("pointerdown", (e) => { pressedControl = e.target.closest?.(CONTROLS) ?? null; }, true);
+  addEventListener("focusout", (e) => { if (e.target === pressedControl) pressedControl = null; });
+}
+
 function enterIsTheControls(e) {
-  const control = e.target.closest?.("button,a[href],summary");
+  const control = e.target.closest?.(CONTROLS);
   if (!control) return false;
-  if (control.matches(":focus-visible")) return true;
+  if (control !== pressedControl) return true;
   e.preventDefault();
   control.blur();
   return false;
