@@ -941,3 +941,45 @@ def test_a_hundred_songs_with_no_match_have_one_action_and_one_question() -> Non
     assert "stay as they are" in ask and "with no album" in ask
     assert "/from-list`, { numbers: ready }" in ask
     assert 'id="tp-all-list"' in tape_markup()
+
+
+def test_a_click_on_the_open_row_closed_it_and_closing_has_its_own_button() -> None:
+    js = (STATIC / "app.js").read_text()
+    row = re.search(r"function songRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "closing" not in row and "tpOpen = null" not in row
+    opened = re.search(r"function songOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'smallButton("Close"' in opened
+
+
+def test_file_from_my_list_was_faint_on_a_row_where_it_was_the_way_forward() -> None:
+    js = (STATIC / "app.js").read_text()
+    options = re.search(r"function releaseOptions\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'wayForward ? "tiny" : "tp-quiet"' in options
+    css = (STATIC / "style.css").read_text()
+    primary = re.search(r"\.tp-group button\.primary[^{]*\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "var(--accent)" in primary
+
+
+def test_a_reason_is_on_its_step_and_a_step_waiting_keeps_its_button() -> None:
+    """Find again's reason was a tooltip, and File vanished while it waited."""
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepBoundaries\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert ".title" not in step and "t.place_refusal) return tpStep" in step
+    css = (STATIC / "style.css").read_text()
+    assert ".tp-step[data-kind=wait] .tp-acts{display:none}" not in css
+    playlist = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"File written", name,' in playlist
+
+
+def test_a_copy_that_might_be_this_song_says_its_path_once() -> None:
+    js = (STATIC / "app.js").read_text()
+    block = re.search(r"function releaseBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "song.settled_by || nothing || rel?.maybe_copy" in block
+
+
+def test_a_job_s_error_stayed_after_what_it_said_stopped_being_true() -> None:
+    js = (STATIC / "app.js").read_text()
+    stands = re.search(r"function jobErrorStands\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.all_cut" in stands and "t.all_filed" in stands
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpErrIsJobs && !jobErrorStands(t)" in shown

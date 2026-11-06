@@ -1209,6 +1209,7 @@ let tpWatchOp = "";                   // the job being watched
 let tpSaving = false;                 // a list is on its way, so what the page holds is about to change
 let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
 let tpAllAsk = false;                 // Albums is asking about filing all from the list
+let tpErrIsJobs = false;              // what the error line says came from a job
 let tpGone = false;                   // the server is not answering
 let tpMisses = 0;                     // heartbeats in a row with no answer
 
@@ -1249,7 +1250,10 @@ async function openTape(id) {
     if (tape?.id !== id) { tpOpen = null; tpDraft = null; tpLanded = null; tpListAsk = null; tpRows.clear(); tpKeyed = null; tpUnsent.clear(); }
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
-    else if (!$("#tp-err").textContent) $("#tp-err").textContent = tape.job?.error || tape.prepare_failed;
+    else if (!$("#tp-err").textContent) {
+      $("#tp-err").textContent = jobErrorStands(tape) ? tape.job?.error || tape.prepare_failed : "";
+      tpErrIsJobs = true;
+    }
   } catch (e) { tpFail(e); }
 }
 
@@ -1279,10 +1283,18 @@ function keyRows(t) {
 const keyOf = (number) => tpKeys[number - 1];
 const numberOf = (key) => tpKeys.indexOf(key) + 1;
 
+// A job's error stays until a person acts or it stops being true: Cut's once every song is
+// cut, File's once every song is filed, and any once the job has been forgotten for an edit.
+function jobErrorStands(t) {
+  if (!t.job?.error) return !!t.prepare_failed;
+  return !((t.job.op === "cut" && t.all_cut) || (t.job.op === "file" && t.all_filed));
+}
+
 function showTape(t) {
   tape = t;
   if (t) remember("rd-tape", t.id);
   if (t) keyRows(t);
+  if (t && tpErrIsJobs && !jobErrorStands(t)) $("#tp-err").textContent = "";
   const naming = !t || tpNaming;
   $("#tp-new-form").hidden = !naming;
   $("#tp-new-cancel").hidden = !t;
@@ -1445,7 +1457,6 @@ function stepBoundaries(t) {
   const doubts = t.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
   const canFind = t.songs.length > 0 && (t.audio || (t.upload && t.upload.have === t.upload.total));
   tpAction("#tp-process", canFind || placed, !placed, !canFind || !!t.place_refusal);
-  $("#tp-process").title = t.place_refusal;
   $("#tp-process").textContent = placed ? "Find again" : "Find boundaries";
   tpAction("#tp-review-next", doubts.length > 0, true);
   if (!canFind && !placed) return tpStep("boundaries", "wait", "Waiting", "Needs the recording and the song list.");
@@ -1455,6 +1466,7 @@ function stepBoundaries(t) {
     return tpStep("boundaries", "todo", `${doubts.length} to check`,
       `${lead}${songsNamed(doubts)} ${doubts.length === 1 ? "needs" : "need"} listening to.`, t.mismatch);
   }
+  if (t.place_refusal) return tpStep("boundaries", "done", "All checked", "Every song is in the library, so there is nothing to find again.");
   return tpStep("boundaries", "done", "All checked", "Every boundary is set, accepted or skipped.");
 }
 
@@ -1580,8 +1592,8 @@ function stepPlaylist(t) {
   const server = "The music server imports it within about a minute, and an admin there may need to make imported playlists public.";
   const name = p.path.split("/").pop();
   if (p.left_out.length)
-    return tpStep("playlist", "todo", "File written", `${name}, ${p.songs} of ${t.songs.length} songs. ${counted(p.left_out.length, "song", "songs")} left out. ${server}`, why);
-  return tpStep("playlist", "done", "File written", `${name}. ${server}`, why);
+    return tpStep("playlist", "todo", "File written", `${p.songs} of ${t.songs.length} songs, ${p.left_out.length} left out.`, [server, why].join("\n"));
+  return tpStep("playlist", "done", "File written", name, [server, why].join("\n"));
 }
 
 function stepArchive(t) {
@@ -1683,9 +1695,7 @@ function songRowView(song, row) {
   const tr = el("tr", [tpOpen === song.number ? "sel" : "", song.skip ? "skipped" : ""].join(" ").trim());
   tr.dataset.song = song.number;
   tr.onclick = () => {
-    const closing = tpOpen === song.number;
     tapeSelect(song.number, "start", true);
-    if (closing) { tpOpen = null; showSongs(tape); return; }
     // Stacked on a phone, the waveform is not beside the row that was pressed.
     if (matchMedia("(max-width:48rem)").matches && !$("#tp-wave-wrap").hidden)
       $("#tp-wave-wrap").scrollIntoView({ block: "start" });
@@ -2071,8 +2081,10 @@ function releaseOptions(song, rel) {
   change.append(searchForm(song));
   const quiet = el("div", "tp-rel-quiet");
   if (song.settled_by || !others.length || song.proposal) {
+    const wayForward = song.proposal?.status === "none" && !song.settled_by;
     quiet.append(smallButton("File from my list", "tag this song from the list, with no release",
-      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/from-list`, {})), "tp-quiet"));
+      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/from-list`, {})),
+      wayForward ? "tiny" : "tp-quiet"));
   }
   quiet.append(smallButton("Use a release id", "name a release the search did not find",
     () => { state.byId = !state.byId; showSongs(tape); }, "tp-quiet"));
@@ -2140,13 +2152,13 @@ function releaseBlock(song, t) {
   if (rel?.maybe_copy) box.append(maybeCopyView(song, rel.maybe_copy));
   if (rel?.edition_note) box.append(editionNoteView(song, rel.edition_note));
   const nothing = song.proposal?.status === "none" && rel?.options.length;
-  const words = rel?.note || (song.settled_by || nothing ? "" : song.proposal?.reason) || "";
+  const words = rel?.note || (song.settled_by || nothing || rel?.maybe_copy ? "" : song.proposal?.reason) || "";
   if (words) {
     const line = el("p", "dim tp-rel-why", words);
     line.title = words;
     box.append(line);
   }
-  if (rel?.library_note) box.append(el("p", "dim", rel.library_note));
+  if (rel?.library_note && !rel.library_note.includes(rel.maybe_copy || "\0")) box.append(el("p", "dim", rel.library_note));
   if (!song.proposal && !song.settled_by) box.append(el("p", "dim", "Not looked up yet."));
   const options = releaseOptions(song, rel);
   if (!song.settled_by) {
@@ -2246,7 +2258,8 @@ function songOpenView(song, row, t) {
   const moves = el("div", "tp-moves");
   moves.append(smallButton("↑", "move up", () => moveSong(key, -1)),
                smallButton("↓", "move down", () => moveSong(key, 1)),
-               smallButton("Remove", "take off the list", () => removeSong(key), "ghost tiny tp-danger"));
+               smallButton("Remove", "take off the list", () => removeSong(key), "ghost tiny tp-danger"),
+               smallButton("Close", "close this row", () => { tpOpen = null; showSongs(tape); }));
   fields.append(moves);
   box.append(fields);
   if ([...tpUnsent.keys()].some((held) => held.startsWith(`${key}/`))) box.append(el("p", "dim", unsentWords()));
@@ -2914,6 +2927,7 @@ const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", 
 // An answer has a status, whatever it says. Anything else never got there, and that is
 // one message, which goes by itself, in place of a browser's words for it that stay.
 function tpFail(e) {
+  tpErrIsJobs = false;
   if (e.status) $("#tp-err").textContent = e.message;
   else lostContact();
 }
@@ -3008,6 +3022,7 @@ async function watchTape() {
         const parts = j.op === "prepare" ? [j.result?.boundaries, j.result?.albums] : [];
         const said = [j.error, ...parts].filter(Boolean).join(" ");
         if (said) $("#tp-err").textContent = said;
+        tpErrIsJobs = !!said;
         if (j.error) tpStopped.add(id); else tpStopped.delete(id);
         break;
       }
