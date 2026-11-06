@@ -534,7 +534,7 @@ function showSideMeta() {
   const d = S.sideData[S.side];
   if (!d) return;
   $("#sp-meta").textContent = [`side ${S.side}`, fmt(d.duration), counted(tracks().length, "track", "tracks"),
-    `${d.gaps.band.gaps.length} silent regions`, `threshold ${d.gaps.band.threshold} dB`].join(" · ");
+    counted(d.gaps.band.gaps.length, "silent region", "silent regions"), `threshold ${d.gaps.band.threshold} dB`].join(" · ");
 }
 
 // ------------------------------------------------------------ track table
