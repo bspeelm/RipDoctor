@@ -45,8 +45,10 @@ def one_import(job: Job | None = None) -> Iterator[None]:
     """One import into the library at a time, across tapes and records alike. What an
     import is answered with rests on what the library held when it was read, so nothing
     else may file between the two. This waits rather than refuses: the job is already
-    off the request thread, and its turn will come."""
+    off the request thread, and its turn will come. What it was doing is said again once
+    it has that turn, since a wait that is over is no longer true."""
     if not _IMPORTS.acquire(blocking=False):
+        was = (job.current, job.detail) if job else None
         if job is not None:
             job.step(job.current, "waiting for another import to finish")
         if not _IMPORTS.acquire(timeout=IMPORT_WAIT):
@@ -54,6 +56,8 @@ def one_import(job: Job | None = None) -> Iterator[None]:
                 f"another import has held the library for {IMPORT_WAIT / 60:.0f} "
                 "minutes, so nothing was imported - try again once it has finished"
             )
+        if job is not None and was is not None:
+            job.step(*was)
     try:
         yield
     finally:

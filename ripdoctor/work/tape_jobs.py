@@ -527,15 +527,14 @@ class _Filing:
             return ""
         return f"its album's art did not embed: {why or 'beets gave no reason'}"
 
-    def imported(
+    def handed_over(
         self,
         run: F.Run,
         waiting: list[tuple[F.Track, tuple[F.Row, ...]]],
         directory: str,
-    ) -> None:
-        """Copy, tag, import, and believe only what the library says afterward: a
-        song is filed by a row in the library and a file there, whatever beets
-        exited with, and any other row it left in this tape's copies is cleared."""
+    ) -> tuple[dict[int, Path], TapeRun, str]:
+        """Copy, tag and import. What a pinned run answers rests on what the library
+        holds of its album, read here under the same lock as the import."""
         count = len(self.tape.songs)
         where = T.fresh_filing(self.layout, self.tape.id, directory)
         copies = {}
@@ -549,23 +548,33 @@ class _Filing:
             copies[song.number] = copy
 
         self.job.step(run.album, "importing with beets")
-        with one_import(self.job):
-            doubled, how = "", F.BESIDE
-            if run.release:
-                how = F.joining(
-                    run, self.beets.album_rows(self.runner, self.library, run.album)
-                )
-                doubled = F.beside_note(run) if how == F.BESIDE else ""
-            else:
-                query = [F.term("albumartist", run.artist), F.term("album", run.album)]
-                doubled = F.second_row(run, self.rows(query))
-            self.tape = F.begun(self.tape, copies)
-            T.save(self.layout, self.tape)
-            self.job.step(run.album, "importing with beets")
-            took = self.beets.file_tape_run(
-                self.runner, str(where), run.release, self.library, how=how
+        doubled, how = "", F.BESIDE
+        if run.release:
+            how = F.joining(
+                run, self.beets.album_rows(self.runner, self.library, run.album)
             )
+            doubled = F.beside_note(run) if how == F.BESIDE else ""
+        else:
+            query = [F.term("albumartist", run.artist), F.term("album", run.album)]
+            doubled = F.second_row(run, self.rows(query))
+        self.tape = F.begun(self.tape, copies)
+        T.save(self.layout, self.tape)
+        took = self.beets.file_tape_run(
+            self.runner, str(where), run.release, self.library, how=how
+        )
+        return copies, took, doubled
 
+    def believed(
+        self,
+        run: F.Run,
+        waiting: list[tuple[F.Track, tuple[F.Row, ...]]],
+        copies: dict[int, Path],
+        took: TapeRun,
+        doubled: str,
+    ) -> None:
+        """Believe only what the library says afterward: a song is filed by a row in the
+        library and a file there, whatever beets exited with, and any other row it left
+        in this tape's copies is cleared."""
         cleared, unclear = set(), ""
         try:
             cleared = self.clear_leftovers()
@@ -614,10 +623,15 @@ class _Filing:
         """One album, whose failure is about that album and stops no other."""
         self.unanswered = {t.song.number for t in run.tracks}
         try:
-            self.clear_leftovers()
-            waiting = self.checked(run)
-            if waiting:
-                self.imported(run, waiting, directory)
+            # From the pre-check to the import: two jobs filing one recording would
+            # otherwise both find nothing, and both import it.
+            with one_import(self.job):
+                self.clear_leftovers()
+                waiting = self.checked(run)
+                if not waiting:
+                    return
+                copies, took, doubled = self.handed_over(run, waiting, directory)
+            self.believed(run, waiting, copies, took, doubled)
         except Exception as e:  # kept in the document against each song it stopped
             begun = {s.number for s in self.tape.songs if s.import_begun}
             for track in run.tracks:

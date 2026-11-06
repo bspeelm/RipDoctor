@@ -65,6 +65,52 @@ def test_the_read_and_the_import_of_a_tape_both_hold_the_lock(service: Service) 
     assert not J._IMPORTS.locked()
 
 
+def test_two_jobs_filing_one_recording_both_found_nothing_and_both_imported(
+    service: Service,
+) -> None:
+    """The pre-check ran before the lock, so a second job's answer was out of date by
+    the time its turn came."""
+    app = build(service)
+    tape = pinned(app, service)
+    runner = service.runner
+    original = runner.run  # type: ignore[attr-defined]
+    held: list[bool] = []
+
+    def noticed(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        args = [str(a) for a in argv]
+        if args[0] == "beet" and "ls" in args and not runner.imports:  # type: ignore[attr-defined]
+            held.append(J._IMPORTS.locked())
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    runner.run = noticed  # type: ignore[attr-defined]
+    assert not file_it(app, tape, service)["error"]
+    assert held
+    assert all(held), "a question was asked of the library before the lock was held"
+
+
+def test_the_wait_for_an_import_is_no_longer_said_once_it_is_over() -> None:
+    """A record's page read "waiting for another import" through its whole import."""
+    job = J.Job(slug="a-record", op="import", started=0.0)
+    job.step("A Record", "importing with beets")
+    entered = threading.Event()
+
+    def later() -> None:
+        with J.one_import(job):
+            entered.set()
+
+    other = threading.Thread(target=later)
+    with J.one_import():
+        other.start()
+        for _ in range(500):
+            if "waiting for another import" in job.detail:
+                break
+            time.sleep(0.01)
+        assert "waiting for another import" in job.detail
+    assert entered.wait(5)
+    other.join(5)
+    assert (job.current, job.detail) == ("A Record", "importing with beets")
+
+
 def test_a_tape_run_waits_for_a_held_lock_says_so_and_then_files(
     service: Service,
 ) -> None:
