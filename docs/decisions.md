@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,631, and
-at 3,931 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,634, and
+at 3,934 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2270,7 +2270,8 @@ is offered and never accepted. A classical `Work: movement` title goes to review
 stands: a search on loose words is unquoted terms, which this does not send.
 
 **Everything else goes to review,** with the options best first, one to an album and
-recording, at most twelve, and the chosen recording's single past that. A person chooses
+recording, each with a track even where its name did not agree, at most twelve, and the
+chosen recording's single past that. A person chooses
 one with no typing, since it carries its track, or searches inside the row by their own
 title and artist, whose results are offered and settle nothing. A choice more than 3 s
 off the list is refused until it is said twice, because a song was once settled on the
@@ -2330,9 +2331,9 @@ joining an album takes all three, and with only the first two the run stopped sa
 at end of input. With anything else held, apply, keep both. Merging rematches every row
 of the album against the pinned release, and measured on a real library it renamed,
 renumbered and retagged every owned track of another edition. Keeping both left the
-existing files byte-identical and made a second album row in the same folder, with its
-own cover and album gain, and a track number from its edition that may match one beside
-it. That is said on the song's outcome. Each later edition adds another entry, as does a
+existing files byte-identical and made a second album row, with its own cover and album
+gain, in the same folder unless the library's path format has `%aunique`, and a track
+number from its edition that may match one beside it. That is said on the song's outcome. Each later edition adds another entry, as does a
 later song of an edition held beside another, because merging there would take in both.
 A song with a release is not filed with lookup off, which made two album rows for one
 album when tried. A from-list

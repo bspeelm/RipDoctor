@@ -406,8 +406,12 @@ def _fit(wanted: Wanted, edition: Edition, library: Iterable[str]) -> _Fit:
     named = album == NAMED
     asked_live = named and _LIVE.search(fold(wanted.album))
     credit = (track.credit if track else ()) or (edition.artist,)
+    # A person can still choose a track whose name did not agree, so it is offered.
+    shown = track or min(
+        edition.tracks, key=lambda t: _off(t, wanted.length), default=None
+    )
     return _Fit(
-        choice=_choice(edition, track),
+        choice=_choice(edition, shown),
         grade=grade,
         off=math.inf if track is None else _off(track, wanted.length),
         official=fold(edition.status) == OFFICIAL,

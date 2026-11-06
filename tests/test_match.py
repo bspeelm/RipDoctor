@@ -200,7 +200,7 @@ def test_releases_with_no_such_track_are_a_doubt_not_no_release() -> None:
     got = M.propose(wanted(), [edition(title="Something Else Entirely")])
     assert got.status == M.REVIEW
     assert got.choice is None and len(got.candidates) == 1
-    assert got.candidates[0].number == 0
+    assert got.candidates[0].number == 3
 
 
 @pytest.mark.parametrize(
@@ -924,6 +924,17 @@ def test_an_option_says_all_a_person_chooses_by() -> None:
     assert (option["track_title"], option["disc"], option["number"]) == ("A Song", 2, 3)
     assert (option["tracks"], option["length"], option["delta"]) == (13, 202.5, 2.5)
     assert (option["kind"], option["in_library"]) == ("ep", True)
+
+
+def test_a_track_by_another_name_is_offered_with_its_place_and_not_proposed() -> None:
+    """An option with no track could not be chosen with no typing."""
+    got = M.propose(wanted(), [edition(title="Something Else Entirely")])
+    assert got.status == M.REVIEW
+    assert got.choice is None
+    assert (got.candidates[0].track_title, got.candidates[0].number) == (
+        "Something Else Entirely",
+        3,
+    )
 
 
 def test_a_title_loses_only_a_trailing_clause_when_shortened() -> None:

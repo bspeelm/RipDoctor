@@ -515,7 +515,7 @@ def joining(run: Run, rows: Sequence[Row]) -> str:
 def beside_note(run: Run) -> str:
     return (
         f"beets already held {run.album} as another edition, so this is a second album "
-        "entry in the same folder, and your tracks there did not change"
+        "entry beside it, and your tracks there did not change"
     )
 
 
