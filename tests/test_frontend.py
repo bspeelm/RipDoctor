@@ -608,7 +608,8 @@ def test_a_copy_that_might_be_this_song_is_one_click_away() -> None:
 def test_an_edition_note_is_said_on_the_row_and_offers_the_single() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function editionNoteView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "note.text" in body and "note.single" in body
+    assert "noteBox(note.text)" in body and "note.choices" in body
+    assert 'c.current ? "tp-choice on" : "tp-choice"' in body
     word = re.search(r"function releaseWord\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'rel?.edition_note ? "warn" : null' in word
 
@@ -635,3 +636,11 @@ def test_a_field_being_typed_in_holds_the_lookup_back() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'closest?.("#tp-rows")' in body and "setTimeout" in body
+
+
+def test_a_tape_shown_after_an_archived_one_gets_its_controls_back() -> None:
+    """Every control on the page stayed off, so the next tape could not take a file."""
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    on = shown.index('querySelectorAll("input, button")) c.disabled = false')
+    assert on < shown.index("showRail(t);") < shown.index("archivedControls()")

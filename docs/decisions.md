@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,636, and
-at 3,936 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,689, and
+at 3,989 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2158,6 +2158,15 @@ happens to lay somewhere it agrees stays owed. A new list clears it. That can as
 every song to be judged, which is heavy on a long list and is accepted: the gate is the
 point of the flow. A song the library holds or may hold was judged before it got there,
 and is never flagged again.
+
+**The page is one rail, one waveform and one table.** A rail lists the eight steps, each
+with only its own actions and one line of plain state, with anything longer one press
+away. The waveform stays in view while the table scrolls, because a row is how a long tape
+is got around. A song's row opens to edit it, to choose its album and to say where it went.
+The same songs in three tables, with every control on every row, was what this replaced.
+Nothing the page holds is unsaved: a field saves when it is left, and a question that would
+lose boundaries is asked in the row that raised it. It opens on the first song that needs
+its person, so nobody hunts for where to start.
 
 **The waveform is a rip's editor,** the same `Editor` and `Player` on a canvas of the
 tape's page, with the tape's own envelope and its uncut FLAC served directly. A
@@ -2273,9 +2282,13 @@ stands: a search on loose words is unquoted terms, which this does not send.
 recording, each with a track even where its name did not agree, at most twelve, and the
 chosen recording's single past that. A person chooses
 one with no typing, since it carries its track, or searches inside the row by their own
-title and artist, whose results are offered and settle nothing. A choice more than 3 s
-off the list is refused until it is said twice, because a song was once settled on the
-233 s original when the list said the 202 s remix. Nothing files until review is settled.
+title and artist, whose results are offered and settle nothing. Each option is one line of
+album, year, kind, place on the release, length against the list, and whether the library
+has that release, because those are what tell two editions apart for a person: format and
+country are not shown. A release id can still be given, behind a small action, for one no
+search finds. A choice more than 3 s off the list is refused until it is said twice, in the
+option's own line, because a song was once settled on the 233 s original when the list said
+the 202 s remix. Nothing files until review is settled.
 
 **Measured.** Three lists through this rule against the service's replies, and every
 accept read for a wrong version: 39 accepted, none wrong; 6 to review; 4 with nothing.
@@ -2293,9 +2306,13 @@ on the song and stops nothing, and File still asks. What the library holds is ke
 the proposal, which is what ranks an edition it has and marks an option.
 
 **Beside an edition already held.** A release of an album the library has as another
-edition carries a note: not on your edition, its track number and count, a second album
-entry in the same folder, your tracks unchanged. The same recording's single is offered
-if the search showed one.
+edition is put as a choice, in what each answer does to a person's folders, because a note
+in the catalogue's terms was read and not understood: you have the 13-track album, this
+song is only on the 35-track version, so add it to that folder as its track number, or file
+it as a single in its own. The first is said to sit beside a track of the same number only
+when the library has one, and the second is offered if the search showed the same recording
+as a single. It informs and gates nothing. An album the catalogue also files as a
+compilation shows as an album when the list names it, which changes no ranking.
 
 **A song with no release** takes the ADR-049 route when a person chooses it: tagged
 from the list, marked as having no release, with no fetched art or date. It still

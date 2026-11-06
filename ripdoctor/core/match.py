@@ -142,17 +142,19 @@ class Choice:
     country: str = ""
     format: str = ""
     kind: str = ""
+    primary: str = ""  # the kind of record it is, where `kind` says what it is sold as
     tracks: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class Held:
-    """An album row the library has, as many rows as `tracks`."""
+    """An album row the library has, as many rows as `tracks`, numbered as `numbers`."""
 
     release: str
     album: str
     album_artist: str
     tracks: int
+    numbers: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +193,10 @@ class Proposal:
             choice=Choice(**choice) if choice else None,
             candidates=tuple(Choice(**c) for c in data["candidates"]),
             note=data.get("note", ""),
-            held=tuple(Held(**h) for h in data.get("held", ())),
+            held=tuple(
+                Held(**{**h, "numbers": tuple(h.get("numbers", ()))})
+                for h in data.get("held", ())
+            ),
             copy=Copy(**data["copy"]) if data.get("copy") else None,
             library_note=data.get("library_note", ""),
         )
@@ -343,6 +348,7 @@ def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:
         country=edition.country,
         format=edition.format,
         kind=kind_of(edition.primary, edition.secondary),
+        primary=edition.primary.lower(),
     )
     if track is None:
         return base
@@ -598,6 +604,17 @@ def propose(
     return Proposal(MATCHED, "", best.choice, offered, note, albums)
 
 
+def _shown_kind(wanted: Wanted, c: Choice) -> str:
+    """An album the catalogue files as a compilation too is the album a list named."""
+    if c.kind != "compilation" or c.primary != "album":
+        return c.kind
+    return (
+        "compilation"
+        if album_agreement(wanted.album, c.release_title) == ELSEWHERE
+        else "album"
+    )
+
+
 def options(wanted: Wanted, proposal: Proposal | None) -> list[dict[str, Any]]:
     """What a person can choose from, as the page shows it."""
     if proposal is None:
@@ -606,6 +623,7 @@ def options(wanted: Wanted, proposal: Proposal | None) -> list[dict[str, Any]]:
     return [
         {
             **asdict(c),
+            "kind": _shown_kind(wanted, c),
             "year": c.date[:4],
             "delta": None if c.length is None else round(c.length - wanted.length, 1),
             "in_library": c.release in library,

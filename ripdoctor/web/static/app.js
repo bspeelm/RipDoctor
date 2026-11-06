@@ -1271,6 +1271,8 @@ function showTape(t) {
     return;
   }
   if (tpOpen != null && !songOf(tpOpen)) tpOpen = null;
+  // An archived tape shown before this one left them all off.
+  for (const c of $("#tapepane").querySelectorAll("input, button")) c.disabled = false;
   $("#tp-what").textContent = t.name;
   const said = [t.source, t.duration ? clock(t.duration) : "",
     `${t.songs.length} song${t.songs.length === 1 ? "" : "s"}`].filter(Boolean);
@@ -1379,7 +1381,7 @@ function stepRecording(t) {
   $("#tp-file-pick").textContent = partial ? "Choose the same file…" : "Choose a file…";
   tpAction("#tp-go", failed, true);
   tpAction("#tp-cancel", !!t.upload);
-  if (t.playlist.done) return tpStep("recording", "done", "Archived", t.playlist.archived.file);
+  if (t.playlist.done) return tpStep("recording", "done", "Archived", t.source);
   if (t.audio) return tpStep("recording", "done", "Uploaded", [t.source, t.duration ? clock(t.duration) : ""].filter(Boolean).join(" · "));
   if (t.upload && !partial) return tpStep("recording", "done", "Here", `${t.upload.name}, ${mb(t.upload.total)}, not read yet.`);
   if (partial) return tpStep("recording", "todo", "Part-way", `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)}. Choose the same file to carry on.`);
@@ -1506,7 +1508,7 @@ function stepArchive(t) {
   const p = t.playlist;
   const unfiled = t.filing.every((o) => o.state === "pending" || o.state === "skipped");
   tpAction("#tp-archive", !p.done, !p.archive_refusal, !!p.archive_refusal);
-  if (p.done) return tpStep("archive", "done", "Archived", p.archived.file);
+  if (p.done) return tpStep("archive", "done", "Archived", "Copied and read back. The song list stays.", p.archived.file);
   if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
   if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
   return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
@@ -1571,9 +1573,10 @@ function releaseWord(song, rel) {
   if (song.filing === "already") return ["In your library", "good"];
   if (song.filing === "failed") return ["Filing failed", "bad"];
   if (song.proposal?.status === "owned") return ["In your library", "good"];
+  // The dot asks for a look at a choice made for them, which a person's own has had.
   const noted = rel?.edition_note ? "warn" : null;
   if (song.settled_by === "catalogue") return ["Matched", "good", noted];
-  if (song.settled_by) return [song.proposal?.choice ? "Your choice" : "From your list", "good", noted];
+  if (song.settled_by) return [song.proposal?.choice ? "Your choice" : "From your list", "good"];
   if (rel?.maybe_copy) return ["Your copy?", "warn"];
   const p = song.proposal;
   if (!p) return ["Not looked up", "mute"];
@@ -1793,7 +1796,8 @@ function optionLine(song, o, kind) {
   go.onclick = (e) => { e.stopPropagation(); chooseRelease(song, o.release, o); };
   const name = el("span", "tp-opt-album");
   name.append(el("span", null, o.release_title));
-  if (o.track_title && o.track_title.toLowerCase() !== song.title.toLowerCase())
+  const named = [song.title.toLowerCase(), o.release_title.toLowerCase()];
+  if (o.track_title && !named.includes(o.track_title.toLowerCase()))
     name.append(el("span", "tp-opt-track", o.track_title));
   const [off, offClass] = offWords(song, o);
   go.append(el("i"), name,
@@ -1920,22 +1924,47 @@ function releaseOptions(song, rel) {
   return change;
 }
 
-function editionNoteView(song, note) {
+function noteBox(said, ...after) {
   const box = el("div", "tp-note");
-  box.append(el("i"), el("span", null, note.text));
-  if (note.single) {
-    box.append(smallButton("Use the single instead", "file it as its own single, away from this album",
-      () => chooseRelease(song, note.single, releaseOf(tape, song.number)?.options.find((o) => o.release === note.single))));
+  const body = el("div");
+  body.append(el("span", null, said), ...after);
+  box.append(el("i"), body);
+  return box;
+}
+
+// A choice put in what each answer does to a person's folders. The current one is marked.
+function editionNoteView(song, note) {
+  const state = rowState(song.number);
+  const options = releaseOf(tape, song.number)?.options ?? [];
+  const box = noteBox(note.text);
+  const choices = el("div", "tp-choices");
+  for (const c of note.choices) {
+    const b = el("button", c.current ? "tp-choice on" : "tp-choice");
+    b.type = "button";
+    b.disabled = c.current;
+    b.append(el("b", null, c.label), el("span", null, c.said));
+    b.onclick = (e) => {
+      e.stopPropagation();
+      chooseRelease(song, c.release, options.find((o) => o.release === c.release));
+    };
+    choices.append(b);
+  }
+  box.append(choices);
+  const asked = note.choices.find((c) => c.release === state.ask?.release);
+  if (asked) {
+    box.append(askView(state.ask.said, "Use it", () => {
+      state.ask = null;
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/release`,
+        { release: asked.release, ...extra, confirm: true }));
+    }, () => { state.ask = null; showSongs(tape); }));
   }
   return box;
 }
 
 function maybeCopyView(song, path) {
-  const box = el("div", "tp-note");
-  box.append(el("i"), el("span", null, `This might be your copy at ${path}.`),
-             useCopyButton({ number: song.number, unconfirmed: path }),
-             el("span", "dim", "or choose a release."));
-  return box;
+  return noteBox(`This might be your copy at ${path}.`,
+    useCopyButton({ number: song.number, unconfirmed: path }),
+    el("span", "dim", "or choose a release."));
 }
 
 function releaseBlock(song, t) {
@@ -1951,7 +1980,8 @@ function releaseBlock(song, t) {
   }
   if (rel?.maybe_copy) box.append(maybeCopyView(song, rel.maybe_copy));
   if (rel?.edition_note) box.append(editionNoteView(song, rel.edition_note));
-  const words = rel?.note || (song.settled_by ? "" : song.proposal?.reason) || "";
+  const nothing = song.proposal?.status === "none" && rel?.options.length;
+  const words = rel?.note || (song.settled_by || nothing ? "" : song.proposal?.reason) || "";
   if (words) {
     const line = el("p", "dim tp-rel-why", words);
     line.title = words;
@@ -1966,8 +1996,9 @@ function releaseBlock(song, t) {
   }
   // Settled, only the choice stays out; changing it is one press away.
   const first = options.querySelector(".tp-opt.on");
-  if (first) box.append(first);
-  else if (!copy) box.append(el("p", "dim", "From your list, with no release."));
+  // A note's choices already say which release this is.
+  if (first && !rel?.edition_note) box.append(first);
+  else if (!copy && !rel?.edition_note) box.append(el("p", "dim", "From your list, with no release."));
   const more = el("details", "tp-more");
   more.open = !!state.open;
   more.ontoggle = () => { state.open = more.open; };
@@ -2042,7 +2073,7 @@ function songOpenView(song, row, t) {
   }
   // Archiving clears the cuts of songs already proved to be in the library.
   const cutSaid = !row || song.skip ? "" : t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
-  if (cutSaid && cutSaid !== "not cut") {
+  if (cutSaid && cutSaid !== "not cut" && cutSaid !== "cut") {
     box.append(el("p", cutSaid === "failed" || cutSaid === "out of date" ? "tp-warn" : "dim",
       `Cut: ${cutSaid}${cutSaid === "failed" && song.cut?.why ? `: ${song.cut.why}` : ""}`));
   }
@@ -2110,6 +2141,7 @@ function showSongs(t) {
   $("#tp-rows").replaceChildren(...rows);
   $("#tp-add").hidden = !!tpDraft;
   if (focused) $("#tp-rows").querySelector(`[data-field="${focused}"]`)?.focus();
+  $("#tp-rows").querySelector(".tp-ask")?.scrollIntoView({ block: "nearest" });
   if (t.playlist.done) archivedControls();
 }
 

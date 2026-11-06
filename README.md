@@ -125,6 +125,17 @@ would pass the song beside it is refused and goes back
 every doubt is moved, accepted or skipped
 (`test_accepting_settles_a_doubt_and_the_cut_waits_until_it_is_settled`).
 
+The page is one pipeline rail, one waveform and one table of songs, with a row that
+opens (`test_a_tape_s_songs_are_in_one_table`,
+`test_the_pipeline_rail_runs_in_order_with_archive_last`). Once the audio and the list are
+both in, boundaries and albums follow by themselves
+(`test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in`). A cut needs settled
+boundaries, and filing also needs every song's album
+(`test_a_cut_is_not_said_to_wait_on_an_album_and_a_file_is`). A row chooses its album from
+one line per option, and a choice more than 3 s from the list asks first, in that line
+(`test_an_option_is_one_line_of_columns_with_no_edition_jargon`,
+`test_a_release_far_from_the_list_is_asked_about_and_sent_again`).
+
 The list is a CSV with one playlist per file
 (`test_two_playlists_in_one_file_are_told_to_split`), or is built by hand on the
 tape's page, and both produce the same document

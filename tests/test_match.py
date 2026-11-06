@@ -1189,3 +1189,12 @@ def test_a_boundary_doubt_and_a_release_doubt_are_kept_apart() -> None:
     settled = TP.settle(read, 1, None).songs[0]
     assert settled.reason == "which edge"
     assert settled.proposal is not None and settled.proposal.reason == ""
+
+
+def test_an_album_also_a_compilation_says_album_when_the_list_names_it() -> None:
+    """A person read "compilation" on the album they asked for and took fright."""
+    made = M.propose(wanted(), [edition(secondary=("Compilation",))])
+    named = M.options(wanted(), made)
+    assert [o["kind"] for o in named] == ["album"]
+    other = M.options(replace(wanted(), album="Another Thing"), made)
+    assert [o["kind"] for o in other] == ["compilation"]

@@ -297,11 +297,14 @@ def claimed(tape: Tape, song: Song) -> set[str]:
 
 def held_albums(rows: Sequence[Row]) -> tuple[Held, ...]:
     """What these rows say the library has, one to an album row."""
-    counted: dict[tuple[str, str, str], int] = {}
+    counted: dict[tuple[str, str, str], list[int]] = {}
     for row in rows:
         key = (row.release, row.album, row.album_artist or row.artist)
-        counted[key] = counted.get(key, 0) + 1
-    return tuple(Held(*key, tracks) for key, tracks in counted.items())
+        counted.setdefault(key, []).append(row.track)
+    return tuple(
+        Held(*key, len(numbers), tuple(sorted(n for n in numbers if n)))
+        for key, numbers in counted.items()
+    )
 
 
 def at_lookup(
@@ -338,40 +341,80 @@ def at_lookup(
     return made, ""
 
 
-def edition_note(song: Song) -> dict[str, Any] | None:
-    """What filing this release beside an edition the library has will do."""
+def _beside_an_album(song: Song, choice: Choice) -> tuple[Held, Choice] | None:
+    """The album held and the release of it that has this song, whichever of that
+    release or its single is chosen. None when the choice is what the library holds."""
     made = song.proposal
+    if made is None:
+        return None
+    held = {h.release for h in made.held}
+    if choice.release in held:
+        return None
+    for c in (choice, *made.candidates):
+        if c.kind == "single" or c.release in held or not c.number:
+            continue
+        if c is not choice and c.recording != choice.recording:
+            continue
+        for album in made.held:
+            if album_agreement(album.album, c.release_title) != ELSEWHERE:
+                return album, c
+    return None
+
+
+def edition_note(song: Song) -> dict[str, Any] | None:
+    """The choice a release beside an album already held puts to a person, in what each
+    answer does to their folders."""
     choice = choice_of(song)
-    if made is None or choice is None:
+    found = None if choice is None else _beside_an_album(song, choice)
+    if choice is None or found is None or song.proposal is None:
         return None
-    albums = [
-        h
-        for h in made.held
-        if album_agreement(h.album, choice.release_title) != ELSEWHERE
-    ]
-    if not albums or choice.release in {h.release for h in albums}:
-        return None
+    held, album = found
     single = next(
         (
             c
-            for c in made.candidates
+            for c in song.proposal.candidates
             if c.kind == "single"
-            and c.recording == choice.recording
-            and c.release != choice.release
+            and c.recording == album.recording
+            and c.release != album.release
         ),
         None,
     )
-    place = f"track {choice.number}" + (f" of {choice.tracks}" if choice.tracks else "")
+    version = f"{album.tracks}-track version" if album.tracks else "other version"
+    place = f"track {album.number}"
+    beside = f", next to your other {place}" if album.number in held.numbers else ""
+    choices = [
+        {
+            "label": f"Add to {held.album}",
+            "said": (
+                f"goes in your {held.album} folder as {place}{beside}. "
+                f"Your {held.tracks} songs don't change."
+            ),
+            "release": album.release,
+            "current": choice.release == album.release,
+        }
+    ]
+    if single is not None:
+        choices.append(
+            {
+                "label": "File as a single",
+                "said": (
+                    "goes in its own folder, "
+                    f"{single.album_artist} / {single.release_title}."
+                ),
+                "release": single.release,
+                "current": choice.release == single.release,
+            }
+        )
     return {
         "text": (
-            f"Not on your edition of {albums[0].album}. This edition has it as "
-            f"{place}. It joins the same folder as a second album entry, and your "
-            "tracks don't change. Each further edition adds another entry."
+            f"You have the {held.tracks}-track {held.album}. "
+            f"This song is only on the {version}."
         ),
-        "album": albums[0].album,
-        "track": choice.number,
-        "tracks": choice.tracks,
+        "album": held.album,
+        "track": album.number,
+        "tracks": album.tracks,
         "single": None if single is None else single.release,
+        "choices": choices,
     }
 
 

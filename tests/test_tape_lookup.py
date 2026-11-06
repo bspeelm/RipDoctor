@@ -510,14 +510,44 @@ def test_a_release_beside_an_owned_edition_says_what_will_happen_and_offers_its_
     assert note["album"] == "A Record"
     assert (note["track"], note["tracks"]) == (1, 1)
     assert note["single"] == "single"
-    for said in (
-        "Not on your edition",
-        "same folder",
-        "second album entry",
-        "tracks don't change",
-        "another entry",
-    ):
-        assert said in note["text"]
+    assert note["text"] == (
+        "You have the 2-track A Record. This song is only on the 1-track version."
+    )
+    add, alone = note["choices"]
+    assert add["label"] == "Add to A Record" and add["current"]
+    assert "your A Record folder as track 1" in add["said"]
+    assert "Your 2 songs don't change" in add["said"]
+    assert alone["label"] == "File as a single" and not alone["current"]
+    assert alone["release"] == "single"
+    assert "its own folder, A Band / A Song" in alone["said"]
+    for jargon in ("edition", "second album entry", "another entry"):
+        assert jargon not in note["text"] + add["said"] + alone["said"]
+
+
+def test_a_note_says_track_clash_only_when_the_library_has_that_number(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record", [("A Song", 200)]), "rec")
+    ]
+    owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1", track="1")
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "next to your other track 1" in add["said"]
+
+
+def test_the_note_stays_after_the_single_is_chosen_with_the_single_marked(
+    service: Service, catalogue: Catalogue
+) -> None:
+    an_owned_edition(service, catalogue)
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    looked_up(app, service, tape)
+    note = releases(picked(app, service, tape, release="single").json())["edition_note"]
+    add, alone = note["choices"]
+    assert alone["current"] and not add["current"]
+    assert add["release"] == "theirs"
 
 
 def test_no_note_on_an_edition_the_library_has_or_an_album_it_does_not(
@@ -542,9 +572,9 @@ def test_a_person_choosing_beside_an_owned_edition_gets_the_note_too(
     tape = a_tape(app, service, row("A Song"))
     looked_up(app, service, tape)
     said = picked(app, service, tape, release="single")
-    assert releases(said.json())["edition_note"] is None
+    assert releases(said.json())["edition_note"]["choices"][1]["current"]
     said = picked(app, service, tape, release="theirs")
-    assert "second album entry" in releases(said.json())["edition_note"]["text"]
+    assert releases(said.json())["edition_note"]["choices"][0]["current"]
 
 
 def test_a_view_of_a_song_never_looked_up_offers_nothing(service: Service) -> None:
