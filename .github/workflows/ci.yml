@@ -33,6 +33,7 @@ jobs:
   # run this tier and running none of it would otherwise report green.
   with-tools:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
