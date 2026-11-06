@@ -76,6 +76,14 @@ def service(tmp_path: Path) -> Service:
     return a_service(tmp_path, runner=a_tape_runner())
 
 
+def seeing(
+    service: Service, tape: str, number: int, start: object, end: object
+) -> dict:
+    """What the page sends: the new edges, and the ones it last saw."""
+    song = T.read(service.layout, tape).songs[number - 1]
+    return {"start": start, "end": end, "seen_start": song.start, "seen_end": song.end}
+
+
 def a_new_tape(app, service: Service, name: str = "Mix: Vol. 1") -> str:  # type: ignore[no-untyped-def]
     made = post(app, "/api/tapes", service, {"name": name})
     assert made.status == 201

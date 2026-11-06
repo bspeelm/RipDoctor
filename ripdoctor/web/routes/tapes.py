@@ -497,9 +497,17 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/edges")
     @settled
     def edges(r: H.Request, tape: TP.Tape) -> H.Response:
+        """`seen_start` and `seen_end` are the edges the sender last saw, so that a page
+        left open cannot put back an edge somebody has moved since."""
         song, body = song_of(tape, r), r.json()
         start, end = _seconds(body, TP.START), _seconds(body, TP.END)
-        return judged(tape, lambda: TP.set_edges(tape, song.number, start, end))
+        seen = _seconds(body, "seen_start"), _seconds(body, "seen_end")
+
+        def moved() -> TP.Tape:
+            TP.still_as_seen(tape, song, seen)
+            return TP.set_edges(tape, song.number, start, end)
+
+        return judged(tape, moved)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
     @settled

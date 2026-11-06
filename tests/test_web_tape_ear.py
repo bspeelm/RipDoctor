@@ -16,6 +16,7 @@ from tests.test_web_tapes import (
     a_new_tape,
     a_tape_runner,
     process,
+    seeing,
     send_csv,
     upload,
 )
@@ -93,7 +94,7 @@ def test_a_drag_is_saved_as_the_person_s_and_a_re_run_leaves_it(
     app = build(service)
     tape = placed(app, service)
     url = "songs/2/edges"
-    body = {"start": 6.5, "end": 11.0}
+    body = seeing(service, tape, 2, 6.5, 11.0)
     answer = post(app, f"/api/tapes/{tape}/{url}", service, body)
     assert answer.status == 200, answer.text
     process(app, tape, service)
@@ -116,11 +117,57 @@ def test_an_impossible_drag_is_refused_with_its_reason_and_changes_nothing(
     tape = placed(app, service)
     before = T.read(service.layout, tape)
     url = "songs/2/edges"
-    body = {"start": start, "end": end}
+    body = seeing(service, tape, 2, start, end)
     refused = post(app, f"/api/tapes/{tape}/{url}", service, body)
     assert refused.status == 409
     assert said in refused.json()["error"]
     assert T.read(service.layout, tape) == before
+
+
+def test_a_page_left_open_cannot_put_back_an_edge_moved_since(
+    service: Service,
+) -> None:
+    """A drag of one edge sends the other as the page last knew it, and a second tab
+    overwrote what the first had just set."""
+    app = build(service)
+    tape = placed(app, service)
+    url = f"/api/tapes/{tape}/songs/2/edges"
+    stale = seeing(service, tape, 2, 6.5, T.read(service.layout, tape).songs[1].end)
+    newer = seeing(service, tape, 2, stale["seen_start"], 10.0)
+    assert post(app, url, service, newer).status == 200
+    before = T.read(service.layout, tape)
+    refused = post(app, url, service, stale)
+    assert refused.status == 409
+    assert "has changed since this page loaded it" in refused.json()["error"]
+    assert T.read(service.layout, tape) == before
+
+
+@pytest.mark.parametrize("left_out", ["seen_start", "seen_end"])
+def test_a_move_that_does_not_say_what_it_saw_is_refused(
+    service: Service, left_out: str
+) -> None:
+    app = build(service)
+    tape = placed(app, service)
+    before = T.read(service.layout, tape)
+    body = seeing(service, tape, 2, 6.5, 11.0)
+    del body[left_out]
+    url = f"/api/tapes/{tape}/songs/2/edges"
+    answer = post(app, url, service, body)
+    assert answer.status == 400
+    assert left_out in answer.json()["error"]
+    assert T.read(service.layout, tape) == before
+
+
+def test_typing_the_edges_a_page_already_shows_is_still_a_judgement(
+    service: Service,
+) -> None:
+    """Set with the two edges as they are: the person says they are right."""
+    app = build(service)
+    tape = placed(app, service)
+    song = T.read(service.layout, tape).songs[1]
+    body = seeing(service, tape, 2, song.start, song.end)
+    assert post(app, f"/api/tapes/{tape}/songs/2/edges", service, body).status == 200
+    assert T.read(service.layout, tape).songs[1].set_by == TP.EAR
 
 
 def test_moving_a_boundary_settles_that_song_s_doubt(
@@ -129,7 +176,7 @@ def test_moving_a_boundary_settles_that_song_s_doubt(
     app = build(service)
     tape = placed(app, service)
     url = "songs/2/edges"
-    body = {"start": 6.5, "end": 11.0}
+    body = seeing(service, tape, 2, 6.5, 11.0)
     view = post(app, f"/api/tapes/{tape}/{url}", service, body).json()
     assert not {r["number"]: r for r in view["ear"]}[2]["doubtful"]
 
@@ -179,7 +226,7 @@ def test_an_edge_set_over_the_wire_is_not_moved_by_a_re_run(service: Service) ->
     app = build(service)
     tape = placed(app, service)
     url = f"/api/tapes/{tape}/songs/1/edges"
-    answer = post(app, url, service, {"start": 0.5, "end": 5.25})
+    answer = post(app, url, service, seeing(service, tape, 1, 0.5, 5.25))
     assert answer.status == 200, answer.text
     process(app, tape, service)
     song = T.read(service.layout, tape).songs[0]
@@ -189,11 +236,11 @@ def test_an_edge_set_over_the_wire_is_not_moved_by_a_re_run(service: Service) ->
 def test_an_overlap_is_refused_and_changes_nothing(service: Service) -> None:
     app = build(service)
     tape = placed(app, service)
-    post(app, f"/api/tapes/{tape}/songs/2/edges", service, {"start": 7.0, "end": 11.0})
+    body = seeing(service, tape, 2, 7.0, 11.0)
+    post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
     before = T.read(service.layout, tape)
-    refused = post(
-        app, f"/api/tapes/{tape}/songs/1/edges", service, {"start": 0.0, "end": 8.0}
-    )
+    body = seeing(service, tape, 1, 0.0, 8.0)
+    refused = post(app, f"/api/tapes/{tape}/songs/1/edges", service, body)
     assert refused.status == 409
     assert "overlaps song 2" in refused.json()["error"]
     assert T.read(service.layout, tape) == before
@@ -221,7 +268,7 @@ def test_a_real_zero_is_a_good_edge(service: Service) -> None:
     app = build(service)
     tape = placed(app, service)
     url = f"/api/tapes/{tape}/songs/1/edges"
-    assert post(app, url, service, {"start": 0.0, "end": 1.0}).status == 200
+    assert post(app, url, service, seeing(service, tape, 1, 0.0, 1.0)).status == 200
     assert T.read(service.layout, tape).songs[0].start == 0.0
 
 

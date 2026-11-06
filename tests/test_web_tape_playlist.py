@@ -1077,7 +1077,15 @@ def test_an_archived_tape_takes_no_new_judgement_or_choice(service: Service) -> 
     for action, body in (
         ("release", {"release": "rel-other"}),
         ("from-list", {}),
-        ("edges", {"start": one.start, "end": (one.end or 0.0) - 0.5}),
+        (
+            "edges",
+            {
+                "start": one.start,
+                "end": (one.end or 0.0) - 0.5,
+                "seen_start": one.start,
+                "seen_end": one.end,
+            },
+        ),
         ("heard", {}),
         ("skip", {}),
     ):

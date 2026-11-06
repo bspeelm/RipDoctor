@@ -32,7 +32,7 @@ from tests.test_web_tape_cut import (
     placed,
     settle_all,
 )
-from tests.test_web_tapes import a_tape_runner
+from tests.test_web_tapes import a_tape_runner, seeing
 
 TG_TITLE = "TITLE"
 
@@ -1575,7 +1575,7 @@ def test_a_boundary_moved_after_the_cut_refuses_filing_until_it_is_cut_again(
     tape = cut_tape(app, service)
     url = f"/api/tapes/{tape}/songs/2/edges"
     current = songs(service, tape)[1]
-    body = {"start": current.start, "end": (current.end or 0.0) - 0.5}
+    body = seeing(service, tape, 2, current.start, (current.end or 0.0) - 0.5)
     assert post(app, url, service, body).status == 200
     assert post(app, f"/api/tapes/{tape}/file", service).status == 409
 
@@ -1718,7 +1718,7 @@ def test_a_boundary_on_a_filed_song_is_refused_and_it_is_never_filed_twice(
     before = T.read(service.layout, tape)
     imports = len(beet_of(service).imports)
     current = before.songs[1]
-    body = {"start": current.start, "end": (current.end or 0.0) - 0.5}
+    body = seeing(service, tape, 2, current.start, (current.end or 0.0) - 0.5)
     refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
     assert refused.status == 409
     assert "already in the library" in refused.json()["error"]
@@ -1797,7 +1797,7 @@ def test_a_song_lost_at_beets_cannot_be_moved_and_file_again_finds_the_library_s
     filed = songs(service, tape)[1]
     imports = len(beet_of(service).imports)
     lost_at_beets(service, tape)
-    body = {"start": filed.start, "end": (filed.end or 0.0) - 0.2}
+    body = seeing(service, tape, 2, filed.start, (filed.end or 0.0) - 0.2)
     refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
     assert refused.status == 409
     assert "press File again" in refused.json()["error"]

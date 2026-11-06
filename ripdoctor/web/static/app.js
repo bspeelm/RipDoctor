@@ -1565,7 +1565,9 @@ async function saveTapeEdges(num, start, end) {
   }
   tpEd.frozen = true;
   try {
-    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`, { start, end });
+    const seen = songOf(num);
+    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`,
+      { start, end, seen_start: seen.start, seen_end: seen.end });
     showTape(after);
     tapeSelect(num, tpEd.sel?.edge ?? "start", false);
     waveSay(moveSaid(before, after, num));
@@ -1573,6 +1575,8 @@ async function saveTapeEdges(num, start, end) {
     tpEd.frozen = tapeWatching || !!tape?.playlist.done;
     if (tape) tpEd.setTracks(tapeTracks(tape));
     tapeReadout();
+    // What this page believed may be what was wrong, so the markers show the truth.
+    try { if (tape) showTape(await api(`/api/tapes/${tape.id}`)); } catch { /* it was asked again only to be sure, and the reason below still stands */ }
     waveSay(`Not moved: ${e.message}`, true);
   }
 }

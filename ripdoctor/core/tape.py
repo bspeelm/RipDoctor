@@ -882,6 +882,17 @@ def _crossing(tape: Tape, song: Song, start: float, end: float) -> str:
     return ""
 
 
+def still_as_seen(tape: Tape, song: Song, seen: Span) -> None:
+    """Refuse a move made from edges that are no longer the song's."""
+    music_of(tape)
+    if seen != (song.start, song.end):
+        raise BadEdge(
+            f"{label(song)} has changed since this page loaded it: it is now "
+            f"{clock(song.start or 0.0)} to {clock(song.end or 0.0)}, and nothing was "
+            "moved - look again"
+        )
+
+
 def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
     """A person's boundary, which every other song not set by ear is laid around.
 

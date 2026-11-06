@@ -19,7 +19,14 @@ from ripdoctor.web.service import Service
 from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Job
 from tests.test_web_routes import a_service, get, post
-from tests.test_web_tapes import a_new_tape, a_tape_runner, process, send_csv, upload
+from tests.test_web_tapes import (
+    a_new_tape,
+    a_tape_runner,
+    process,
+    seeing,
+    send_csv,
+    upload,
+)
 
 TWO = (
     "playlist,owned,position,title,artist,album,duration\r\n"
@@ -104,7 +111,8 @@ def cut(app, tape: str, service: Service) -> H.Response:  # type: ignore[no-unty
 def set_song_2(app, tape: str, service: Service, start: float, end: float) -> None:  # type: ignore[no-untyped-def]
     """Inside the silence before it, so song 1 has no cause to move or doubt."""
     url = f"/api/tapes/{tape}/songs/2/edges"
-    assert post(app, url, service, {"start": start, "end": end}).status == 200
+    body = seeing(service, tape, 2, start, end)
+    assert post(app, url, service, body).status == 200
 
 
 def directory(service: Service, tape: str) -> Path:
