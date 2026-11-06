@@ -2771,6 +2771,11 @@ const matchTape = (again) => startTapeJob(`/api/tapes/${tape.id}/match`, { again
 
 const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
+function serverGone() {
+  status("The server can't be reached. Trying again…", true);
+  if (tpJobStep) stepBox(tpJobStep).querySelector(".tp-state").textContent = "No contact";
+}
+
 // Also what a reload lands in when a job is still going.
 async function watchTape() {
   if (tapeWatching) return;
@@ -2784,10 +2789,14 @@ async function watchTape() {
       let j;
       try {
         j = await api(`/api/job/${key}`);
+        if (missed >= TRIES && tpJobStep) stepBusy(tpJobStep);
         missed = 0;
       } catch (e) {
-        // A server restarting does not answer for a moment, and a job is not lost by it.
-        if (e.status || ++missed >= TRIES) throw e;
+        // Anything that answered is an answer. Nothing else says whether the job is
+        // still going, so this only keeps asking, which can do nothing twice, and comes
+        // back by itself. A server that restarted says so when it does answer: a 404.
+        if (e.status) throw e;
+        if (++missed >= TRIES) serverGone();
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }

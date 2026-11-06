@@ -244,7 +244,7 @@ def test_a_job_lost_to_a_restart_is_said_plainly_and_a_blip_is_waited_out() -> N
     """It said "no job" and left the last progress on the page."""
     js = (STATIC / "app.js").read_text()
     body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "if (e.status || ++missed >= TRIES) throw e" in body
+    assert "if (e.status) throw e;" in body
     assert "e.status === 404" in body and "start it again" in body
     assert "if (tapeWatching) for (const b of TAPE_JOB_BUTTONS)" in js
 
@@ -786,3 +786,19 @@ def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "Laid around it" not in said and "No longer accepted" not in said
+
+
+def test_with_the_server_gone_the_page_kept_saying_working_and_now_says_so() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (++missed >= TRIES) serverGone();" in body
+    assert "throw e;" in body.split("serverGone")[0].split("catch (e)")[1]
+    assert "if (missed >= TRIES && tpJobStep) stepBusy(tpJobStep);" in body
+    gone = re.search(r"function serverGone\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "can't be reached" in gone and "No contact" in gone
+
+
+def test_keeping_on_asking_for_a_job_sends_nothing_but_the_question() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "postJSON" not in body
