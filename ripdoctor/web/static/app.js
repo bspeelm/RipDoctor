@@ -3902,8 +3902,8 @@ async function loadOrphans() {
         try {
           const r = await postJSON("/api/rip/salvage",
                                    { slug: o.slug, side: o.side, kind: o.kind });
-          status(`salvaged side ${r.side} — ${fmt(r.duration)}`);
           await loadOrphans(); await refreshAlbums(o.slug);
+          status(`salvaged side ${r.side} — ${fmt(r.duration)}`);
         } catch (e) { $("#rip-err").textContent = e.message; keep.disabled = false; }
       };
       const drop = el("button", "ghost", "Discard");
@@ -3973,10 +3973,10 @@ async function loadRipSides() {
         try {
           const r = await postJSON("/api/rip/discard-side",
                                    { slug: o.slug, side: o.side });
-          status(`discarded side ${r.side} — freed ${(r.freed_bytes / 1e6).toFixed(0)} MB`);
           if (r.notes.length) logline(r.notes.join("\n"));
           await loadRipSides();
           await refreshAlbums(S.slug);
+          status(`discarded side ${r.side} — freed ${(r.freed_bytes / 1e6).toFixed(0)} MB`);
         } catch (e) { $("#rip-err").textContent = e.message; drop.disabled = false; }
       };
       row.append(drop);

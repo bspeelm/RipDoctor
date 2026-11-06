@@ -242,6 +242,16 @@ def test_a_replaced_punch_reports_what_the_replacing_said() -> None:
     assert "runJob" not in body
 
 
+def test_what_keeping_or_discarding_a_capture_did_outlasts_the_reload_it_causes() -> (
+    None
+):
+    """Reopening the record clears the status line, so the sentence was gone at once."""
+    js = (STATIC / "app.js").read_text()
+    for said in ("status(`salvaged side", "status(`discarded side"):
+        at = js.index(said)
+        assert js.rindex("await refreshAlbums(", 0, at) > at - 200
+
+
 def test_the_capture_controls_invent_no_rate_or_depth() -> None:
     """A busy device cannot be asked what it accepts, and busy is the ordinary
     case: a capture is running. A hardcoded fallback then offers a list the
