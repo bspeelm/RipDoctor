@@ -1588,3 +1588,11 @@ def test_ci_has_to_parse_the_pages_scripts_and_make_check_tries_to() -> None:
     assert "--require=needs_node" in ci
     make = (root / "Makefile").read_text()
     assert re.search(r"^check:.*\bjs\b", make, re.M)
+
+
+def test_a_split_takes_its_edges_from_the_rule_that_bounds_them() -> None:
+    js = (STATIC / "app.js").read_text()
+    split = re.search(r"function splitAtPlayhead\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "splitEdges(t, at," in split
+    assert "if (edges.refused) { status(edges.refused, true); return; }" in split
+    assert "g.lo" not in split, "the page has its own idea of a gap's edges again"

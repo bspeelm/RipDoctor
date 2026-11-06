@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { drawMeter, slugify } from "/ripui.js";
+import { drawMeter, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -878,41 +878,26 @@ function offerDraft(slug) {
   return true;
 }
 
-// Split the track under the playhead in two.
-//
-// If the playhead sits inside a detected silence, the two new edges are placed
-// the way refit2 places them - tail after the outgoing music, lead before the
-// incoming - so the second track gets its lead-in instead of starting on the
-// first note. Outside a gap the split lands exactly where you clicked, because
-// a "split here" that quietly moves somewhere else is worse than a blunt one.
+// Split the track under the playhead in two. Where the edges go is ripui.js's.
 function splitAtPlayhead() {
   const at = ed.playhead;
   const list = tracks();
   const t = list.find((x) => x.start < at && at < x.end);
   if (!t) { status("playhead is not inside a track — click inside one first", true); return; }
-  if (at - t.start < 0.5 || t.end - at < 0.5) { status("too close to an existing boundary", true); return; }
-
-  const LEAD = 1.3, TAIL = 1.5;
-  let prevEnd = at, nextStart = at, note = "split at playhead";
-  const g = (S.sideData[S.side].gaps?.band?.gaps || []).find((x) => x.lo <= at && at <= x.hi);
-  if (g) {
-    prevEnd = Math.min(g.lo + TAIL, g.hi - 0.2);
-    nextStart = Math.max(g.hi - LEAD, g.lo + 0.2);
-    if (nextStart < prevEnd) prevEnd = nextStart = (g.lo + g.hi) / 2;
-    note = `split inside gap ${g.lo.toFixed(2)}–${g.hi.toFixed(2)}`;
-  }
+  const edges = splitEdges(t, at, S.sideData[S.side].gaps?.band?.gaps);
+  if (edges.refused) { status(edges.refused, true); return; }
 
   // everything at or after the insertion point shifts up one, across all sides
   const newNum = t.number + 1;
   for (const x of Object.values(S.bySide).flat()) if (x.number >= newNum) x.number += 1;
 
-  list.push({ number: newNum, title: "Untitled", start: round2(nextStart), end: t.end, settled: "hand" });
-  t.end = round2(prevEnd);
+  list.push({ number: newNum, title: "Untitled", start: round2(edges.start), end: t.end, settled: "hand" });
+  t.end = round2(edges.end);
   setByHand(t);
   list.sort((a, b) => a.start - b.start);
   markDirty(); renderTracks(); ed.setTracks(list);
   select(newNum, "start");
-  status(note);
+  status(edges.note);
 }
 
 function select(num, edge, picked = false) {

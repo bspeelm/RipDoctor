@@ -79,3 +79,41 @@ export function drawMeter(cv, levels) {
 export function slugify(artist, album) {
   return `${artist} - ${album}`.replace(/[ /]/g, "-").replace(/[^A-Za-z0-9\-_]/g, "");
 }
+
+// What a boundary may do, worked out from numbers alone so it can be run without a page.
+
+const LEAD = 1.3, TAIL = 1.5;
+
+// Neither part of a split may be shorter than this.
+const SMALLEST = 0.5;
+
+const secs = (v) => `${v.toFixed(2)} s`;
+
+// Where a split puts the two new edges, or why there is nothing to split.
+//
+// Inside a silence between two pieces of music the edges go the way a fit places them: tail
+// after the outgoing music, lead before the incoming, so the second track gets its lead-in.
+// A silence that reaches the track's own start or end has music on one side at most, and
+// its edges say nothing about this track. Outside a gap the split lands exactly where the
+// playhead is, because a "split here" that quietly moves somewhere else is worse than a
+// blunt one.
+export function splitEdges(track, at, gaps) {
+  const g = (gaps || []).find((x) => x.lo <= at && at <= x.hi);
+  let end = at, start = at, note = "split at playhead";
+  if (g) {
+    const span = `${secs(g.lo)} to ${secs(g.hi)}`;
+    if (g.lo <= track.start && g.hi >= track.end)
+      return { refused: `nothing to split: all of this track is inside one silent region (${span}), so there is no music either side of the playhead` };
+    if (g.lo <= track.start)
+      return { refused: `nothing to split: the silence under the playhead (${span}) runs back to this track's start, so the first part would have no music. Move the playhead into the music` };
+    if (g.hi >= track.end)
+      return { refused: `nothing to split: the silence under the playhead (${span}) runs on to this track's end, so the second part would have no music. Move the playhead into the music` };
+    end = Math.min(g.lo + TAIL, g.hi - 0.2);
+    start = Math.max(g.hi - LEAD, g.lo + 0.2);
+    if (start < end) end = start = (g.lo + g.hi) / 2;
+    note = `split inside gap ${g.lo.toFixed(2)}–${g.hi.toFixed(2)}`;
+  }
+  if (end - track.start < SMALLEST || track.end - start < SMALLEST)
+    return { refused: "too close to an existing boundary" };
+  return { end, start, note };
+}
