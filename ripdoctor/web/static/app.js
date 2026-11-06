@@ -1417,16 +1417,16 @@ async function fpRun(rel) {
                            "fitting");
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
-    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + r.report;
+    const kept = r.kept ? `${counted(r.kept, "track", "tracks")} you set or checked left where ${r.kept === 1 ? "it was" : "they were"}` : "";
+    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + (kept ? `${kept}.\n\n` : "") + r.report;
     $("#fp-done").hidden = false;
     $("#fp-cancel").hidden = true;
     S.sideData = {};
     await openAlbum(S.slug);
     const forced = (r.forced || []).join(", ");
-    const kept = r.kept ? `, ${counted(r.kept, "track", "tracks")} you settled left where ${r.kept === 1 ? "it was" : "they were"}` : "";
     status(forced
-      ? `first pass applied${kept} — side ${forced} placed from the catalogue alone, check it by ear`
-      : `first pass applied${kept} — read the delta column, then check by ear`);
+      ? `first pass applied — side ${forced} placed from the catalogue alone, check it by ear`
+      : "first pass applied — read the delta column, then check by ear");
   } catch (e) {
     // keep the release list up so another one can be tried straight away
     renderReleases();

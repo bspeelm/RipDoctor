@@ -130,7 +130,7 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 .cut-fields input{width:100%;min-width:0;font-size:13px}
 .cut-fields input[data-edge]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .cut-moves{display:flex;gap:.25rem;align-items:stretch}
-.cut-moves button{padding:.3rem .55rem;font-weight:500}
+.cut-moves button{padding:.3rem .55rem;font-weight:500;font-size:12.5px}
 .cut-fields input[type=number]{appearance:textfield}
 #tracks .t{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 #tracks .t-start,#tracks .t-end{cursor:pointer}

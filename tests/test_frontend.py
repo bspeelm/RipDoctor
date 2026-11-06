@@ -1488,3 +1488,10 @@ def test_no_top_level_name_is_declared_twice() -> None:
         )
         doubled = {n for n in names if names.count(n) > 1}
         assert not doubled, f"{script.name}: {sorted(doubled)}"
+
+
+def test_the_first_pass_report_says_what_it_left_where_it_was() -> None:
+    """The status line clears behind the dialog, so the report is what gets read."""
+    js = (STATIC / "app.js").read_text()
+    assert "you set or checked left where" in js
+    assert '(kept ? `${kept}.\\n\\n` : "") + r.report' in js
