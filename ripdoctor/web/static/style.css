@@ -81,7 +81,9 @@ header .tabs,header strong{flex:none}
 #sides button{border:0;padding:.2rem .8rem;color:var(--fg)}
 #sides button.on{color:#0b0d10}
 #cut-wave{flex:none;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0f1114}
-#cut-scroll{flex:1 1 auto;min-height:11rem;overflow-y:auto}
+#cut-scroll{flex:1 1 auto;min-height:11rem;overflow-y:auto;display:flex;flex-direction:column;gap:.75rem}
+#cut-scroll > *{flex:none}
+#cut-scroll #logwrap{border:1px solid var(--line);border-radius:9px;overflow:hidden}
 #cut-msg{flex:none;min-height:1.4em;font-size:13px}
 #cut-msg #status{display:block;white-space:normal;color:#b9bec5;font-size:13px}
 
@@ -99,44 +101,52 @@ header .tabs,header strong{flex:none}
 .hint{margin:0;color:var(--ghost);font-size:11px;line-height:1.45;max-width:44rem}
 kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 .25rem}
 
-/* tracks | album+art | rip doctor | side.  The track table gives up the width:
-   it was running to ~50% of a wide screen while the album panel was 16rem and
-   scrolling. */
-#lower{display:flex;gap:0;flex:none;height:36vh;min-height:15rem;overflow:hidden;
-  padding:.5rem 0 .5rem .75rem}
-#tracks{flex:1;border-collapse:collapse;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
-  display:block;overflow:auto}
-#tracks th{position:sticky;top:0;background:var(--bg);text-align:left;color:var(--dim);
-  font-weight:500;padding:.25rem .5rem;border-bottom:1px solid var(--line)}
-#tracks td{padding:.15rem .5rem;border-bottom:1px solid #1f232a}
+/* The table takes what the album panel leaves, and scrolls sideways before it crushes a
+   time. A row's own title is what gives way. */
+#lower{display:grid;grid-template-columns:minmax(0,1fr) minmax(16rem,20rem);gap:.75rem;align-items:start}
+#cut-table{min-width:0;overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+#cut-table-head{display:flex;align-items:center;gap:.4rem;min-width:36rem;padding:.4rem .6rem}
+#cut-table-head button{font-size:12.5px;padding:.2rem .6rem}
+#tracks{width:100%;min-width:36rem;table-layout:fixed;border-collapse:collapse}
+#tracks th{text-align:left;color:var(--ghost);font-size:11px;font-weight:500;letter-spacing:.06em;
+  text-transform:uppercase;padding:.3rem .5rem;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#tracks .c-num{width:3rem}
+#tracks .c-time{width:5rem}
+#tracks .c-len{width:4.25rem}
+#tracks .c-bnd{width:10.75rem}
+#tracks .c-del{width:2.5rem}
+#tracks td{padding:.3rem .5rem;border-bottom:1px solid #1f232a;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+#tracks tbody tr:last-child td{border-bottom:0}
 #tracks tr.sel td{background:#20262e}
+#tracks tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 #tracks input{width:100%;border:0;background:transparent;padding:.1rem .2rem;font:inherit}
 #tracks input:focus{background:#0f1114;outline:1px solid var(--accent)}
-#tracks .num{width:3rem}#tracks .t{width:6rem;text-align:right}
-#tracks .drift{text-align:right}
-#tracks .drift.forced{color:var(--warn);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
-.big{color:var(--warn)}
-/* The table was taking half a wide screen while sitting nearly empty and the
-   album panel scrolled at 21rem. Cap the table, let the panels take real width,
-   and reserve the scrollbar gutter so it never crowds an input. */
-#tracks{flex:1 1 0;min-width:20rem;max-width:44rem}
-#album-panel{flex:1 1 25rem;min-width:20rem;max-width:32rem;overflow-y:auto;
-  scrollbar-gutter:stable;border-left:1px solid var(--line);
-  padding:0 1rem 0 1rem;display:flex;flex-direction:column}
-#album-panel label{flex-direction:row;align-items:center;gap:.6rem;margin-bottom:.4rem}
-#album-panel label input{flex:1;min-width:0}
-#album-panel label{font-size:.75rem}
-#side-panel{flex:0 0 15rem;overflow-y:auto;scrollbar-gutter:stable;
-  border-left:1px solid var(--line);padding:0 .75rem 0 1rem;
-  display:flex;flex-direction:column}
-#album-panel .row,#side-panel .row{display:flex;gap:.4rem;margin-bottom:.5rem}
-#album-panel .row button,#side-panel .row button{flex:1}
-#album-panel h3,#side-panel h3{margin:.15rem 0 .35rem;font-size:.8rem;color:var(--dim);font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em}
-#review{flex:1;min-height:0;overflow-y:auto}
+#tracks input[type=number]{appearance:textfield;color:var(--dim);
+  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks .t{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks .t-start,#tracks .t-end{cursor:pointer}
+#tracks .t-start{color:var(--start)}
+#tracks .t-end{color:var(--end)}
+#tracks .drift{color:var(--dim);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks .drift.big{color:var(--warn)}
+#tracks .c-del button{padding:0 .4rem;border:0;color:var(--ghost)}
+#tracks .c-del button:hover{color:var(--end)}
+#album-panel{min-width:0;display:flex;flex-direction:column;gap:.5rem;padding:.65rem .75rem;
+  border:1px solid var(--line);border-radius:9px}
+#album-panel h3,#cut-table-head h3{margin:0;font-size:11px;font-weight:500;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim)}
+#album-panel label{font-size:11.5px}
+#album-panel input:not([type=file]){width:100%;min-width:0;font-size:13px}
+#md-year{width:6rem}
+#album-panel hr{width:100%;margin:.15rem 0;border:0;border-top:1px solid var(--line)}
+#album-panel .row{display:flex;gap:.4rem}
+#album-panel .row button{font-size:12.5px;padding:.2rem .6rem}
+#album-panel .err:empty{display:none}
 #review a{display:block;color:var(--accent);text-decoration:none;padding:.1rem 0;
   font:12px/1.5 ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #review a:hover{text-decoration:underline}
+#review p{margin:0;font-size:12.5px}
 #logwrap{flex:none;background:#0f1114;border-top:1px solid var(--line)}
 #logbar{display:flex;align-items:center;gap:.6rem;padding:.25rem .75rem;
   font-size:11px;color:var(--dim)}
@@ -483,8 +493,8 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
 #imp-results .vinyl{border-left:3px solid var(--start)}
 #imp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
 
-#md-note{font-size:10.5px;line-height:1.4;margin:0 0 .2rem;color:var(--ghost)}
-#art-state{font:11px/1.4 ui-monospace,monospace;margin-bottom:.3rem}
+#md-note{font-size:12px;line-height:1.4;margin:0;color:var(--ghost)}
+#art-state{font-size:12.5px;line-height:1.4}
 #art-err{font-size:11px}
 
 /* auto-stop warning: a 20 s decision, so the countdown is the loudest thing in

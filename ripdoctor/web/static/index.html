@@ -536,47 +536,50 @@
       <div id="cut-msg"><span id="status"></span></div>
 
       <div id="cut-scroll">
-          <div id="lower">
-            <table id="tracks"><thead><tr>
-              <th>#</th><th>title</th><th>start</th><th>end</th><th>len</th><th>cat &Delta;</th><th></th>
-            </tr></thead><tbody></tbody></table>
-            <div id="album-panel">
-              <h3>Album</h3>
-              <label>Artist <input id="md-artist" placeholder="required"></label>
-              <label>Album <input id="md-album" placeholder="required"></label>
-              <label>Year <input id="md-date" size="6" placeholder="2015"></label>
-              <p class="dim" id="md-note">What you type here is what gets written &mdash;
-                it overrides the release title, qualifiers and all.</p>
-              <h3>Cover art</h3>
-              <div id="art-state" class="dim">&mdash;</div>
-              <div class="row">
-                <button id="art-upload" class="ghost">Upload image</button>
-                <input type="file" id="art-file" accept="image/*" hidden>
-              </div>
-              <p class="err" id="art-err"></p>
-            </div>
-
-            <div id="side-panel">
+        <div id="lower">
+          <section id="cut-table">
+            <div id="cut-table-head">
               <h3>Side <span id="sp-letter"></span></h3>
-                  <div class="row">
-                <button id="addtrack" class="ghost">Add track</button>
-                <button id="splittrack" class="ghost" title="split the track under the playhead in two (S)">Split here</button>
-              </div>
-              <h3>Finished tracks</h3>
-              <div id="review"><p class="dim">nothing cut yet</p></div>
-            </div>
-          </div>
-          <div id="logwrap" hidden>
-            <div id="logbar">
-              <b>console</b>
-              <span id="logwhat">raw output from the pipeline tools &mdash; the finished-tracks
-                list is read back from <code>review/</code>, so the two disagreeing is the signal</span>
               <span class="spacer"></span>
-              <button id="logclear" class="ghost tiny">clear</button>
-              <button id="logtoggle" class="ghost tiny">hide</button>
+              <button type="button" id="addtrack" class="ghost">Add track</button>
+              <button type="button" id="splittrack" class="ghost" title="split the track under the playhead in two (S)">Split here</button>
             </div>
-            <pre id="log"></pre>
+            <table id="tracks"><thead><tr>
+              <th class="c-num">#</th><th>Title</th><th class="c-time">Start</th><th class="c-time">End</th>
+              <th class="c-len">Length</th><th class="c-len">Cat &Delta;</th><th class="c-bnd">Boundary</th><th class="c-del"></th>
+            </tr></thead><tbody></tbody></table>
+          </section>
+          <section id="album-panel">
+            <h3>Album</h3>
+            <label>Artist <input id="md-artist" placeholder="required"></label>
+            <label>Album <input id="md-album" placeholder="required"></label>
+            <label id="md-year">Year <input id="md-date" size="6" placeholder="2015"></label>
+            <p class="dim" id="md-note">What you type here is what gets written &mdash;
+              it overrides the release title, qualifiers and all.</p>
+            <hr>
+            <h3>Cover art</h3>
+            <div id="art-state" class="dim">&mdash;</div>
+            <div class="row">
+              <button type="button" id="art-upload" class="ghost">Upload image</button>
+              <input type="file" id="art-file" accept="image/*" hidden>
+            </div>
+            <p class="err" id="art-err"></p>
+            <hr>
+            <h3>Finished tracks</h3>
+            <div id="review"><p class="dim">nothing cut yet</p></div>
+          </section>
+        </div>
+        <div id="logwrap" hidden>
+          <div id="logbar">
+            <b>Console</b>
+            <span id="logwhat">raw output from the pipeline tools &mdash; the finished-tracks
+              list is read back from <code>review/</code>, so the two disagreeing is the signal</span>
+            <span class="spacer"></span>
+            <button id="logclear" class="ghost tiny">clear</button>
+            <button id="logtoggle" class="ghost tiny">hide</button>
           </div>
+          <pre id="log"></pre>
+        </div>
       </div>
     </main>
   </div>

@@ -1210,3 +1210,27 @@ def test_the_keys_and_the_toolbar_do_one_thing_each() -> None:
     assert "player.audition(" in re.search(  # type: ignore[union-attr]
         r"function auditionSelected\(.*?\n\}", js, re.S
     ).group(0)
+
+
+def test_a_track_placed_from_the_catalogue_is_marked_on_its_row() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '["From catalogue · check", "warn"]' in body
+    assert "zero by" in body, "the delta on such a row says nothing, and says so"
+
+
+def test_the_album_panel_holds_the_finished_tracks_beside_the_table() -> None:
+    page = cut_markup()
+    panel = page[page.index('id="album-panel"') : page.index('id="logwrap"')]
+    for field in ("md-artist", "md-album", "md-date", "art-upload", "review"):
+        assert f'id="{field}"' in panel
+    table = page[page.index('id="cut-table"') : page.index('id="album-panel"')]
+    for button in ("addtrack", "splittrack"):
+        assert f'id="{button}"' in table
+    assert 'id="side-panel"' not in page
+
+
+def test_the_console_keeps_its_clear_button() -> None:
+    page = cut_markup()
+    log = page[page.index('id="logwrap"') :]
+    assert 'id="logclear"' in log and 'id="logtoggle"' in log and 'id="log"' in log

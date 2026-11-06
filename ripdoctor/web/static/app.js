@@ -543,28 +543,27 @@ function renderTracks() {
     const tr = el("tr");
     if (ed.sel && ed.sel.track === t.number) tr.className = "sel";
 
-    const num = el("td"); const ni = el("input"); ni.className = "num";
+    const num = el("td", "c-num"); const ni = el("input"); ni.className = "num";
     ni.value = t.number; ni.type = "number";
     ni.onchange = () => { t.number = parseInt(ni.value, 10) || t.number; markDirty(); renderTracks(); ed.render(); };
     num.appendChild(ni); tr.appendChild(num);
 
     const ti = el("input"); ti.value = t.title;
     ti.onchange = () => { t.title = ti.value; markDirty(); };
-    const td = el("td"); td.appendChild(ti); tr.appendChild(td);
+    const td = el("td", "c-title"); td.appendChild(ti); tr.appendChild(td);
 
     for (const edge of ["start", "end"]) {
-      const c = el("td", "t", fmt(t[edge]));
+      const c = el("td", `t t-${edge}`, fmt(t[edge]));
       c.title = `${t[edge].toFixed(2)} s`;
       c.onclick = () => { select(t.number, edge); ed.fitRange(t.start, t.end); };
       tr.appendChild(c);
     }
 
     const len = t.end - t.start;
-    tr.appendChild(el("td", "t", fmt(len)));
+    tr.appendChild(el("td", "t t-len", fmt(len)));
     const dr = el("td", "drift");
     if (t.forced) {
-      dr.textContent = "forced";
-      dr.className = "drift forced";
+      dr.textContent = "—";
       dr.title = "placed from the catalogue, not found — this column is zero by "
                + "construction and cannot tell you whether the boundary is right";
     } else if (t.cat) {
@@ -573,8 +572,12 @@ function renderTracks() {
       if (Math.abs(d) > 10) dr.className = "drift big";
     } else dr.textContent = "—";
     tr.appendChild(dr);
+    const bnd = statusCell(t.forced ? ["From catalogue · check", "warn"] : ["Not flagged", "mute"]);
+    bnd.classList.add("c-bnd-cell");
+    if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
+    tr.appendChild(bnd);
 
-    const del = el("td");
+    const del = el("td", "c-del");
     const db = el("button", "ghost", "×");
     db.title = "delete track";
     db.onclick = () => {
