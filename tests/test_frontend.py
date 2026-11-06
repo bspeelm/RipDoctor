@@ -771,3 +771,18 @@ def test_a_question_about_a_list_could_be_answered_from_a_row_that_never_asked_i
     assert "tpListAsk?.row === song.number" in opened
     picked = re.search(r"function tapeSelect\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "if (opening) tpListAsk = null;" in picked
+
+
+def test_two_markers_on_one_spot_could_not_be_told_apart_by_a_long_timeline() -> None:
+    js = (STATIC / "editor.js").read_text()
+    hit = re.search(r"\n  hit\(x, y.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "best && this.long ? this._tieBroken(x, reach, best) : best" in hit
+    broken = re.search(r"\n  _tieBroken\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "this.sel?.track" in broken
+    assert 'x > n.at ? "start" : "end"' in broken
+
+
+def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
+    js = (STATIC / "app.js").read_text()
+    said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "Laid around it" not in said and "No longer accepted" not in said

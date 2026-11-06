@@ -827,6 +827,17 @@ def _mismatch(
     return "; ".join(said)
 
 
+def _silences_in(
+    songs: Sequence[Song], music: Music
+) -> tuple[tuple[int, float, float], ...]:
+    return tuple(
+        (s.number, lo, hi)
+        for lo, hi in (g.quiet for g in music.gaps)
+        for s in songs
+        if s.start is not None and s.end is not None and s.start < lo and hi < s.end
+    )
+
+
 def place(tape: Tape, music: Music) -> Tape:
     """Set every boundary not set by ear; those split the list and stay put.
 
@@ -864,12 +875,7 @@ def place(tape: Tape, music: Music) -> Tape:
             out[at] = _placed_song(out[at], span, quiet)
         index = stop
 
-    inside = tuple(
-        (s.number, lo, hi)
-        for lo, hi in quiet
-        for s in out
-        if s.start is not None and s.end is not None and s.start < lo and hi < s.end
-    )
+    inside = _silences_in(out, music)
     misfits = _misfits(out, inside)
     if misfits * 2 > len(out):
         disputed.update(s.number for s in out)
@@ -1041,22 +1047,23 @@ def edges_held(song: Song) -> str:
     )
 
 
+def _overlaps(other: Song, which: str, at: float) -> str:
+    then = "which stays where it is, since the library holds it, or may"
+    if not edges_held(other):
+        then = "move that one first"
+    return f"that overlaps song {other.number}, which {which} at {clock(at)} - {then}"
+
+
 def _crossing(tape: Tape, song: Song, start: float, end: float) -> str:
-    """Why a moved edge passes the song beside it, or nothing. Whichever way a boundary
-    has to go, the edge moving away from its partner can go first and a found partner
-    follows, so a refusal here never leaves a boundary with no way to get there."""
+    """Why a moved edge passes the song beside it, or nothing. A move needs the
+    neighbour's edge out of its way first, which is never stuck: an edge moved away from
+    its partner is not passing anything."""
     before = [s for s in tape.songs if s.number < song.number]
     after = [s for s in tape.songs if s.number > song.number]
     if before and start != song.start and start < (at := before[-1].end or 0.0):
-        return (
-            f"that overlaps song {before[-1].number}, which ends at {clock(at)} - "
-            "move that one first"
-        )
+        return _overlaps(before[-1], "ends", at)
     if after and end != song.end and end > (at := after[0].start or end):
-        return (
-            f"that overlaps song {after[0].number}, which starts at {clock(at)} - "
-            "move that one first"
-        )
+        return _overlaps(after[0], "starts", at)
     return ""
 
 
@@ -1071,26 +1078,14 @@ def still_as_seen(tape: Tape, song: Song, seen: Span) -> None:
         )
 
 
-def _still_owed(before: Tape, after: Tape, number: int) -> Tape:
-    """A song in doubt that a neighbour's move happens to lay somewhere it agrees with
-    the list has still not been judged by anyone."""
-    waiting = {s.number for s in before.songs if doubtful(s)} - {number}
-    return replace(
-        after,
-        songs=tuple(
-            replace(s, owes_ear=True) if s.number in waiting and not doubtful(s) else s
-            for s in after.songs
-        ),
-    )
-
-
 def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
-    """A person's boundary, which every other song not set by ear is laid around.
+    """A person's boundary. It moves this song and no other: what a move leaves between
+    two songs belongs to neither, which is right for a gap, and whose audio that is only
+    a person can say.
 
-    No edge passes the song beside it, whoever set that one, and ear-set songs keep
-    list order against each other, near or far, because `place` relies on them to split
-    the list. Nothing the library holds or may hold moves, whether it is this song or
-    one laid around it.
+    No edge passes the song beside it, whoever set that one, and ear-set songs keep list
+    order against each other, near or far, because `place` relies on them to split the
+    list. Nothing the library holds or may hold moves.
     """
     music = music_of(tape)
     song = _song_at(tape, number)
@@ -1117,23 +1112,14 @@ def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
     crossing = _crossing(tape, song, start, end)
     if crossing:
         raise BadEdge(crossing)
-    placed = _changed(
-        tape,
-        number,
-        start=round(start, 3),
-        end=round(end, 3),
-        set_by=EAR,
-        heard=False,
+    moved = _ear_song(
+        replace(song, start=round(start, 3), end=round(end, 3), set_by=EAR, heard=False)
     )
-    moved = place(placed, music)
-    for was, now in zip(tape.songs, moved.songs, strict=True):
-        if (was.start, was.end) != (now.start, now.end) and (held := edges_held(was)):
-            raise BadEdge(
-                f"that would move a song beside it: {held}. Keep this edge in the "
-                "silence between them, and if it belongs anywhere else, skip this song "
-                "or start the tape over"
-            )
-    return _still_owed(tape, moved, number)
+    songs = tuple(moved if s.number == number else s for s in tape.songs)
+    changed = replace(tape, songs=songs, inside=_silences_in(songs, music))
+    if tape.mismatch and not place(changed, music).mismatch:
+        return replace(changed, mismatch="")
+    return changed
 
 
 def hear(tape: Tape, number: int, heard: bool = True) -> Tape:

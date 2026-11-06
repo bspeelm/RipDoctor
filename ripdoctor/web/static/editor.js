@@ -13,6 +13,7 @@ const OVERVIEW_H = 42;
 const DRAG_FROM = 3;           // pixels a pointer must travel before a press is a move
 const COARSE = 2;              // seconds per pixel beyond which no marker can be grabbed
 const TOUCH_REACH = 20;        // how near a finger has to land to grab a marker
+const TIE_PX = 1;              // pixels within which two markers count as one spot
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const fmt = (t) => {
@@ -366,7 +367,25 @@ export class Editor {
         if (d <= reach && (!best || d < best.d)) best = { track: t.number, edge, d };
       }
     }
-    return best;
+    return best && this.long ? this._tieBroken(x, reach, best) : best;
+  }
+
+  // Two markers on one spot have to be separable by the mouse. The selected song's comes
+  // first, then whichever one's song lies on the side the pointer is: the song starting
+  // here is to the right of it, and the one ending is to the left.
+  _tieBroken(x, reach, best) {
+    const near = [];
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        const at = this.xOf(t[edge]), d = Math.abs(at - x);
+        if (d <= reach && d - best.d <= TIE_PX) near.push({ track: t.number, edge, d, at });
+      }
+    }
+    if (near.length < 2) return best;
+    const mine = near.filter((n) => n.track === this.sel?.track);
+    const pool = mine.length ? mine : near;
+    const { track, edge, d } = pool.find((n) => n.edge === (x > n.at ? "start" : "end")) ?? pool[0];
+    return { track, edge, d };
   }
 
   zoomTo(t0, t1) {

@@ -551,7 +551,7 @@ def test_an_edge_left_alone_is_never_what_a_move_is_refused_for() -> None:
 
 def test_the_edge_moving_away_from_its_partner_can_always_go_first() -> None:
     """Song 1 really ends at 90, inside what was taken for it: its own end goes back,
-    and song 2's found start follows, where dragging that first would be refused."""
+    and then song 2's start can come to it, where dragging that first is refused."""
     gaps = (
         TP.Gap(90.0, 92.0, 90.0, 92.0),
         TP.Gap(100.0, 102.0, 100.0, 102.0),
@@ -568,8 +568,8 @@ def test_the_edge_moving_away_from_its_partner_can_always_go_first() -> None:
     with pytest.raises(TP.BadEdge, match="overlaps song 1"):
         TP.set_edges(tape, 2, 92.0, 202.0)
     moved = TP.set_edges(tape, 1, 0.0, 90.0)
-    assert moved.songs[1].start == 92.0
-    assert moved.songs[1].set_by == TP.FOUND
+    assert moved.songs[1] == tape.songs[1]
+    assert TP.set_edges(moved, 2, 92.0, 202.0).songs[1].start == 92.0
 
 
 @pytest.mark.parametrize("filing", [F.FILED, F.ALREADY, F.UNKNOWN])
@@ -588,8 +588,7 @@ def test_a_song_lost_at_beets_keeps_its_edges_or_the_old_copy_would_pass_for_the
     tape = replace(tape, songs=(tape.songs[0], song, tape.songs[2]))
     with pytest.raises(TP.BadEdge, match=r"song 2 .*press File again"):
         TP.set_edges(tape, 2, 102.5, 202.0)
-    with pytest.raises(TP.BadEdge, match="would move a song beside it: song 2"):
-        TP.set_edges(tape, 1, 0.0, 90.0)
+    assert TP.set_edges(tape, 1, 0.0, 90.0).songs[1] == song
 
 
 def test_a_song_whose_filing_failed_can_still_be_moved() -> None:
@@ -597,21 +596,20 @@ def test_a_song_whose_filing_failed_can_still_be_moved() -> None:
     assert TP.set_edges(tape, 2, 102.5, 202.0).songs[1].start == 102.5
 
 
-def test_a_move_that_would_lay_a_filed_song_elsewhere_is_refused() -> None:
+def test_a_move_beside_a_filed_song_leaves_it_and_may_not_pass_it() -> None:
     tape = three_placed(s3=F.FILED)
-    with pytest.raises(TP.BadEdge, match="would move a song beside it: song 3"):
-        TP.set_edges(tape, 2, 102.0, 190.0)
+    assert TP.set_edges(tape, 2, 102.0, 190.0).songs[2] == tape.songs[2]
+    with pytest.raises(TP.BadEdge, match=r"overlaps song 3.*stays where it is"):
+        TP.set_edges(tape, 2, 102.0, 260.0)
 
 
-def test_a_failed_song_beside_a_filed_one_is_told_what_it_can_still_do() -> None:
-    """Pulling its end into its own music would take the start of the filed song with
-    it, so the honest answers are the silence between them, a skip or starting over."""
+def test_a_failed_song_beside_a_filed_one_could_only_stay_and_can_now_move() -> None:
+    """Pulling its end into its own music took the start of the filed song with it, so
+    it was refused, and the only answers were the silence between them or a skip."""
     tape = three_placed(s2=F.FAILED, s3=F.FILED)
-    with pytest.raises(TP.BadEdge, match="skip this song or start the tape over"):
-        TP.set_edges(tape, 2, 102.0, 195.0)
-    assert TP.set_edges(tape, 2, 102.0, 203.0).songs[1].end == 203.0
-    assert TP.skip(tape, 2).songs[1].skip
-    assert TP.cut_refusal(TP.skip(tape, 2)) == ""
+    moved = TP.set_edges(tape, 2, 102.0, 195.0)
+    assert moved.songs[1].end == 195.0
+    assert moved.songs[2] == tape.songs[2]
 
 
 def test_a_move_that_leaves_a_filed_neighbour_where_it_is_goes_through() -> None:

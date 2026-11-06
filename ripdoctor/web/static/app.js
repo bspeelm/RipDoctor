@@ -2474,24 +2474,16 @@ function tapeHearSilence(lo, hi) {
   tpPlayer.toggle(Math.max(0, lo - 4));
 }
 
-// What a move did beyond the song moved, which is the part nobody asked for.
-function moveSaid(before, after, num) {
-  const was = (n) => before.songs.find((s) => s.number === n);
-  const moved = after.songs.filter((s) => s.number !== num
-    && (was(s.number).start !== s.start || was(s.number).end !== s.end));
-  const unheard = moved.filter((s) => was(s.number).heard && !s.heard);
+// What a move means from here: only this song moved, and its cut no longer matches.
+function moveSaid(after, num) {
   const stale = after.ear.filter((r) => r.cut === "out of date").length;
-  const shown = moved.slice(0, 3).map((s) => `song ${s.number} (${fmtLong(s.start)} to ${fmtLong(s.end)})`);
   return [
     `Song ${num} is yours now, and nothing will move it.`,
-    moved.length ? `Laid around it: ${shown.join(", ")}${moved.length > 3 ? ` and ${moved.length - 3} more` : ""}.` : "",
-    unheard.length ? `No longer accepted, because they moved: ${unheard.map((s) => s.number).join(", ")}.` : "",
     stale ? `${stale} cut${stale === 1 ? " is" : "s are"} now out of date - press Cut again.` : "",
   ].filter(Boolean).join(" ");
 }
 
 async function saveTapeEdges(num, start, end) {
-  const before = tape;
   if (tpNudge?.tape === tape.id && tpNudge.song === num) dropNudge();
   else await flushNudge();
   tpEd.frozen = true;
@@ -2501,7 +2493,7 @@ async function saveTapeEdges(num, start, end) {
       { start, end, seen_start: seen.start, seen_end: seen.end });
     showTape(after);
     if (tpEd.sel?.track === num) tapeSelect(num, tpEd.sel.edge, false, tpPicked?.track === num);
-    waveSay(moveSaid(before, after, num));
+    waveSay(moveSaid(after, num));
   } catch (e) {
     tpEd.frozen = tapeWatching || !!tape?.playlist.done;
     if (tape) tpEd.setTracks(tapeTracks(tape));

@@ -2153,8 +2153,7 @@ the whole list. It disagrees when it does not fit or when more than one grouping
 well. When most of the list is far from its lengths, the whole list is flagged. The
 document keeps that flag against each song, and only that song's own acceptance, setting
 or skip answers it, because setting its neighbours can end the disagreement and says
-nothing about a song nobody heard. For the same reason a doubt that a neighbour's move
-happens to lay somewhere it agrees stays owed. A new list clears it. That can ask for
+nothing about a song nobody heard. A new list clears it. That can ask for
 every song to be judged, which is heavy on a long list and is accepted: the gate is the
 point of the flow. A song the library holds or may hold was judged before it got there,
 and is never flagged again.
@@ -2188,8 +2187,10 @@ Alt, Ctrl or Meta to the browser. None of this, and neither the coarser grid nor
 hours in it, applies to a record's editor, which stays as it was.
 
 **A person's judgement.** A boundary a person set is never moved. Moving either edge
-sets the song's two edges as theirs, and lays every song not set by ear around them
-again, the same way `place` always has, so a found neighbour may move, and the page says which.
+sets the song's two edges as theirs and changes no other song on the tape, found or not.
+Moving an end earlier leaves the audio after it belonging to neither song, which is right
+for a gap: a neighbour laid onto it took on the end of a song that was not its own and was
+flagged for it, and the two markers then sat on one spot and could not be pulled apart.
 Ear-set songs must stay in list order against each other, adjacent or not. Accepting,
 stored as heard, keeps the origin and the measured verdict and answers the doubt in its
 own flag. It is about particular edges, so a later fit that moves them takes it away,
@@ -2199,11 +2200,15 @@ is reported.
 
 **What a move may not do.** One rule, in `set_edges`, whoever asks. No edge passes the
 edge of the song beside it, whoever set that edge. That never strands a boundary: the
-edge moving away from its partner can go first, and a found partner follows. Nothing the
-library holds or may hold moves, whether that is the song moved or one laid around it,
-and that includes a song sent to beets with no answer yet. Filing again answers that one,
-because it finds the copy or imports the song. The marker goes back and the reason is
-shown.
+edge moving away from its partner can go first, and then the partner can come to it. A
+song the library holds or may hold does not move, and that includes a song sent to beets
+with no answer yet. Filing again answers that one, because it finds the copy or imports
+the song. The marker goes back and the reason is shown.
+
+**Two markers on one spot.** On a long timeline a press that lands on two markers takes
+the selected song's, and then the one whose song lies on the side the pointer is: the
+song starting there is to its right, the one ending there to its left. A record's editor
+keeps the first it finds.
 
 **A move says what it saw.** Moving one edge re-sends the other, so a page left open
 could put back an edge moved since. The edges route requires the two edges the sender
@@ -2222,10 +2227,9 @@ its own click sent, so none goes by accident.
 
 **The way back from a filed song.** Remove that copy with beets, then load the list
 again. A new list is refused once any boundary on the tape is a person's, and then the
-only way is to remove the tape and start it over. A failed song beside a filed one can
-keep its edge in the silence between them; if it belongs anywhere else, laying the filed
-song around it is refused, so the choices are to skip it or start over. There is no third
-way, and this record does not add one.
+only way is to remove the tape and start it over. A failed song beside a filed one moves
+freely up to the filed song's edge. There is no third way, and this record does not add
+one.
 
 ### Matching
 
