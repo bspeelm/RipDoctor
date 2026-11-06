@@ -1705,7 +1705,7 @@ async function saveList(songs, openAfter, sure, seen) {
       tpListAsk = null;
       await reloadTape();
     }
-    if (e.needsConfirm) tpListAsk = { said: e.message, songs, openAfter, seen };
+    if (e.needsConfirm) tpListAsk = { said: e.message, songs, openAfter, seen, row: tpOpen };
     else $("#tp-err").textContent = e.message;
     showSongs(tape);
     return false;
@@ -2138,7 +2138,7 @@ function songOpenView(song, row, t) {
                smallButton("Remove", "take off the list", () => removeSong(song), "ghost tiny tp-danger"));
   fields.append(moves);
   box.append(fields);
-  if (tpListAsk && !tpDraft) box.append(listAskView());
+  if (tpListAsk?.row === song.number) box.append(listAskView());
 
   const said = song.reason || (row?.doubtful ? MISMATCH_SAYS : "");
   if (said) box.append(el("p", row?.doubtful ? "tp-warn" : "dim", said));
@@ -2190,7 +2190,7 @@ function draftRowView() {
                smallButton("Cancel", "forget this song", () => { tpDraft = null; showTape(tape); }));
   fields.append(moves);
   box.append(fields);
-  if (tpListAsk) box.append(listAskView());
+  if (tpListAsk?.row === "draft") box.append(listAskView());
   td.append(box);
   tr.append(td);
   return tr;
@@ -2206,7 +2206,11 @@ async function addDraft() {
   const number = tape.songs.length + 1;
   const draft = tpDraft;
   tpDraft = null;
-  if (!await sendList(() => [...listNow(), draft], number)) { tpDraft = draft; showTape(tape); }
+  if (!await sendList(() => [...listNow(), draft], number)) {
+    tpDraft = draft;
+    if (tpListAsk) tpListAsk.row = "draft";
+    showTape(tape);
+  }
 }
 
 // A redraw rebuilds every input, so what is being typed goes back afterwards: a job's
@@ -2401,6 +2405,7 @@ function tapeSelect(num, edge, fit, picked = false) {
   showTapeTools();
   if (num == null) return;
   const opening = tpOpen !== num;
+  if (opening) tpListAsk = null;
   tpOpen = num;
   waveSay("");
   if (opening) showSongs(tape);

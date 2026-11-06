@@ -619,6 +619,8 @@ def test_a_list_that_loses_boundaries_is_asked_about_in_its_row() -> None:
     assert "tpListAsk = {" in body and "confirm(" not in body
     opened = re.search(r"function songOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "listAskView()" in opened
+    drafted = re.search(r"function draftRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "listAskView()" in drafted
 
 
 def test_a_tape_opens_on_the_song_that_needs_its_person() -> None:
@@ -753,3 +755,19 @@ def test_a_song_that_needs_no_cut_is_not_counted_or_called_uncut() -> None:
     step = re.search(r"function stepCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'r.cut !== "not needed"' in step
     assert '"not needed"].includes(cutSaid)' in js
+
+
+def test_a_question_about_a_list_could_be_answered_from_a_row_that_never_asked_it() -> (
+    None
+):
+    """It showed on whichever row was open, with Go ahead sending a list nobody there
+    had made."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "row: tpOpen" in body
+    added = re.search(r"async function addDraft\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'tpListAsk.row = "draft"' in added
+    opened = re.search(r"function songOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpListAsk?.row === song.number" in opened
+    picked = re.search(r"function tapeSelect\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (opening) tpListAsk = null;" in picked
