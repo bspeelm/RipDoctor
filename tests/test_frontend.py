@@ -1056,3 +1056,14 @@ def test_a_finger_needs_forty_pixels_on_the_toolbar_and_a_row() -> None:
     for row_button in (".tp-moves button", ".tp-rel-quiet button", ".tp-ask button"):
         assert row_button in narrow
     assert "min-height:40px;min-width:40px}" in narrow
+
+
+def test_a_marker_s_tag_says_what_it_stands_for_and_a_time_stays_readable() -> None:
+    js = (STATIC / "editor.js").read_text()
+    assert "if (this.long) cv.title = this._tagAt(x, y);" in js
+    tag = re.search(r"\n  _tagAt\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.title" in tag and "edge" in tag
+    assert js.index("this._markers(c, L);") < js.index("this._timeLabels(c, L);")
+    labels = re.search(r"\n  _timeLabels\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (!this.long) return;" in labels
+    assert "if (this.long) this.labels.push({ label, x });" in js

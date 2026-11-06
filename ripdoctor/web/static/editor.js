@@ -125,6 +125,7 @@ export class Editor {
     this._grid(c, L);
     this._ghosts(c, L);
     this._markers(c, L);
+    this._timeLabels(c, L);
     this._playhead(c, L);
     this._overview(c, L.over);
   }
@@ -213,13 +214,28 @@ export class Editor {
     c.strokeStyle = "#20242b"; c.fillStyle = "#5a626c";
     c.font = "10px ui-monospace,monospace"; c.lineWidth = 1;
     let clear = -Infinity;
+    this.labels = [];
     for (let t = Math.ceil(this.t0 / step) * step; t < this.t1; t += step) {
       const x = Math.round(this.xOf(t)) + 0.5;
       c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
       if (this.long && x < clear) continue;
       const label = this.long ? fmtLong(t) : fmt(t);
-      c.fillText(label, x + 3, L.over.top - 4);
+      if (this.long) this.labels.push({ label, x });
+      else c.fillText(label, x + 3, L.over.top - 4);
       clear = x + c.measureText(label).width + 8;
+    }
+  }
+
+  // After the markers on a long timeline, on a plate, so that a line through a time does
+  // not make it unreadable.
+  _timeLabels(c, L) {
+    if (!this.long) return;
+    c.font = "10px ui-monospace,monospace";
+    for (const { label, x } of this.labels) {
+      c.fillStyle = "#0f1114";
+      c.fillRect(x + 1, L.over.top - 14, c.measureText(label).width + 4, 13);
+      c.fillStyle = "#5a626c";
+      c.fillText(label, x + 3, L.over.top - 4);
     }
   }
 
@@ -388,6 +404,19 @@ export class Editor {
     return { track, edge, d };
   }
 
+  // A marker's tag is a number and a mark, so what it stands for is in the tooltip.
+  _tagAt(x, y) {
+    if (!this.side || y >= this.layout().over.top) return "";
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        if (Math.abs(this.xOf(t[edge]) - x) <= HIT_PX) {
+          return `${t.number} ${t.title}: ${edge} at ${fmtLong(t[edge])}`;
+        }
+      }
+    }
+    return "";
+  }
+
   zoomTo(t0, t1) {
     const d = this.side.duration;
     let span = clamp(t1 - t0, 0.25, d);
@@ -458,6 +487,7 @@ export class Editor {
       const x = e.clientX - r.left, y = e.clientY - r.top;
       if (!this.drag) {
         cv.style.cursor = this.hit(x, y) ? "ew-resize" : "crosshair";
+        if (this.long) cv.title = this._tagAt(x, y);
         return;
       }
       if (this.drag.mode === "overview") {
