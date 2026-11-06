@@ -848,8 +848,8 @@ def label(song: Song) -> str:
 
 def edges_held(song: Song) -> str:
     """Why these edges stay as they are, or nothing. The library's copy was cut from
-    them, and one not confirmed may be there."""
-    if song.filing == UNKNOWN:
+    them, and one not confirmed, or sent to beets with no answer yet, may be there."""
+    if song.filing == UNKNOWN or song.import_begun:
         return (
             f"{label(song)} is not confirmed, and the library may already hold it, so "
             "its boundaries stay as they are until a read-back answers - press File "

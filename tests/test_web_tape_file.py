@@ -1778,3 +1778,43 @@ def test_a_release_held_by_a_lost_import_is_freed_by_filing_again(
     assert not file_it(app, tape, service)["error"]
     assert {s.import_begun for s in songs(service, tape)} == {False}
     assert {s.filing for s in songs(service, tape)} == {F.FILED}
+
+
+def lost_at_beets(service: Service, tape: str) -> None:
+    current = T.read(service.layout, tape)
+    two = replace(current.songs[1], filing=TP.PENDING, path="", import_begun=True)
+    T.save(service.layout, replace(current, songs=(current.songs[0], two)))
+
+
+def test_a_song_lost_at_beets_cannot_be_moved_and_file_again_finds_the_library_s_copy(
+    service: Service,
+) -> None:
+    """The server died at the import: a move let through here was then answered by the
+    old row, and the page showed a current cut while the library held the old audio."""
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    filed = songs(service, tape)[1]
+    imports = len(beet_of(service).imports)
+    lost_at_beets(service, tape)
+    body = {"start": filed.start, "end": (filed.end or 0.0) - 0.2}
+    refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
+    assert refused.status == 409
+    assert "press File again" in refused.json()["error"]
+    assert not file_it(app, tape, service)["error"]
+    two = songs(service, tape)[1]
+    assert (two.filing, two.path) == (F.ALREADY, filed.path)
+    assert not two.import_begun
+    assert len(beet_of(service).imports) == imports
+
+
+def test_a_song_lost_at_beets_with_nothing_in_the_library_files_and_is_not_a_dead_end(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    lost_at_beets(service, tape)
+    assert not file_it(app, tape, service)["error"]
+    two = songs(service, tape)[1]
+    assert (two.filing, two.import_begun) == (F.FILED, False)
+    assert two.path

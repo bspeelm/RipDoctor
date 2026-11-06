@@ -565,6 +565,19 @@ def test_a_song_the_library_holds_or_may_hold_is_not_moved_by_hand(filing: str) 
         TP.set_edges(tape, 2, 102.5, 202.0)
 
 
+@pytest.mark.parametrize("filing", [TP.PENDING, F.FAILED])
+def test_a_song_lost_at_beets_keeps_its_edges_or_the_old_copy_would_pass_for_the_new(
+    filing: str,
+) -> None:
+    tape = three_placed()
+    song = replace(tape.songs[1], filing=filing, import_begun=True)
+    tape = replace(tape, songs=(tape.songs[0], song, tape.songs[2]))
+    with pytest.raises(TP.BadEdge, match=r"song 2 .*press File again"):
+        TP.set_edges(tape, 2, 102.5, 202.0)
+    with pytest.raises(TP.BadEdge, match="would move a song beside it: song 2"):
+        TP.set_edges(tape, 1, 0.0, 90.0)
+
+
 def test_a_song_whose_filing_failed_can_still_be_moved() -> None:
     tape = three_placed(s2=F.FAILED)
     assert TP.set_edges(tape, 2, 102.5, 202.0).songs[1].start == 102.5
