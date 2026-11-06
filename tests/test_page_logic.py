@@ -117,6 +117,16 @@ def test_checked_is_offered_on_a_doubt_and_not_on_a_fit_or_a_settled_track() -> 
     assert call("canCheck", None) is False
 
 
+def test_a_finished_captures_last_reading_is_not_what_the_input_is_doing() -> None:
+    """The status keeps it after the stop, so the needle stayed up and the line under
+    it said `monitoring input` about a capture that had ended."""
+    reading = {"full": -30.0, "band": -40.0}
+    assert call("liveLevels", {"running": True, "levels": reading}) == reading
+    assert call("liveLevels", {"running": False, "levels": reading}) is None
+    assert call("liveLevels", {"running": True}) is None
+    assert call("liveLevels", None) is None
+
+
 def test_the_real_scripts_parse() -> None:
     done = check_js("--require")
     assert done.returncode == 0, done.stdout

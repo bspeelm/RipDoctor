@@ -28,6 +28,13 @@ const BAND_ZONES = [
 ];
 const FLOOR = -100;
 
+// What the input is reading now, or nothing. A finished capture's status keeps its last
+// reading for as long as it is the last capture, and that is not a level.
+//
+// Deliberately no peak, held or otherwise: this is a 42 ms window and it jumps every poll,
+// which is unreadable. `ripdoctor probe` is where gain is set.
+export const liveLevels = (st) => (st?.running && st.levels) || null;
+
 export function drawMeter(cv, levels) {
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;

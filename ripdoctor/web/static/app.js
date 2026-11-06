@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { canCheck, drawMeter, fromEarlier, overlapping, slugify, splitEdges } from "/ripui.js";
+import { canCheck, drawMeter, fromEarlier, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -4147,12 +4147,6 @@ function startRipPoll() {
         auto.textContent = q > 5
           ? `quiet for ${Math.round(q)}s — auto-stops at ${Math.round(st.dwell)}s`
           : `music level ${st.music} dB · auto-stop armed`;
-      } else if (!on && st.levels) {
-        auto.className = "dim";
-        // deliberately no peak here: this is a 42 ms window and it jumps every
-        // poll, which is unreadable. `ripdoctor probe` is where gain is set.
-        auto.textContent = `monitoring input — full ${st.levels.full} dB · `
-                         + `1–3 kHz ${st.levels.band} dB`;
       } else { auto.textContent = ""; auto.className = "dim"; }
       // While a stop is being waited out, the readout belongs to whoever is
       // waiting. Two writers on different intervals made it alternate between
@@ -4176,9 +4170,12 @@ function startRipPoll() {
             + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
           : (st.stage === "encoding" ? "encoding…" : "idle");
       }
-      // levels arrive while merely listening too, not only while recording
-      drawMeter($("#meter"), st.levels || null);
-    } catch {}
+      drawMeter($("#meter"), liveLevels(st));
+    } catch {
+      // The next poll says what is going on. Until then a needle left where it was
+      // would be a level nobody measured.
+      drawMeter($("#meter"), null);
+    }
   };
   tick();
   ripTimer = setInterval(tick, 500);
