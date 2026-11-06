@@ -144,7 +144,7 @@ def add(app: App, service: Service) -> None:
         return [
             {
                 "number": s.number,
-                "doubtful": TP.doubtful(tape, s),
+                "doubtful": TP.doubtful(s),
                 "cut": TP.cut_status(s, len(tape.songs), cuts),
             }
             for s in TP.ear_order(tape)

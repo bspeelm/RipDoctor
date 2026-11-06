@@ -499,6 +499,14 @@ def align(
     return Alignment(_walk(ordered, start, end, lengths), False)
 
 
+def _owing(data: dict[str, Any]) -> tuple[Song, ...]:
+    """A document from before the flag was kept meant every song, under a mismatch."""
+    songs = tuple(Song.from_dict(s) for s in data["songs"])
+    if data["mismatch"] and not any("owes_ear" in s for s in data["songs"]):
+        return tuple(replace(s, owes_ear=True) for s in songs)
+    return songs
+
+
 @dataclass(frozen=True, slots=True)
 class Tape:
     id: str
@@ -541,7 +549,7 @@ class Tape:
             music_end=data["music_end"],
             found_start=data.get("found_start"),
             found_end=data.get("found_end"),
-            songs=tuple(Song.from_dict(s) for s in data["songs"]),
+            songs=_owing(data),
             gaps=tuple(
                 Gap(float(lo), float(hi), float(quiet_lo), float(quiet_hi))
                 for (lo, hi), (quiet_lo, quiet_hi) in zip(
@@ -686,23 +694,26 @@ def _ear_song(song: Song) -> Song:
     )
 
 
-def _mismatch(
-    songs: Sequence[Song],
-    fits: bool,
-    stretches: int,
-    inside: Sequence[tuple[int, float, float]],
-    groupings: int,
-) -> str:
-    said: list[str] = []
+def _misfits(songs: Sequence[Song], inside: Sequence[tuple[int, float, float]]) -> int:
     silent = {s.number: 0.0 for s in songs}
     for number, lo, hi in inside:
         silent[number] += hi - lo
-    misfits = sum(
+    return sum(
         s.verdict == DOUBT
         and min(abs(off := s.delta or 0.0), abs(off - silent[s.number]))
         > LENGTH_TOLERANCE
         for s in songs
     )
+
+
+def _mismatch(
+    songs: Sequence[Song],
+    fits: bool,
+    stretches: int,
+    misfits: int,
+    groupings: int,
+) -> str:
+    said: list[str] = []
     if not fits:
         said.append(
             f"{len(songs)} songs on the list and only {stretches} stretches of music "
@@ -722,8 +733,15 @@ def _mismatch(
 
 
 def place(tape: Tape, music: Music) -> Tape:
-    """Set every boundary not set by ear; those split the list and stay put."""
+    """Set every boundary not set by ear; those split the list and stay put.
+
+    What the audio and the list dispute falls on the stretch that disputes it, or on
+    the whole list when most of it disagrees, since then no length that happens to fit
+    proves anything. A song the library holds or may hold was judged before it got
+    there, and is not asked again.
+    """
     out = list(tape.songs)
+    disputed: set[int] = set()
     quiet = [g.quiet for g in music.gaps]
     fits = True
     groupings = 1
@@ -745,6 +763,8 @@ def place(tape: Tape, music: Music) -> Tape:
         found = align(within, lo, hi, [s.length for s in out[index:stop]])
         fits = fits and found.fits
         groupings *= found.groupings
+        if not found.fits or found.groupings > 1:
+            disputed.update(s.number for s in out[index:stop])
         for at, span in enumerate(found.spans, index):
             out[at] = _placed_song(out[at], span, quiet)
         index = stop
@@ -755,10 +775,18 @@ def place(tape: Tape, music: Music) -> Tape:
         for s in out
         if s.start is not None and s.end is not None and s.start < lo and hi < s.end
     )
-    mismatch = _mismatch(out, fits, len(music.gaps) + 1, inside, groupings)
+    misfits = _misfits(out, inside)
+    if misfits * 2 > len(out):
+        disputed.update(s.number for s in out)
+    mismatch = _mismatch(out, fits, len(music.gaps) + 1, misfits, groupings)
     return replace(
         tape,
-        songs=tuple(replace(s, owes_ear=True) for s in out) if mismatch else tuple(out),
+        songs=tuple(
+            replace(s, owes_ear=True)
+            if s.number in disputed and not edges_held(s)
+            else s
+            for s in out
+        ),
         music_start=music.start,
         music_end=music.end,
         found_start=music.found_start,
@@ -896,6 +924,19 @@ def still_as_seen(tape: Tape, song: Song, seen: Span) -> None:
         )
 
 
+def _still_owed(before: Tape, after: Tape, number: int) -> Tape:
+    """A song in doubt that a neighbour's move happens to lay somewhere it agrees with
+    the list has still not been judged by anyone."""
+    waiting = {s.number for s in before.songs if doubtful(s)} - {number}
+    return replace(
+        after,
+        songs=tuple(
+            replace(s, owes_ear=True) if s.number in waiting and not doubtful(s) else s
+            for s in after.songs
+        ),
+    )
+
+
 def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
     """A person's boundary, which every other song not set by ear is laid around.
 
@@ -945,7 +986,7 @@ def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
                 "silence between them, and if it belongs anywhere else, skip this song "
                 "or start the tape over"
             )
-    return moved
+    return _still_owed(tape, moved, number)
 
 
 def hear(tape: Tape, number: int, heard: bool = True) -> Tape:
@@ -964,14 +1005,15 @@ def skip(tape: Tape, number: int, skipped: bool = True) -> Tape:
     return _changed(tape, number, skip=skipped)
 
 
-def doubtful(tape: Tape, song: Song) -> bool:
-    """Waiting for an ear: its own doubt, or any song on a tape whose list and audio
-    disagree, where a length that happens to fit proves nothing. Setting its neighbours
-    can end the disagreement and proves nothing about this song, so one flagged by a
-    mismatch stays flagged until it is judged itself."""
-    if song.skip or song.heard or song.set_by == EAR:
+def doubtful(song: Song) -> bool:
+    """Waiting for an ear: its own doubt, or a stretch of the list its audio disagrees
+    with, where a length that happens to fit proves nothing. Setting its neighbours can
+    end the disagreement and proves nothing about this song, so one flagged that way
+    stays flagged until it is judged itself. What reached the library was judged
+    before it got there."""
+    if song.skip or song.heard or song.set_by == EAR or edges_held(song):
         return False
-    return song.verdict == DOUBT or song.owes_ear or bool(tape.mismatch)
+    return song.verdict == DOUBT or song.owes_ear
 
 
 def ear_order(tape: Tape) -> tuple[Song, ...]:
@@ -980,7 +1022,7 @@ def ear_order(tape: Tape) -> tuple[Song, ...]:
     def rank(song: Song) -> tuple[int, int]:
         if song.skip:
             return 3, song.number
-        if doubtful(tape, song):
+        if doubtful(song):
             return (0 if song.verdict == DOUBT else 1), song.number
         return 2, song.number
 
@@ -1012,7 +1054,7 @@ def cut_refusal(tape: Tape) -> str:
         ),
         (
             "still in doubt - listen, then move it, accept it or skip it",
-            [s for s in active if doubtful(tape, s)],
+            [s for s in active if doubtful(s)],
         ),
         (
             "no settled release - match the songs and settle each one",

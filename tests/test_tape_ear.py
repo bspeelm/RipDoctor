@@ -82,7 +82,7 @@ def test_a_found_neighbour_that_moved_is_no_longer_heard() -> None:
 def test_an_edge_moved_into_the_music_puts_the_found_neighbour_in_doubt() -> None:
     tape = TP.set_edges(three(), 2, 103.0, 203.0)
     assert tape.songs[0].end == 103.0
-    assert TP.doubtful(tape, tape.songs[0]), "it now spans the silence before 102"
+    assert TP.doubtful(tape.songs[0]), "it now spans the silence before 102"
     assert "song 1" in TP.cut_refusal(tape)
 
 
@@ -139,10 +139,10 @@ def test_an_ear_start_at_zero_still_bounds_the_songs_before_it() -> None:
 
 def test_heard_clears_the_doubt_but_keeps_found_as_the_origin() -> None:
     tape = one_doubt()
-    assert TP.doubtful(tape, tape.songs[1])
+    assert TP.doubtful(tape.songs[1])
     heard = TP.hear(tape, 2)
     song = heard.songs[1]
-    assert not TP.doubtful(heard, song)
+    assert not TP.doubtful(song)
     assert song.heard
     assert song.set_by == TP.FOUND
     assert song.verdict == TP.DOUBT, "what was measured is still what was measured"
@@ -159,7 +159,7 @@ def test_a_re_run_that_moves_a_heard_song_takes_the_hearing_away() -> None:
     tape = TP.hear(one_doubt(), 2)
     moved = TP.place(tape, TP.Music(0.0, 310.0, (gap(100.0, 102.0), gap(240.0, 242.0))))
     assert not moved.songs[1].heard
-    assert TP.doubtful(moved, moved.songs[1])
+    assert TP.doubtful(moved.songs[1])
 
 
 def test_a_new_list_takes_the_hearing_with_the_boundaries_it_clears() -> None:
@@ -189,23 +189,112 @@ def test_a_song_with_no_boundaries_or_set_by_ear_cannot_be_heard() -> None:
 
 
 def flagged(tape: TP.Tape) -> list[int]:
-    return [s.number for s in TP.ear_order(tape) if TP.doubtful(tape, s)]
+    return [s.number for s in TP.ear_order(tape) if TP.doubtful(s)]
 
 
 def test_only_the_doubtful_song_is_flagged() -> None:
     assert flagged(one_doubt()) == [2]
 
 
+def owing(tape: TP.Tape) -> TP.Tape:
+    """What `place` leaves when the whole list disagrees with its audio."""
+    songs = tuple(replace(s, owes_ear=True) for s in tape.songs)
+    return replace(tape, songs=songs, mismatch="the list disagrees")
+
+
 def test_a_mismatch_flags_every_song_with_its_own_doubts_first() -> None:
-    tape = replace(one_doubt(), mismatch="the list disagrees")
+    tape = owing(one_doubt())
     assert [s.number for s in TP.ear_order(tape)] == [2, 1, 3]
     assert flagged(tape) == [2, 1, 3]
 
 
 def test_heard_skipped_and_ear_set_songs_are_not_flagged() -> None:
-    tape = replace(one_doubt(), mismatch="the list disagrees")
+    tape = owing(one_doubt())
     tape = TP.set_edges(TP.skip(TP.hear(tape, 1), 3), 2, 101.0, 203.0)
-    assert flagged(replace(tape, mismatch="still")) == []
+    assert flagged(tape) == []
+
+
+def tied_by_a_move(**filing: str) -> tuple[TP.Tape, TP.Tape]:
+    """Pulling song 2's end into its own music leaves a stretch after it that songs 3
+    and 4 can divide two ways alike. Song 1 is on the other side of the move."""
+    gaps = (gap(120.0, 122.0), gap(222.0, 224.0), gap(324.0, 326.0))
+    songs = tuple(
+        TP.Song(
+            n,
+            f"Song {n}",
+            "A Band",
+            "A Record",
+            length,
+            settled_by=M.CATALOGUE,
+            filing=filing.get(f"s{n}", TP.PENDING),
+        )
+        for n, length in enumerate((120.0, 60.0, 100.0, 162.0), 1)
+    )
+    unplaced = TP.Tape(id="mix", name="Mix", duration=450.0, songs=songs)
+    tape = TP.place(unplaced, TP.Music(0.0, 446.0, gaps))
+    return tape, TP.set_edges(tape, 2, 122.0, 192.0)
+
+
+def test_a_tie_one_move_makes_flags_its_own_stretch_and_not_the_songs_far_away() -> (
+    None
+):
+    """It flagged every song on the tape, the far and the filed, and only a hearing of
+    each one could lift it."""
+    before, after = tied_by_a_move()
+    assert not before.mismatch
+    assert "groupings" in after.mismatch
+    assert flagged(after) == [3, 4]
+    assert not after.songs[0].owes_ear
+    assert "song 1" not in TP.cut_refusal(after)
+
+
+def test_a_filed_song_in_a_stretch_a_move_ties_is_not_asked_again() -> None:
+    _, after = tied_by_a_move(s4=TP.FILED)
+    assert "groupings" in after.mismatch
+    assert flagged(after) == [3]
+    assert not after.songs[3].owes_ear
+    assert "song 4" not in TP.cut_refusal(after)
+
+
+def test_a_doubt_a_neighbour_s_move_lays_somewhere_it_agrees_is_still_owed() -> None:
+    """Song 7 was 3.5 s out, a move two songs along re-laid it where it fits, and nobody
+    had heard it. The fuzz found this one in 72,000 moves."""
+    lengths = (60.941, 72.015, 198.952, 238.688, 198.792, 188.795, 62.417, 61.532)
+    lengths = (*lengths, 238.441, 90.476)
+    gaps = tuple(
+        gap(lo, hi)
+        for lo, hi in (
+            (60.941, 62.688),
+            (151.236, 155.154),
+            (354.106, 357.548),
+            (596.237, 598.757),
+            (797.549, 800.584),
+            (1000.949, 1003.408),
+            (1062.289, 1063.454),
+            (1124.986, 1126.777),
+            (1365.217, 1368.033),
+            (1458.509, 1461.221),
+        )
+    )
+    songs = tuple(
+        TP.Song(n, f"Song {n}", "A Band", "A Record", length, settled_by=M.CATALOGUE)
+        for n, length in enumerate(lengths, 1)
+    )
+    unplaced = TP.Tape(id="mix", name="Mix", duration=1527.0, songs=songs)
+    tape = TP.place(unplaced, TP.Music(0.0, 1522.698, gaps))
+    assert not tape.mismatch
+    assert TP.doubtful(tape.songs[6])
+    moved = TP.set_edges(tape, 9, 1136.777, tape.songs[8].end or 0.0)
+    assert moved.songs[6].verdict == TP.AGREES, "laid where it fits"
+    assert TP.doubtful(moved.songs[6]), "and still not judged by anyone"
+
+
+def test_a_document_from_before_the_flag_was_kept_still_flags_every_song() -> None:
+    saved = replace(three(), mismatch="the list disagrees").to_dict()
+    for song in saved["songs"]:
+        del song["owes_ear"]
+    back = TP.Tape.from_dict(saved)
+    assert all(TP.doubtful(s) for s in back.songs)
 
 
 def test_skipped_songs_come_last_in_the_ear_check() -> None:
@@ -236,7 +325,7 @@ def setting_the_five(tape: TP.Tape) -> TP.Tape:
 def test_setting_the_doubts_does_not_clear_a_flagged_song_nobody_heard() -> None:
     tape = setting_the_five(five_in_doubt())
     assert not tape.mismatch
-    assert TP.doubtful(tape, tape.songs[5])
+    assert TP.doubtful(tape.songs[5])
     assert "song 6 (Song 6)" in TP.cut_refusal(tape)
     assert flagged(tape) == [6]
 
@@ -244,7 +333,7 @@ def test_setting_the_doubts_does_not_clear_a_flagged_song_nobody_heard() -> None
 def test_a_flag_survives_the_document() -> None:
     tape = setting_the_five(five_in_doubt())
     again = TP.Tape.from_dict(json.loads(json.dumps(tape.to_dict())))
-    assert TP.doubtful(again, again.songs[5])
+    assert TP.doubtful(again.songs[5])
 
 
 @pytest.mark.parametrize(
@@ -257,13 +346,13 @@ def test_a_flag_survives_the_document() -> None:
 )
 def test_a_flagged_song_is_cleared_by_its_own_judgement(judge: object) -> None:
     tape = judge(setting_the_five(five_in_doubt()))  # type: ignore[operator]
-    assert not TP.doubtful(tape, tape.songs[5])
+    assert not TP.doubtful(tape.songs[5])
     assert TP.cut_refusal(tape) == ""
 
 
 def test_taking_back_the_hearing_of_a_flagged_song_flags_it_again() -> None:
     tape = TP.hear(TP.hear(setting_the_five(five_in_doubt()), 6), 6, False)
-    assert TP.doubtful(tape, tape.songs[5])
+    assert TP.doubtful(tape.songs[5])
 
 
 def test_a_new_list_starts_with_nothing_flagged() -> None:
@@ -292,7 +381,7 @@ def test_an_unheard_doubt_refuses_the_cut_and_is_named() -> None:
 
 
 def test_a_mismatch_refuses_the_cut_until_each_song_is_judged() -> None:
-    tape = replace(three(), mismatch="the list disagrees")
+    tape = owing(three())
     assert "song 1" in TP.cut_refusal(tape)
     judged = TP.hear(TP.hear(TP.hear(tape, 1), 2), 3)
     assert TP.cut_refusal(judged) == ""
