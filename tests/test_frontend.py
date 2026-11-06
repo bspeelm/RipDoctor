@@ -1617,3 +1617,10 @@ def test_the_row_and_the_rail_say_a_track_overlaps() -> None:
     assert "Overlaps" in boundary
     cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert '"Overlap"' in cut and "!!f.overlaps.length" in cut
+
+
+def test_a_warning_about_an_overlap_goes_when_the_overlap_does() -> None:
+    js = (STATIC / "app.js").read_text()
+    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'else if (saidOverlap) status("no tracks overlap now");' in helper
+    assert "saidOverlap = !!over.length;" in helper

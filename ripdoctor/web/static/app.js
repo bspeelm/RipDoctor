@@ -574,6 +574,8 @@ const trackOverlaps = (t) => overlapping(t, sideOf(t)).sort((a, b) => a.start - 
 const sideOf = (t) => Object.values(S.bySide).find((list) => list.includes(t)) ?? [];
 const placedByLength = (t) => !t.settled && !t.forced && t.placed === "length";
 
+let saidOverlap = false;
+
 // A boundary moved is the person's, and nothing later moves it, this included: one moved
 // past its neighbour stays there, and they are told at once, while it is theirs to undo.
 function setByHand(t) {
@@ -582,6 +584,8 @@ function setByHand(t) {
   t.placed = "";
   const over = trackOverlaps(t);
   if (over.length) status(`${t.number} \u201c${t.title}\u201d now overlaps ${over.map((x) => `${x.number} \u201c${x.title}\u201d`).join(" and ")}. Left where you put it; Cut will not run until they no longer overlap.`, true);
+  else if (saidOverlap) status("no tracks overlap now");
+  saidOverlap = !!over.length;
 }
 
 // The row is read-only, and what edits it opens beneath it, one at a time. The open track is
