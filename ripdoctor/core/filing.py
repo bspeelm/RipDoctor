@@ -310,6 +310,22 @@ def held_albums(rows: Sequence[Row]) -> tuple[Held, ...]:
     )
 
 
+def _owning(made: Proposal, row: Row, choice: Choice | None) -> Proposal:
+    copy = Copy(row.album_artist or row.artist, row.album, row.path, row.release)
+    return replace(made, status=OWNED, reason="", note="", choice=choice, copy=copy)
+
+
+def _maybe(made: Proposal, path: str) -> tuple[Proposal, str]:
+    """A copy only a person can vouch for. A failed lookup stays one, to be retried."""
+    said = (
+        f"your library may already have this at {path}, and nothing proves it is this "
+        "song - listen, then use that copy or choose a release"
+    )
+    if made.status == FAILED:
+        return replace(made, library_note=said), path
+    return replace(made, status=REVIEW, reason=said), path
+
+
 def at_lookup(
     song: Song,
     made: Proposal,
@@ -318,28 +334,29 @@ def at_lookup(
     taken: Collection[str] = (),
 ) -> tuple[Proposal, str]:
     """A proposal, as the pre-check would answer it at File, and any copy only a person
-    can vouch for. Only what would be filed is asked about by its recording: a doubt's
-    best guess proves nothing by its id. A copy proved by name holds no release, because
-    File looks for it by the same name."""
-    filing = made.status == MATCHED
-    said = precheck(
-        replace(song, proposal=made if filing else None), by_id, by_name, taken
-    )
-    if said.action == ALREADY:
-        row = next(r for r in (*by_id, *by_name) if r.path == said.path)
-        copy = Copy(row.album_artist or row.artist, row.album, row.path, row.release)
-        kept = made.choice if filing and row in by_id else None
-        return replace(
-            made, status=OWNED, reason="", note="", choice=kept, copy=copy
-        ), ""
-    if said.unconfirmed:
-        reason = (
-            f"your library may already have this at {said.unconfirmed}, with no "
-            "recording id to prove it - listen, then use that copy or choose this "
-            "release"
-        )
-        return replace(made, status=REVIEW, reason=reason), said.unconfirmed
-    if said.action == FAILED and (filing or song.album):
+    can vouch for. A song is owned with nobody looking only on a recording id: the one a
+    match chose, or one the catalogue offered for this song. A doubt's best guess proves
+    nothing by its id, and a row that only agrees on title, artist and length can be a
+    live album, so that is for a person."""
+    if made.status == MATCHED:
+        said = precheck(replace(song, proposal=made), by_id, by_name, taken)
+        if said.action == ALREADY:
+            row = next(r for r in (*by_id, *by_name) if r.path == said.path)
+            return _owning(made, row, made.choice if row in by_id else None), ""
+        if said.unconfirmed:
+            return _maybe(made, said.unconfirmed)
+    else:
+        said = precheck(replace(song, proposal=None), (), by_name, taken)
+        if said.action == ALREADY:
+            row = next(r for r in by_name if r.path == said.path)
+            offered = (
+                c
+                for c in made.candidates
+                if row.recording and c.recording == row.recording
+            )
+            found = next(offered, None)
+            return (_owning(made, row, found), "") if found else _maybe(made, row.path)
+    if said.action == FAILED and (made.status == MATCHED or song.album):
         return replace(made, library_note=said.note), ""
     return made, ""
 

@@ -10,6 +10,7 @@ import pytest
 from ripdoctor.config.settings import Settings
 from ripdoctor.core import filing as F
 from ripdoctor.core import match as M
+from ripdoctor.core import tape as TP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import tapes as T
 from ripdoctor.web.routes import build
@@ -30,9 +31,15 @@ def a_release(
     extras: tuple[str, ...] = (),
     group: str = "",
     date: str = "1990",
+    status: str = "Official",
 ) -> dict[str, object]:
     made = an_edition(
-        mbid, title=title, tracks=tracks, group=group or f"g-{mbid}", date=date
+        mbid,
+        title=title,
+        tracks=tracks,
+        group=group or f"g-{mbid}",
+        date=date,
+        status=status,
     )
     made["release-group"] = {
         "id": group or f"g-{mbid}",
@@ -341,15 +348,89 @@ def test_a_copy_with_this_recording_is_shown_at_lookup_and_counts_as_settled(
     }
 
 
-def test_a_copy_proved_by_name_when_the_catalogue_has_no_answer_is_shown(
+def test_a_row_agreeing_by_name_settles_nothing_when_nothing_was_matched(
     service: Service, catalogue: Catalogue
 ) -> None:
-    where = owned_row(service, album="Elsewhere", mb_trackid="their-own-id")
+    """It settled itself with nobody looking, so a live take of the same length answered
+    for the song."""
+    where = owned_row(service, album="Live Somewhere", mb_trackid="their-own-id")
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    assert statuses(view) == [M.REVIEW]
+    assert view["songs"][0]["settled_by"] == ""
+    assert releases(view)["copy"] is None
+    assert releases(view)["maybe_copy"] == str(where)
+
+
+def test_a_review_with_a_row_of_another_recording_is_asked_about_and_not_owned(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("A Song", 200)], status="Bootleg")
+    ]
+    where = owned_row(service, album="Live Somewhere", mb_trackid="their-own-id")
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    assert statuses(view) == [M.REVIEW]
+    assert view["songs"][0]["settled_by"] == ""
+    assert releases(view)["maybe_copy"] == str(where)
+
+
+def test_a_review_with_a_row_of_no_recording_id_is_asked_about_and_not_owned(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("A Song", 200)], status="Bootleg")
+    ]
+    where = owned_row(service, album="Live Somewhere")
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    assert statuses(view) == [M.REVIEW]
+    assert releases(view)["maybe_copy"] == str(where)
+
+
+def test_a_review_whose_candidate_is_the_rows_recording_is_owned_by_that_id(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("A Song", 200)], status="Bootleg")
+    ]
+    where = owned_row(service, mb_trackid="rec-r-1", mb_albumid="r")
     app = build(service)
     view = looked_up(app, service, a_tape(app, service, row("A Song")))
     assert statuses(view) == [M.OWNED]
     assert releases(view)["copy"]["path"] == str(where)
-    assert proposal(view)["choice"] is None
+    assert proposal(view)["choice"]["recording"] == "rec-r-1"
+
+
+def test_a_failed_lookup_never_settles_on_a_row_and_stays_to_be_retried(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.down = {"recording"}
+    where = owned_row(service, mb_trackid="their-own-id")
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    view = looked_up(app, service, tape)
+    assert statuses(view) == [M.FAILED]
+    assert view["songs"][0]["settled_by"] == ""
+    assert view["all_settled"] is False
+    assert releases(view)["maybe_copy"] == str(where)
+    assert str(where) in releases(view)["library_note"]
+    assert [s.number for s in TP.to_match(T.read(service.layout, tape))] == [1]
+
+
+def test_a_person_can_use_a_copy_a_lookup_only_asked_about(
+    service: Service, catalogue: Catalogue
+) -> None:
+    where = owned_row(service, album="Elsewhere", mb_trackid="their-own-id")
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    looked_up(app, service, tape)
+    used = post(
+        app, f"/api/tapes/{tape}/songs/1/use-copy", service, {"path": str(where)}
+    )
+    assert used.status == 200
+    assert used.json()["songs"][0]["filing"] == F.ALREADY
 
 
 def test_a_row_of_another_length_is_not_a_copy(
@@ -600,10 +681,12 @@ def test_a_view_of_a_song_never_looked_up_offers_nothing(service: Service) -> No
 def test_a_copy_found_at_lookup_is_found_again_at_file_and_written_to_the_playlist(
     service: Service, catalogue: Catalogue
 ) -> None:
-    catalogue.albums["A Record"] = [a_release("r", "A Record", [("One", 5)])]
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("One", 5), ("Two", 5)])
+    ]
     beet = beet_of(service)
     one = owned_row(service, "One", length="0:05", mb_trackid="rec-r-1", mb_albumid="r")
-    two = owned_row(service, "Two", length="0:05", album="Elsewhere", mb_trackid="x")
+    two = owned_row(service, "Two", length="0:05", mb_trackid="rec-r-2", mb_albumid="r")
     app = build(service)
     tape = placed(app, service)
     view = looked_up(app, service, tape)
