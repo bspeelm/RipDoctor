@@ -127,6 +127,100 @@ def test_a_finished_captures_last_reading_is_not_what_the_input_is_doing() -> No
     assert call("liveLevels", None) is None
 
 
+def values(*names: str) -> dict:  # type: ignore[type-arg]
+    program = (
+        f"import {{ {', '.join(names)} }} from {json.dumps(RULES.as_uri())};"
+        f"console.log(JSON.stringify({{ {', '.join(names)} }}));"
+    )
+    done = subprocess.run(  # noqa: S603 - argv list, never shell=True
+        [str(shutil.which("node")), "--input-type=module", "-e", program],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(done.stdout)  # type: ignore[no-any-return]
+
+
+def test_the_meter_says_what_the_chain_measures_and_nothing_a_mock_drew() -> None:
+    """The advice on the page is to drop the needle in the groove zone. Zones from a
+    drawing put true silent groove in red and quiet music in `groove`."""
+    got = values("ZONES", "BAND_ZONES", "FLOOR")
+    assert got["FLOOR"] == -100
+    assert [(z["lo"], z["hi"], z["label"]) for z in got["ZONES"]] == [
+        (-120, -68, "dead air / needle up"),
+        (-68, -60, "groove"),
+        (-60, -45, "quiet music"),
+        (-45, 0, "music"),
+    ]
+    assert [(z["lo"], z["hi"], z["label"]) for z in got["BAND_ZONES"]] == [
+        (-120, -92, "dead air"),
+        (-92, -72, "silent groove"),
+        (-72, -58, "arm-up rumble"),
+        (-58, -44, "quiet music"),
+        (-44, 0, "music"),
+    ]
+
+
+def test_the_scale_is_straight_and_ends_where_it_says() -> None:
+    assert call("levelAt", -100) == 0
+    assert call("levelAt", 0) == 1
+    assert call("levelAt", -50) == 0.5
+    assert call("levelAt", -120) == 0, "under the floor reads as the floor"
+    assert call("levelAt", 3) == 1
+
+
+def test_a_level_is_named_by_the_zone_it_is_in() -> None:
+    zones = values("BAND_ZONES")["BAND_ZONES"]
+    for db, label in [
+        (-110.0, "dead air"),
+        (-92.0, "silent groove"),
+        (-72.1, "silent groove"),
+        (-72.0, "arm-up rumble"),
+        (-58.0, "quiet music"),
+        (-44.0, "music"),
+        (0.0, "music"),
+    ]:
+        assert call("zoneOf", db, zones)["label"] == label, db
+
+
+def history(*steps: tuple[float, object]) -> list[dict]:  # type: ignore[type-arg]
+    seen: list[dict] = []  # type: ignore[type-arg]
+    for at, band in steps:
+        seen = call("historyAfter", seen, at, band)  # type: ignore[assignment]
+    return seen
+
+
+def test_a_poll_with_no_level_leaves_a_gap_and_not_a_level() -> None:
+    seen = history((10.0, -40.0), (10.5, None), (11.0, -41.0))
+    assert [s["db"] for s in seen] == [-40.0, -41.0]
+
+
+def test_the_history_forgets_what_has_left_its_window() -> None:
+    seen = history((0.0, -40.0), (10.0, -41.0), (50.0, -42.0))
+    assert [s["db"] for s in seen] == [-42.0]
+
+
+def test_a_stretch_with_no_readings_is_drawn_as_nothing() -> None:
+    """A capture stopped and started, or a tab left in the background. Drawing across
+    it would be showing levels that nobody read."""
+    seen = [{"at": 100.0, "db": -40.0}, {"at": 110.0, "db": -41.0}]
+    bars = call("historyBars", seen, 110.0)
+    assert len(bars) == 2
+    assert bars[0]["to"] <= (30 - 10) / 30 + 1e-9
+    assert bars[1]["from"] >= (30 - 0.5 - 0.01) / 30
+
+
+def test_readings_a_poll_apart_meet() -> None:
+    seen = [{"at": 100.0, "db": -40.0}, {"at": 100.5, "db": -41.0}]
+    first, second = call("historyBars", seen, 100.5)
+    assert first["to"] == second["from"]
+    assert second["to"] == 1
+
+
+def test_a_reading_older_than_the_window_is_not_drawn_at_its_edge() -> None:
+    assert call("historyBars", [{"at": 0.0, "db": -40.0}], 31.0) == []
+
+
 def test_the_real_scripts_parse() -> None:
     done = check_js("--require")
     assert done.returncode == 0, done.stdout

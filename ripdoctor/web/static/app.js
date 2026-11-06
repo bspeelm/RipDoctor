@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { canCheck, drawMeter, fromEarlier, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
+import { canCheck, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -4110,6 +4110,17 @@ async function loadDevices() {
   } catch (e) { $("#rip-err").textContent = e.message; }
 }
 
+// The band's last half minute, as this page polled it. It is drawing and nothing else: no
+// request is made for it, and nothing that records reads it.
+let bandSeen = [];
+
+function showLevels(levels) {
+  const at = performance.now() / 1000;
+  bandSeen = historyAfter(bandSeen, at, levels?.band);
+  drawMeter($("#meter"), levels);
+  drawHistory($("#meter-history"), bandSeen, at);
+}
+
 function startRipPoll() {
   stopRipPoll();
   const tick = async () => {
@@ -4170,11 +4181,11 @@ function startRipPoll() {
             + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
           : (st.stage === "encoding" ? "encoding…" : "idle");
       }
-      drawMeter($("#meter"), liveLevels(st));
+      showLevels(liveLevels(st));
     } catch {
       // The next poll says what is going on. Until then a needle left where it was
       // would be a level nobody measured.
-      drawMeter($("#meter"), null);
+      showLevels(null);
     }
   };
   tick();

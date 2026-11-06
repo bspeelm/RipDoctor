@@ -375,7 +375,11 @@
         <span id="rip-state" class="dim"></span>
         <span class="spacer"></span>
         <span class="dim" id="rip-auto"></span></div>
-      <canvas id="meter"></canvas>
+      <div id="meter-box">
+        <canvas id="meter"></canvas>
+        <div id="meter-then">1&ndash;3&nbsp;kHz, last 30&nbsp;s</div>
+        <canvas id="meter-history"></canvas>
+      </div>
       <p class="hint">The 1&ndash;3&nbsp;kHz bar is the one to watch. Arm-up handling
         rumble is loud full-band but dead in this band; silent groove is quiet in
         both; music is loud in both. Drop the needle when the band bar sits in

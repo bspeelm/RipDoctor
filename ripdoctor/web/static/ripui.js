@@ -13,20 +13,20 @@
 // was -80, so the meter called "stylus in the air" a groove. Only this edge is
 // moved: the groove and quiet-music edges below still want a real measurement
 // and are left as inherited values rather than guesses.
-const ZONES = [
+export const ZONES = [
   { lo: -120, hi: -68, label: "dead air / needle up", color: "#2a2e35" },
   { lo: -68, hi: -60, label: "groove", color: "#2f4a3a" },
   { lo: -60, hi: -45, label: "quiet music", color: "#3f5a2f" },
   { lo: -45, hi: 0, label: "music", color: "#4a5a2f" },
 ];
-const BAND_ZONES = [
+export const BAND_ZONES = [
   { lo: -120, hi: -92, label: "dead air", color: "#2a2e35" },
   { lo: -92, hi: -72, label: "silent groove", color: "#2f4a3a" },
   { lo: -72, hi: -58, label: "arm-up rumble", color: "#5a3f2f" },
   { lo: -58, hi: -44, label: "quiet music", color: "#3f5a2f" },
   { lo: -44, hi: 0, label: "music", color: "#4a5a2f" },
 ];
-const FLOOR = -100;
+export const FLOOR = -100;
 
 // What the input is reading now, or nothing. A finished capture's status keeps its last
 // reading for as long as it is the last capture, and that is not a level.
@@ -35,51 +35,221 @@ const FLOOR = -100;
 // which is unreadable. `ripdoctor probe` is where gain is set.
 export const liveLevels = (st) => (st?.running && st.levels) || null;
 
-export function drawMeter(cv, levels) {
+// Where a level sits on the scale both meters share, 0 at the floor and 1 at full scale.
+// Below the floor reads as the floor: the scale ends there, and it does not bend to fit.
+export const levelAt = (db) => (Math.max(FLOOR, Math.min(0, db)) - FLOOR) / (0 - FLOOR);
+
+export const zoneOf = (db, zones) =>
+  zones.find((z) => db >= z.lo && db < z.hi) ?? (db >= 0 ? zones.at(-1) : zones[0]);
+
+const readable = (db) => typeof db === "number" && Number.isFinite(db);
+const minus = (text) => String(text).replace("-", "\u2212");
+const SANS = "ui-sans-serif,system-ui", MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
+const INK = "#e6e8ea", DIM = "#8b9199", FAINT = "#6b7480", GRID = "rgba(15,17,20,.55)";
+
+// A canvas drawn at the screen's own pixels, or nothing while it is hidden.
+function pen(cv) {
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
-  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  if (!w || !h) return null;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  }
   const c = cv.getContext("2d");
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, w, h);
+  return { c, w, h };
+}
 
+// A zone's name in the room it has, a word to a line if it must. Too narrow for that, it
+// goes without, and the readout beside the bar still names the zone the needle is in.
+function labelLines(c, label, room, most) {
+  const lines = [];
+  for (const word of label.split(" ")) {
+    const joined = lines.length ? `${lines.at(-1)} ${word}` : word;
+    if (lines.length && c.measureText(joined).width <= room) lines[lines.length - 1] = joined;
+    else lines.push(word);
+  }
+  const fits = lines.length <= most && lines.every((l) => c.measureText(l).width <= room);
+  return fits ? lines : [];
+}
+
+const METER_STACKS_BELOW = 480;
+
+function drawRow(c, row, left, right) {
+  const X = (db) => left + levelAt(db) * (right - left);
+  for (const z of row.zones) {
+    const a = X(z.lo), b = X(z.hi);
+    if (b <= a) continue;
+    c.fillStyle = z.color;
+    c.fillRect(a, row.y, b - a, row.h);
+  }
+  if (readable(row.db)) {
+    c.fillStyle = "rgba(230,232,234,.13)";
+    c.fillRect(left, row.y, X(row.db) - left, row.h);
+  }
+  c.font = `10px ${SANS}`;
+  c.textBaseline = "middle";
+  c.textAlign = "left";
+  for (const z of row.zones) {
+    const a = X(z.lo), b = X(z.hi);
+    const lines = labelLines(c, z.label, b - a - 6, row.h >= 26 ? 2 : 1);
+    c.fillStyle = "rgba(230,232,234,.72)";
+    lines.forEach((l, i) => c.fillText(l, a + 3, row.y + row.h / 2 + (i - (lines.length - 1) / 2) * 12));
+  }
+  if (readable(row.db)) {
+    const x = X(row.db);
+    c.fillStyle = "#0f1114";
+    c.fillRect(x - 2.5, row.y - 3, 5, row.h + 6);
+    c.fillStyle = INK;
+    c.fillRect(x - 1.5, row.y - 3, 3, row.h + 6);
+  }
+}
+
+// One bar above the other on the same scale, so a level reads the same on both. On a wide
+// page the name and reading sit either side of each bar; on a phone they sit above it, and
+// the bar gets all of the width.
+export function drawMeter(cv, levels) {
+  const p = pen(cv);
+  if (!p) return;
+  const { c, w, h } = p;
+  const stacked = w < METER_STACKS_BELOW;
+  const left = stacked ? 0 : 76, right = stacked ? w - 1 : w - 112;
+  const over = stacked ? 16 : 0;
   const rows = [
-    { name: "full band", db: levels?.full, zones: ZONES, y: 18, hh: 26 },
-    { name: "1–3 kHz", db: levels?.band, zones: BAND_ZONES, y: 84, hh: 40 },
+    { name: "Full band", db: levels?.full, zones: ZONES, y: 3 + over, h: 28, weight: 400 },
+    { name: "1\u20133 kHz", db: levels?.band, zones: BAND_ZONES, y: 3 + over + 28 + 12 + over, h: 48, weight: 600 },
   ];
-  const x0 = 92, x1 = w - 60;
-  const X = (db) => x0 + (Math.max(FLOOR, Math.min(0, db)) - FLOOR) / (0 - FLOOR) * (x1 - x0);
-
-  c.font = "11px ui-sans-serif,system-ui";
-  for (const r of rows) {
-    for (const z of r.zones) {
-      const a = X(z.lo), b = X(z.hi);
-      c.fillStyle = z.color;
-      c.fillRect(a, r.y, b - a, r.hh);
-      c.fillStyle = "rgba(230,232,234,0.55)";
-      const tw = c.measureText(z.label).width;
-      if (b - a > tw + 8) c.fillText(z.label, a + 4, r.y + r.hh - 6);
-    }
-    c.fillStyle = "#8b9199";
-    c.textAlign = "right";
-    c.fillText(r.name, x0 - 8, r.y + r.hh / 2 + 4);
+  for (const row of rows) {
+    drawRow(c, row, left, right);
+    const said = readable(row.db)
+      ? { db: minus(row.db.toFixed(1)), zone: zoneOf(row.db, row.zones).label }
+      : { db: "\u2014", zone: "" };
+    const mid = row.y + row.h / 2;
+    c.textBaseline = "middle";
     c.textAlign = "left";
-    if (typeof r.db === "number") {
-      const x = X(r.db);
-      c.fillStyle = "#e6e8ea";
-      c.fillRect(x - 1.5, r.y - 5, 3, r.hh + 10);
-      c.font = "600 12px ui-monospace,monospace";
-      c.fillText(`${r.db.toFixed(1)}`, Math.min(x + 6, x1 + 4), r.y - 8);
-      c.font = "11px ui-sans-serif,system-ui";
+    c.font = `${row.weight} 12px ${SANS}`;
+    c.fillStyle = row.weight > 400 ? INK : DIM;
+    if (stacked) {
+      c.fillText(row.name, 0, row.y - 11);
+      c.textAlign = "right";
+      c.font = `600 12px ${MONO}`;
+      c.fillStyle = INK;
+      const db = `${said.db} dB`;
+      c.fillText(db, w, row.y - 11);
+      const dbw = c.measureText(db).width;
+      c.font = `11px ${SANS}`;
+      c.fillStyle = DIM;
+      c.fillText(said.zone, w - dbw - 8, row.y - 11);
+    } else {
+      c.fillText(row.name, 0, mid);
+      c.textAlign = "right";
+      c.font = `600 13px ${MONO}`;
+      c.fillStyle = INK;
+      c.fillText(said.db, w, said.zone ? mid - 7 : mid);
+      c.font = `10.5px ${SANS}`;
+      c.fillStyle = DIM;
+      c.fillText(said.zone, w, mid + 7);
     }
   }
-  c.strokeStyle = "#2a2e35";
-  c.fillStyle = "#5a626c";
-  c.font = "10px ui-monospace,monospace";
-  for (let db = -100; db <= 0; db += 20) {
-    const x = X(db);
-    c.beginPath(); c.moveTo(x + 0.5, 8); c.lineTo(x + 0.5, h - 18); c.stroke();
-    c.fillText(`${db}`, x + 2, h - 6);
+  const scale = rows[1].y + rows[1].h + 6;
+  c.font = `10px ${MONO}`;
+  c.textBaseline = "top";
+  for (let db = FLOOR; db <= 0; db += 20) {
+    const x = left + levelAt(db) * (right - left);
+    c.fillStyle = GRID;
+    for (const row of rows) c.fillRect(x, row.y, 1, row.h);
+    c.fillStyle = FAINT;
+    c.textAlign = db === FLOOR ? "left" : db === 0 ? "right" : "center";
+    c.fillText(db === 0 ? "0 dB" : minus(db), x, scale);
+  }
+}
+
+// ------------------------------------------------------------- the band's history
+
+const HISTORY_SECONDS = 30;
+
+// The longest a reading is taken to stand for, a little over the capture's one a second.
+// Anything longer between two polls is a gap, and is left as one rather than drawn across.
+const HOLD_SECONDS = 1.5;
+// What one on its own stands for: the poll that found it.
+const POLL_SECONDS = 0.5;
+
+// The readings still inside the window, and this one if there is one. A poll with no
+// level adds nothing, so what it leaves is a gap and not a level.
+export function historyAfter(seen, at, band) {
+  const kept = seen.filter((s) => at - s.at < HISTORY_SECONDS + HOLD_SECONDS);
+  return readable(band) ? [...kept, { at, db: band }] : kept;
+}
+
+// Each reading as a stretch of the window, 0 the oldest edge and 1 now.
+export function historyBars(seen, at) {
+  const where = (t) => 1 - (at - t) / HISTORY_SECONDS;
+  const bars = [];
+  seen.forEach((s, i) => {
+    const before = seen[i - 1]?.at;
+    const since = before !== undefined && s.at - before <= HOLD_SECONDS ? before : s.at - POLL_SECONDS;
+    if (where(s.at) <= 0) return;
+    bars.push({ from: Math.max(0, where(since)), to: where(s.at), db: s.db });
+  });
+  return bars;
+}
+
+// The same scale and the same zones as the bar above it, stood on end: the floor is the
+// bottom and full scale is the top, whatever this window happens to hold, so a quiet
+// stretch looks quiet and not like a graph that has zoomed in on it.
+export function drawHistory(cv, seen, at) {
+  const p = pen(cv);
+  if (!p) return;
+  const { c, w, h } = p;
+  const foot = 14, right = w - 30;
+  const bottom = h - foot;
+  const Y = (db) => bottom * (1 - levelAt(db));
+  for (const z of BAND_ZONES) {
+    const top = Y(z.hi), low = Y(z.lo);
+    if (low <= top) continue;
+    c.fillStyle = z.color;
+    c.fillRect(0, top, right, low - top);
+  }
+  const bars = historyBars(seen, at);
+  for (const b of bars) {
+    const x0 = b.from * right, x1 = b.to * right, y = Y(b.db);
+    c.fillStyle = "rgba(230,232,234,.3)";
+    c.fillRect(x0, y, Math.max(1, x1 - x0), bottom - y);
+    c.fillStyle = INK;
+    c.fillRect(x0, y - 1, Math.max(1, x1 - x0), 2);
+  }
+  c.font = `10px ${SANS}`;
+  c.textBaseline = "middle";
+  c.textAlign = "left";
+  for (const z of BAND_ZONES) {
+    const top = Y(z.hi), low = Y(z.lo);
+    if (low - top < 10) continue;
+    c.fillStyle = "rgba(230,232,234,.72)";
+    c.fillText(z.label, 6, (top + low) / 2);
+  }
+  c.font = `10px ${MONO}`;
+  c.textAlign = "right";
+  for (let db = FLOOR; db <= 0; db += 20) {
+    const y = Y(db);
+    c.fillStyle = GRID;
+    c.fillRect(0, Math.min(y, bottom - 1), right, 1);
+    c.fillStyle = FAINT;
+    c.textBaseline = db === 0 ? "top" : db === FLOOR ? "bottom" : "middle";
+    c.fillText(minus(db), w, y);
+  }
+  c.textBaseline = "bottom";
+  c.fillStyle = FAINT;
+  c.textAlign = "left";
+  c.fillText("30 s ago", 0, h);
+  c.textAlign = "right";
+  c.fillText("now", right, h);
+  if (!bars.length) {
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.font = `12px ${SANS}`;
+    c.fillStyle = DIM;
+    c.fillText("nothing to show until a capture is running", right / 2, bottom / 2);
   }
 }
 

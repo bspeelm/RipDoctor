@@ -431,9 +431,12 @@ label.autostop input{width:auto;flex:none;margin:0}
 .ripmeter .row{display:flex;align-items:baseline;gap:1rem}
 .ripmeter .row .spacer{flex:1}
 .big-time{font:600 1.6rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
-/* grow into the space instead of leaving a screen of nothing under a 190px box */
-#meter{width:100%;flex:1;min-height:190px;max-height:34rem;display:block;
+#meter-box{display:flex;flex-direction:column;gap:.75rem;padding:1rem;
   background:#0f1114;border:1px solid var(--line);border-radius:8px}
+#meter{display:block;width:100%;height:112px}
+#meter-then{padding-top:.75rem;border-top:1px solid var(--line);font-size:11px;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--ghost)}
+#meter-history{display:block;width:100%;height:150px}
 
 /* capture lists belong under the form, not above its heading */
 #orphans,#ripsides{border-top:1px solid var(--line);padding-top:.6rem;margin-top:.2rem}
@@ -575,6 +578,8 @@ table.keys kbd{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color
   #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
   .ripform{width:100%}
   .ripmeter{flex:none}
+  #meter-box{padding:.75rem}
+  #meter{height:138px}
   #tapeview{display:block;overflow-y:auto;overflow-x:hidden}
   #cutview{display:block;overflow-y:auto;overflow-x:hidden}
   #cut-main{padding:.75rem 1rem 1rem;overflow:visible}
