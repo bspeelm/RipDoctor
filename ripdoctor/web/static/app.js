@@ -1273,6 +1273,7 @@ async function relabelRun() {
     await openAlbum(S.slug);
     $("#imp-mbid").value = r.mbid;
     showCatalogueState();
+    checkExisting();
     status(`re-labelled ${r.applied} tracks from ${r.release} — boundaries untouched`);
   } catch (e) {
     $("#imp-err").textContent = e.message;
@@ -3790,10 +3791,12 @@ function showReplaceOffer(existing, { keepTick = false } = {}) {
     return;
   }
   box.hidden = false;
+  // The server's own selection, the one Replace removes, so what is named is what goes.
+  const more = existing.folders > 1 ? ` and ${existing.folders - 1} more folders` : "";
   $("#imp-replace-what").textContent =
-    `${existing.tracks} files already in ${existing.where}`;
-  // Importing writes into that same directory, so a track with the same name
-  // is overwritten. The tick is the acknowledgement; nothing is deleted.
+    `${existing.tracks} files of ${existing.artist} \u2014 ${existing.album}, `
+    + `in ${existing.where}${more}`
+    + (existing.refused ? `\nReplace is refused: ${existing.refused}` : "");
   $("#imp-go").disabled = !$("#imp-replace").checked;
 }
 
@@ -3823,7 +3826,8 @@ async function clearStale() {
 // which path is taken, so it does not wait for a release id.
 async function checkExisting() {
   try {
-    const { existing, stale } = await api(`/api/library/existing/${S.slug}`);
+    const mbid = encodeURIComponent(importMbid());
+    const { existing, stale } = await api(`/api/library/existing/${S.slug}?mbid=${mbid}`);
     showStale(stale);
     showReplaceOffer(existing, { keepTick: true });
   } catch {
@@ -4618,6 +4622,7 @@ function wire() {
                            $("#imp-results"), (r) => {
                              $("#imp-mbid").value = r.id;
                              showCatalogueState();
+                             checkExisting();
                              $("#imp-results").innerHTML = "";
                              // Picking here used to set the id in the box and
                              // nowhere else: the plan kept the release chosen in
@@ -4708,7 +4713,8 @@ function wire() {
   for (const id of ["#rip-artist", "#rip-album"])
     $(id).addEventListener("input", () => { if (picked) showPicked(picked); });
   $("#imp-mbid").oninput = showCatalogueState;
-  $("#imp-fromplan").onchange = showCatalogueState;
+  $("#imp-mbid").onchange = checkExisting;
+  $("#imp-fromplan").onchange = () => { showCatalogueState(); checkExisting(); };
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
   $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };

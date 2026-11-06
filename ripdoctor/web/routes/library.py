@@ -86,6 +86,11 @@ def spec_from(slug: str, release: MB.Release, sides: list[tuple[str, float, floa
     )
 
 
+def _spec_mbid(service: Service, slug: str) -> str:
+    spec_file = service.layout.spec_file(slug)
+    return F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+
+
 def add(app: App, service: Service) -> None:
     layout = service.layout
 
@@ -250,17 +255,35 @@ def add(app: App, service: Service) -> None:
         importer = IMP.choose(
             service.runner, service.settings.importer, service.state_dir
         )
-        where, count = importer.locate(
-            service.runner, service.settings.library, plan.artist, plan.album
+        # The page says which release it will use, empty included, because this is what
+        # a replace would remove. A caller that says nothing gets the spec's.
+        mbid = r.query.get("mbid", _spec_mbid(service, slug))
+        filed = importer.filed(
+            service.runner,
+            service.settings.library,
+            plan.artist,
+            plan.album,
+            mbid=mbid,
         )
         stale = importer.stale(
-            service.runner, service.settings.library, plan.artist, plan.album
+            service.runner,
+            service.settings.library,
+            plan.artist,
+            plan.album,
+            mbid=mbid,
         )
         return H.ok(
             {
                 "existing": None
-                if where is None
-                else {"where": str(where), "tracks": count},
+                if filed.where is None
+                else {
+                    "where": str(filed.where),
+                    "tracks": filed.tracks,
+                    "artist": plan.artist,
+                    "album": plan.album,
+                    "folders": filed.folders,
+                    "refused": filed.refused,
+                },
                 # Rows without files. They read as a copy already there, and
                 # they stop an import part-way. ADR-050.
                 "stale": None
@@ -371,6 +394,7 @@ def add(app: App, service: Service) -> None:
             plan.album,
             sum(len(s.tracks) for s in plan.sides),
             read=read,
+            mbid=_spec_mbid(service, slug),
         )
 
     @app.route("GET", "/api/archive/([^/]+)")

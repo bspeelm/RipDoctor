@@ -1994,6 +1994,22 @@ without the importer detecting a duplicate at all, and that remains open. This
 is the case that is understood: the duplicate was detected, the answer was
 correct, and the promise made to the person was not kept.
 
+**A replace removes the record it names, and nothing else.** It selected with `album:<title>`,
+a substring over every artist. Measured on 2.1.0, replacing `Band A - Blue` deleted `Band B - Blue`
+and `Band C - Blue Skies`, audio and rows, and replacing an artist with nothing filed did the same.
+A release id of `e` deleted an unrelated album and then filed nothing. And beets' own `R` deleted
+the audio of every album of that artist and name: another edition went on a pinned Replace, with no
+tick, and on an album that arrived cut. That is not what this record said of `R` above, which was
+that it leaves the audio; 2.8.0 was not measured again. So `R` is never sent, and every selection is one function in core over every row: the whole release id, or
+with none the album artist and album, folded. `filed` shows the dialog what that holds, and a
+replace removes what that holds, by each row's exact path. Nothing exact is refused with nothing
+deleted, and so are rows of several releases under one name, since only a release says which is
+meant. `locate`, `stale` and the archive gate read the same selection: a gate fed another album's
+rows could have cleared raw sides on the strength of them. A pinned Replace goes by the id alone, so
+it takes every album row of that id in any folder, and no other edition's. An album that arrived
+cut has no plan, and no person ticked anything, so finding none of its release there is not a
+refusal. The ceiling moves 12,730 → 12,830.
+
 **The folders it empties go too.** Measured on 2.1.0, a replace removed the files and left the
 folders: `Album [2]` under `%aunique`, and the old artist's folder when a record came back under
 another name. So once the import has run, the folders those files were in, and those above them

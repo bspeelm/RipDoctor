@@ -627,6 +627,41 @@ def joining(run: Run, rows: Sequence[Row]) -> str:
     return ADDING if run.release in held else BESIDE
 
 
+def filed_copy(
+    rows: Sequence[Row], artist: str, album: str, release: str = ""
+) -> tuple[Row, ...]:
+    """What the library holds of exactly this record: by the whole release id, or with
+    none by the album artist and album, folded. A replace removes what this chooses, so
+    a title inside a longer one, or the same title by someone else, is never it."""
+    if release:
+        return tuple(r for r in rows if r.release == release)
+    if not album.strip():
+        return ()
+    who, what = fold(artist), fold(album)
+    return tuple(
+        r for r in rows if fold(r.album_artist) == who and fold(r.album) == what
+    )
+
+
+def replace_refusal(
+    copy: Sequence[Row], artist: str, album: str, release: str = ""
+) -> str:
+    """Why these rows may not be removed as one record, or nothing. Rows of several
+    releases under one name are editions, and only a release says which is meant."""
+    if not copy:
+        named = f"release {release}" if release else f"{artist} - {album}"
+        return (
+            f"the library holds nothing that is exactly {named}, so nothing is removed"
+        )
+    releases = {r.release for r in copy}
+    if not release and len(releases) > 1:
+        return (
+            f"{artist} - {album} is {len(releases)} different releases in the library, "
+            "so nothing is removed - pin the release to replace, or choose Keep both"
+        )
+    return ""
+
+
 def beside_note(run: Run) -> str:
     return (
         f"beets already held an album called {run.album}, so this is a separate album "

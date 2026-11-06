@@ -29,7 +29,9 @@ from ripdoctor.core.filing import (
     NEW_ALBUM,
     Row,
     Run,
+    filed_copy,
     joining,
+    replace_refusal,
     row_length,
     term,
 )
@@ -79,6 +81,17 @@ class Stale:
             "It will treat this import as a duplicate and stop part-way. Clear the "
             "stale rows first; that removes database rows only, never files."
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Filed:
+    """What the library holds of one record, which is what replacing it would remove,
+    and why it would refuse. `where` is the first of `folders` folders."""
+
+    tracks: int
+    where: Path | None
+    folders: int = 0
+    refused: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +158,10 @@ class Importer(Protocol):
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]: ...
 
+    def filed(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Filed: ...
+
     def stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> Stale | None: ...
@@ -197,6 +214,12 @@ class Tagger:
     ) -> tuple[Path | None, int]:
         return T.locate(library, artist, album)
 
+    def filed(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Filed:
+        where, count = T.locate(library, artist, album)
+        return Filed(count, where, 1 if where else 0)
+
     def stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> Stale | None:
@@ -227,7 +250,11 @@ _COPY = _SEP.join((_HELD, "$albumartist"))
 # leaves that second question at end-of-input, which beets reports as a stdin
 # error three screens below the thing that actually went wrong. ADR-054.
 _APPLY = "A"
-DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
+#
+# Replace is answered with keep, because beets' own `R` deletes the audio of every album
+# of that artist and name, another edition's included, measured on 2.1.0. What a replace
+# removes is chosen and removed here first, so what beets still asks about is not it.
+DUPLICATES = {"replace": "K", "keep": "K", "skip": "S", "merge": "M"}
 
 # beets says this when it asked and nobody answered. Worth recognising: the
 # failure it causes looks like "the tracks are still in review", which is true
@@ -275,7 +302,7 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
     because beets asks again. ADR-054.
     """
     said = [_APPLY] if matching else []
-    said.append(DUPLICATES.get(duplicates, "R"))
+    said.append(DUPLICATES.get(duplicates, "K"))
     return ("\n".join(said) + "\n").encode()
 
 
@@ -541,7 +568,7 @@ class Beets:
         renames, renumbers and retags it. ADR-054."""
         if duplicates != "merge":
             return ""
-        own = self._held(runner, root, [f"mb_albumid:{release}"], 300.0)
+        own = filed_copy(self._copies(runner, root, []), "", "", release)
         if own:
             title = own[0].album
             run = Run(release, "", title, ())
@@ -606,6 +633,12 @@ class Beets:
         release so the run that commits cannot choose a different one."""
         self._refuse_off_its_mount(runner, library)
         how = self._merging(runner, library, mbid, "", duplicates)
+        # Nothing asked first here, so finding none of this release is the usual case.
+        removed = (
+            self._remove_filed(runner, library, "", "", mbid=mbid, none_is_fine=True)
+            if duplicates == "replace"
+            else []
+        )
         result = runner.run(
             self._argv(
                 ["import", "--search-id", mbid, directory], self._config_for(how)
@@ -614,6 +647,7 @@ class Beets:
             timeout=3600,
         )
         output = _plain(result.text + result.err)
+        folders = _clear_emptied(library, removed)
 
         left = [n for n in tracks if (Path(directory) / n).exists()]
         if left:
@@ -632,6 +666,10 @@ class Beets:
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
             notes.append(f"set {fixed} files' modes")
+        if removed:
+            notes.append(f"removed {len(removed)} files of this release already filed")
+        if folders:
+            notes.append(f"removed {folders} empty folders it left")
         notes.extend(self._merged(runner, library, mbid, how))
         if duplicates != "merge":
             notes.extend(too_many(count, len(tracks)))
@@ -862,11 +900,37 @@ class Beets:
         have chosen would be checking the wrong directory on every install that
         configured beets differently, which is all of them.
         """
-        query = _query(album, mbid)
-        paths = self._paths(runner, query, library) if query else []
-        if not paths:
-            return None, 0
-        return paths[0].parent, len(paths)
+        rows = self._quietly_filed(runner, library, artist, album, mbid)
+        return (Path(rows[0].path).parent, len(rows)) if rows else (None, 0)
+
+    def filed(
+        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+    ) -> Filed:
+        """The one selection the dialog shows and a replace removes."""
+        rows = self._quietly_filed(runner, library, artist, album, mbid)
+        if not rows:
+            return Filed(0, None)
+        folders = {Path(r.path).parent for r in rows}
+        refused = replace_refusal(rows, artist, album, mbid)
+        return Filed(len(rows), Path(rows[0].path).parent, len(folders), refused)
+
+    def _filed_rows(
+        self, runner: Runner, library: str, artist: str, album: str, mbid: str
+    ) -> tuple[Row, ...]:
+        """Every row, judged here. A beets query cannot do this: `album:` is a substring
+        over every artist, and any id that is part of another finds that one too."""
+        if not mbid and not album.strip():
+            return ()
+        return filed_copy(self._copies(runner, library, []), artist, album, mbid)
+
+    def _quietly_filed(
+        self, runner: Runner, library: str, artist: str, album: str, mbid: str
+    ) -> tuple[Row, ...]:
+        """For a question only reading, where no answer has always read as not there."""
+        try:
+            return self._filed_rows(runner, library, artist, album, mbid)
+        except (ImportFailed, ToolMissing):
+            return ()
 
     def _said_paths(self, runner: Runner, query: list[str]) -> list[str]:
         """Every file beets registered, as it says them, in its own order."""
@@ -891,13 +955,10 @@ class Beets:
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> Stale | None:
         """Rows whose files are all gone, or nothing. ADR-050."""
-        query = _query(album, mbid)
-        if not query:
+        rows = self._quietly_filed(runner, library, artist, album, mbid)
+        if not rows or any(Path(r.path).exists() for r in rows):
             return None
-        paths = self._paths(runner, query, library)
-        if not paths or any(p.exists() for p in paths):
-            return None
-        return Stale(len(paths), paths[0].parent, " ".join(query))
+        return Stale(len(rows), Path(rows[0].path).parent, f"{artist} - {album}")
 
     def replace_filed(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -906,26 +967,47 @@ class Beets:
         return len(self._remove_filed(runner, library, artist, album, mbid=mbid))
 
     def _remove_filed(
-        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+        self,
+        runner: Runner,
+        library: str,
+        artist: str,
+        album: str,
+        *,
+        mbid: str = "",
+        none_is_fine: bool = False,
     ) -> list[Path]:
-        query = _query(album, mbid)
-        if not query:
+        """Exactly `filed`'s rows, or a plain refusal with nothing deleted. Every row is
+        proved first, so a bad one stops this before any file goes, and rows go before
+        files, so what stops partway has forgotten a file and not lost one."""
+        rows = self._filed_rows(runner, library, artist, album, mbid)
+        if not rows and none_is_fine:
             return []
-        filed = self._paths(runner, query, library)
-        if not filed:
-            return []
+        refused = replace_refusal(rows, artist, album, mbid)
+        if refused:
+            raise ImportFailed(refused)
         root = Path(library).resolve()
-        gone = []
-        for path in filed:
-            if not path.is_file():
-                continue
+        paths = [Path(r.path) for r in rows]
+        for path in paths:
             # They come from another program and this deletes what they name.
             if not contains(root, path):
                 raise ImportFailed(f"refusing to delete {path}: outside {root}")
-            path.unlink()
-            gone.append(path)
-        runner.run(self._argv(["remove", "-f", *query]), timeout=600)
+        self._forget_rows(runner, rows)
+        gone = []
+        for path in paths:
+            if path.is_file():
+                path.unlink()
+                gone.append(path)
         return gone
+
+    def _forget_rows(self, runner: Runner, rows: Collection[Row]) -> None:
+        """By each exact path, in one command, and with no `-d`, so no file goes."""
+        if not rows:  # with no query at all, beets would take the whole library
+            return
+        terms = [part for r in rows for part in (",", _one_file(r.path))][1:]
+        result = runner.run(self._argv(["remove", "-f", *terms]), timeout=600)
+        if not result.ok:
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not clear those rows: {why}")
 
     def unregistered(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -939,8 +1021,9 @@ class Beets:
             return []
         # By the folder and not the record: another edition can share it, and that is
         # in the library. A path ending in a comma cannot be asked about at all.
-        here = [] if str(where).endswith(",") else [f"path:{where}"]
-        known = set(self._paths(runner, here or _query(album, mbid) or [], library))
+        if str(where).endswith(","):
+            return []
+        known = set(self._paths(runner, [f"path:{where}"], library))
         return sorted(p for p in where.glob("*.flac") if p not in known)
 
     def all_stale(self, runner: Runner, library: str = "") -> tuple[int, int]:
@@ -961,15 +1044,15 @@ class Beets:
         `beet remove` without `-d` leaves files alone, which is right here
         because there are none left to leave. ADR-050.
         """
-        found = self.stale(runner, library, artist, album, mbid=mbid)
-        if found is None:
+        rows = self._filed_rows(runner, library, artist, album, mbid)
+        if not rows or any(Path(r.path).exists() for r in rows):
             raise ImportFailed(
                 f"nothing stale for {album or mbid} - either beets has no rows for "
                 "it, or the files it names are still there"
             )
-        query = _query(album, mbid) or []
-        runner.run(self._argv(["remove", "-f", *query]), timeout=600)
-        left = self._paths(runner, query, library)
+        found = Stale(len(rows), Path(rows[0].path).parent, f"{artist} - {album}")
+        self._forget_rows(runner, rows)
+        left = self._filed_rows(runner, library, artist, album, mbid)
         if left:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
@@ -1127,17 +1210,6 @@ def _relative_row(root: str, said: str) -> bool:
         and not where.exists()
         and (Path(root) / where.relative_to(here)).is_file()
     )
-
-
-def _query(album: str, mbid: str) -> list[str]:
-    """What to ask beets for this record, or nothing if there is no question.
-
-    An empty name is not a query, it is every record in the library: `beet ls
-    album:` matches them all.
-    """
-    if mbid:
-        return [f"mb_albumid:{mbid}"]
-    return [f"album:{album}"] if album else []
 
 
 # beets prints the release it settled on as a URL. More than one means it is

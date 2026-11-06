@@ -68,6 +68,7 @@ def survey(
     expected: int,
     *,
     read: bool = False,
+    mbid: str = "",
 ) -> dict[str, Any]:
     """What archiving would do, and whether it is allowed to.
 
@@ -77,7 +78,11 @@ def survey(
     # Asked of the importer rather than derived: beets owns its own naming, and
     # a gate that checked the path this project would have chosen would be
     # checking the wrong directory on every install that configured it.
-    where, count = importer.locate(runner, library, artist, album)
+    # By its release first: beets may keep the artist under another name than the
+    # plan's. A record filed with no release has only its names to be found by.
+    where, count = importer.locate(runner, library, artist, album, mbid=mbid)
+    if where is None and mbid:
+        where, count = importer.locate(runner, library, artist, album)
     source = layout.raw / slug
     sides = []
     if source.is_dir():

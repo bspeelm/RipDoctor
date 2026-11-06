@@ -1718,3 +1718,15 @@ def test_merge_is_not_offered_where_beets_has_nothing_to_merge_by() -> None:
     assert 'imp-dupes").value = "keep"' in state
     dialog = markup()[markup().index('id="imp-nomerge"') :]
     assert "another album entry" in dialog[: dialog.index("</p>")]
+
+
+def test_the_replace_panel_names_what_goes_for_the_release_in_use() -> None:
+    js = (STATIC / "app.js").read_text()
+    offer = js[js.index("function showReplaceOffer") :]
+    offer = offer[: offer.index("\n}\n")]
+    for said in ("existing.artist", "existing.album", "existing.tracks"):
+        assert said in offer
+    assert "existing.refused" in offer
+    check = js[js.index("async function checkExisting()") :]
+    assert "encodeURIComponent(importMbid())" in check[: check.index("\n}\n")]
+    assert "the files named above" in markup()

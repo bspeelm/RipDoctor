@@ -235,7 +235,7 @@ def test_the_release_chosen_in_the_dialog_is_the_one_imported(
     imported the release picked before it."""
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
-    rows = f"A Record{I_SEP}/music/A Band/A Record/01 One.flac"
+    rows = every_row("/music/A Band/A Record/01 One.flac")
     service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
     F.remember(service.layout, "album", album="A Record", artist="A Band")
 
@@ -264,6 +264,12 @@ def a_plan_dict() -> dict:
 
 
 # --------------------------------------------------------------- archive
+
+
+def every_row(path: str) -> str:
+    """Beets' answer to being asked for every row: this album, this file."""
+    fields = ("T", "A Band", "A Record", "3:00", path, "", "1", "", "A Band")
+    return I_SEP.join(fields)
 
 
 def with_library(tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -694,7 +700,10 @@ def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     service.settings = replace(service.settings, importer="beets")
     gone = tmp_path / "gone" / "01 One.flac"
     service.runner = FakeRunner(installed={"beet"}).expect(
-        "ls", stdout=f"A Record{I_SEP}{gone}".encode()
+        "ls",
+        stdout=I_SEP.join(
+            ("T", "A Band", "A Record", "3:00", f"{gone}", "", "1", "", "A Band")
+        ).encode(),
     )
     body = get(build(service), "/api/library/existing/album", service).json()
     assert body["stale"]["tracks"] == 1
@@ -709,7 +718,10 @@ def test_stale_rows_are_cleared_only_when_every_file_is_absent(
     there = tmp_path / "01 One.flac"
     there.write_bytes(b"fLaC")
     service.runner = FakeRunner(installed={"beet"}).expect(
-        "ls", stdout=f"A Record{I_SEP}{there}".encode()
+        "ls",
+        stdout=I_SEP.join(
+            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", "", "A Band")
+        ).encode(),
     )
     r = post(build(service), "/api/library/clear-stale/album", service)
     assert r.status == 409 and "still there" in r.json()["error"]
@@ -813,8 +825,8 @@ def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
     assert runner.stdin_for("import") == b"A\nK\n"
 
 
-def test_replacing_is_what_it_does_when_nothing_is_said(tmp_path: Path) -> None:
-    assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nR\n"
+def test_saying_nothing_never_sends_beets_own_replace(tmp_path: Path) -> None:
+    assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nK\n"
 
 
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
