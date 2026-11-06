@@ -3578,7 +3578,8 @@ function setMode(mode) {
   $("#uploadbits").hidden = mode !== "upload";
   $("#capturepane").hidden = !metering;
   $("#uploadpane").hidden = mode !== "upload";
-  $("#source-title").textContent = mode === "upload" ? "Add a file" : "Rip a side";
+  $("#source-title").textContent = mode === "upload" ? "Upload a side" : "Rip a side";
+  if (mode === "rip") ripSlug();
   if (metering) startRipPoll(); else stopRipPoll();
   if (mode === "rip") loadOrphans();
   if (mode === "punch") loadPunchTracks();
@@ -3596,7 +3597,8 @@ function setMode(mode) {
 // identically twice, so when an existing album is picked the slug is pinned to
 // it and the name fields go read-only.
 function ripSlug() {
-  const side = $("#rip-side").value.trim();
+  // An upload always becomes side a, whatever the Rip tab has lined up next.
+  const side = document.body.dataset.mode === "upload" ? "a" : $("#rip-side").value.trim();
   if (S.slug) {
     const sides = (S.meta.sides || []).join(" ") || "none";
     $("#rip-slug").textContent =
@@ -3887,14 +3889,14 @@ async function loadOrphans() {
     const { orphans } = await api("/api/rip/orphans");
     if (!orphans.length) { box.hidden = true; return; }
     box.hidden = false;
-    box.innerHTML = "<h4>unfinished capture</h4>";
+    box.innerHTML = "<h4>Interrupted capture</h4>";
     for (const o of orphans) {
       const m = Math.floor(o.seconds / 60), sec = Math.round(o.seconds % 60);
       const p = el("p", "", `${o.slug} side ${o.side} — ${m}:${String(sec).padStart(2, "0")} `
         + `(${(o.bytes / 1e6).toFixed(0)} MB) was cut short. The audio is intact; `
         + `it just never got encoded.`);
       const row = el("div", "row");
-      const keep = el("button", "", "Keep it — encode to FLAC");
+      const keep = el("button", "", o.kind === "punch" ? "Keep this punch" : `Keep as side ${o.side}`);
       keep.onclick = async () => {
         keep.disabled = true;
         try {
@@ -3950,11 +3952,17 @@ async function loadRipSides() {
     const { sides } = await api(`/api/rip/sides/${S.slug}`);
     if (!sides.length) { box.hidden = true; return; }
     box.hidden = false;
-    box.innerHTML = "<h4>captures on disk</h4>";
+    box.innerHTML = "<h4>Sides on this record</h4>";
     for (const o of sides) {
-      const row = el("div", "row");
-      row.append(el("span", "", `side ${o.side} — ${(o.bytes / 1e6).toFixed(0)} MB`
+      const row = el("div", "side");
+      row.append(el("b", "", o.side));
+      row.append(el("span", "", `${(o.bytes / 1e6).toFixed(0)} MB`
                                 + (o.recording ? " · recording now" : "")));
+      const open = el("button", "linky", "Open in Cut");
+      open.type = "button";
+      open.disabled = o.recording;
+      open.onclick = () => openInCut(o.side);
+      row.append(open);
       const drop = el("button", "ghost", "Discard");
       drop.disabled = o.recording;
       drop.onclick = async () => {
@@ -3975,6 +3983,13 @@ async function loadRipSides() {
       box.append(row);
     }
   } catch { box.hidden = true; }
+}
+
+// The Cut tab, on a side of the record already open here.
+function openInCut(letter) {
+  setMode("cut");
+  if (letter && S.sideData && letter !== S.side) openSide(letter)
+    .catch((e) => status(`could not open side ${letter}: ${e.message}`, true));
 }
 
 // Auto-stop is a server-side timer, so the browser cannot hold it off - it can
@@ -4175,7 +4190,9 @@ function startRipPoll() {
       } else if (on) {
         $("#rip-done").className = "dim";
       }
+      $("#rip-open-cut").hidden = on;
       if (!settling) {
+        $("#rip-state").toggleAttribute("data-on", on);
         $("#rip-state").textContent = on
           ? `recording ${st.slug} side ${st.side} — ${(st.bytes / 1e6).toFixed(0)} MB`
             + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
@@ -4751,6 +4768,8 @@ function wire() {
     }
   };
   $("#rip-listen").onclick = toggleListen;
+  $("#rip-open-cut").onclick = () => openInCut();
+  $("#up-open-cut").onclick = () => openInCut();
   // A fresh load starts on a new album with empty fields and side a. These used
   // to be restored from localStorage, so opening the Rip panel showed whatever
   // record was last ripped - which is both confusing and, with a pinned re-rip,

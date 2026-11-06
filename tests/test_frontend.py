@@ -168,6 +168,71 @@ def test_the_record_picker_cannot_set_the_header_width() -> None:
     )
 
 
+CAPTURE_WARNINGS = {
+    "rip-done": "the dropped-buffers warning, and what a finished capture wrote",
+    "rip-force-wrap": "the way past a device that does not look like the turntable",
+    "rip-force": "record from it anyway",
+    "rip-err": "anything a capture was refused for",
+    "up-err": "anything an upload was refused for",
+    "pc-err": "anything a pre-cut was refused for",
+    "punch-err": "anything a punch was refused for",
+    "orphans": "the interrupted capture card",
+    "rip-auto": "the auto-stop text and the warning from the capture itself",
+    "autostopdlg": "the question before an auto-stop fires",
+    "up-cancel": "Cancel on an upload",
+    "pc-cancel": "Cancel on a pre-cut upload",
+    "rip-autostop-hint": "the hint under the auto-stop box, and the 35-minute cap",
+    "punch-hint": "how to record a punch",
+    "meter-hint": "which bar to watch, and where to drop the needle",
+    "up-hint": "what an upload does and does not do",
+    "pc-hint": "that nothing is filed until asked",
+}
+
+
+@pytest.mark.parametrize(("name", "why"), sorted(CAPTURE_WARNINGS.items()))
+def test_every_warning_on_the_capture_pages_is_still_there(name: str, why: str) -> None:
+    """They protect a side, and a redraw is when things like this go missing."""
+    assert f'id="{name}"' in markup(), why
+
+
+def test_the_warnings_still_say_what_they_exist_to_say() -> None:
+    js = (STATIC / "app.js").read_text()
+    page = markup()
+    assert "this side has gaps in it and should be re-ripped" in js
+    assert "${st.overruns} DROPPED" in js
+    assert "record from it anyway" in page
+    assert page.count("35-minute hard cap") == 2, "the box's own title, and its hint"
+    assert "Stop &amp; encode" in page
+
+
+def test_the_meter_values_are_not_a_drawing_s(tmp_path: Path) -> None:
+    """Read from the source so that no-node runs pin them too; test_page_logic runs
+    the module itself."""
+    ui = (STATIC / "ripui.js").read_text()
+    assert "export const FLOOR = -100;" in ui
+    for line in (
+        '{ lo: -120, hi: -68, label: "dead air / needle up"',
+        '{ lo: -68, hi: -60, label: "groove"',
+        '{ lo: -60, hi: -45, label: "quiet music"',
+        '{ lo: -45, hi: 0, label: "music"',
+        '{ lo: -120, hi: -92, label: "dead air"',
+        '{ lo: -92, hi: -72, label: "silent groove"',
+        '{ lo: -72, hi: -58, label: "arm-up rumble"',
+        '{ lo: -58, hi: -44, label: "quiet music"',
+        '{ lo: -44, hi: 0, label: "music"',
+    ):
+        assert line in ui, line
+
+
+def test_nothing_about_recording_reads_the_history() -> None:
+    """Drawing only. A capture costs a side if the wrong thing changes under it."""
+    js = (STATIC / "app.js").read_text()
+    drawing = re.search(r"let bandSeen = .*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert js.count("bandSeen") == drawing.count("bandSeen")
+    assert "api(" not in drawing and "postJSON(" not in drawing
+    assert "ripTimer = setInterval(tick, 500);" in js
+
+
 def test_the_capture_controls_invent_no_rate_or_depth() -> None:
     """A busy device cannot be asked what it accepts, and busy is the ordinary
     case: a capture is running. A hardcoded fallback then offers a list the
@@ -208,7 +273,7 @@ def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None
     assert narrow, "nothing changes on a narrow screen"
     assert "#captureview{flex-direction:column" in narrow.group(1)
     assert ".ripform{width:100%}" in narrow.group(1)
-    assert css.index(".ripform{width:30rem") < narrow.start(), "the wide rule wins"
+    assert css.index(".ripform{width:26.25rem") < narrow.start(), "the wide rule wins"
     assert "#tapeview{display:block;overflow-y:auto;overflow-x:hidden}" in narrow.group(
         1
     )

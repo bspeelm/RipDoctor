@@ -394,58 +394,110 @@ button.tp-danger.tp-quiet:hover{color:var(--end)}
   border:1px dashed var(--line);font-weight:400}
 #tp-add:hover{color:var(--fg)}
 
-/* ---- rip view ---- */
-#captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
-.ripform{width:30rem;flex:none;display:flex;flex-direction:column;gap:.55rem;min-width:0}
-.ripform h2{margin:0;font-size:1rem;font-weight:600}
-.ripform .row{display:flex;gap:.5rem;margin-top:.2rem}
-/* five buttons sized to their own labels made a ragged line; a fixed three
-   columns keeps the second row aligned under the first */
-.ripform .row.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;
-  margin-top:0}
-.ripform .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
-  overflow:hidden;text-overflow:ellipsis}
-.ripform .fields .wide input{margin-bottom:.35rem}
-/* two columns: the fields are short, and a single 22rem stack of six of them
-   ran taller than the meter beside it while leaving the right half empty */
-.ripform .fields{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .75rem}
-/* The source column is stacked blocks now, so each one stacks its own
-   contents at the same gap or the form reads as several forms. Named rather
-   than `.ripform > div`, which would also catch the captures list and both of
-   punch's blocks. */
-#recordfields,#ripbits{display:flex;flex-direction:column;gap:.55rem}
-.ripform .fields label{min-width:0}
-.ripform .fields .wide{grid-column:1/-1}
-.ripform .fields input[readonly]{opacity:.7;cursor:not-allowed}
-/* :not(checkbox) matters - this rule outranks label.inline input{width:auto}
-   on specificity, and a stretched checkbox pushes its own caption away */
-.ripform .fields select,
-.ripform .fields input:not([type=checkbox]){min-width:0;width:100%}
-/* the checkbox shares the Side row, aligned to the control not the caption */
-label.autostop{align-self:end;padding-bottom:.5rem;color:var(--fg);font-size:.8rem;
-  gap:.45rem;white-space:nowrap}
-label.autostop input{width:auto;flex:none;margin:0}
+/* ---- capture: what goes on the record on the left, what the record is doing on the right ---- */
+#captureview{flex:1;display:flex;align-items:flex-start;gap:1.5rem;padding:1.5rem;overflow:auto;
+  min-height:0;font-size:14px}
+.ripform{width:26.25rem;flex:0 1 26.25rem;display:flex;flex-direction:column;gap:1rem;min-width:18rem}
+.source-head{display:flex;flex-direction:column;gap:.35rem}
+.kicker{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.source-head h2{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ripform .lead{margin:0;font-size:13px;line-height:1.55;color:#a3a9b0}
+.lead b{color:var(--fg);font-weight:600}
+#captureview .hint b{color:#a3a9b0;font-weight:600}
+.ripform > label,.ripform .fields label,.ripmeter .fields label{min-width:0;font-size:11.5px}
+.ripform select,.ripform input:not([type=checkbox]),.ripmeter .fields select{width:100%;min-width:0;font-size:13px}
+#recordfields,#ripbits,#uploadbits,#punch-found{display:flex;flex-direction:column;gap:.75rem}
+#captureview .fields{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+#captureview .fields.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+#captureview .fields.device{grid-template-columns:2fr 1fr 1fr}
+.ripform input[readonly]{opacity:.7;cursor:not-allowed}
+#captureview .row.btns{display:flex;flex-wrap:wrap;gap:.5rem}
+#captureview .row.btns button{white-space:nowrap;padding:.45rem .75rem;min-width:0}
+#rip-go,#pc-import{width:100%;padding:.6rem .85rem;font-size:14px}
+.autostop{align-self:end;padding-bottom:.5rem;color:var(--fg);font-size:13px !important;gap:.5rem;
+  white-space:nowrap}
+label.autostop input{width:auto;flex:none;margin:0;accent-color:var(--accent)}
+#rip-force-wrap input{accent-color:var(--accent)}
 .mono{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+#captureview .mono{font-size:11.5px;overflow-wrap:anywhere}
+#captureview p.mono{margin:0}
+#captureview p.mono:empty{display:none}
+.ripform .err:empty,.ripmeter .err:empty{display:none}
 
-.ripmeter{flex:1;min-width:0;display:flex;flex-direction:column;gap:.6rem}
-.ripmeter .row{display:flex;align-items:baseline;gap:1rem}
-.ripmeter .row .spacer{flex:1}
-.big-time{font:600 1.6rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+/* The record's sides, and what is left of a capture that was cut short. */
+#ripsides{display:flex;flex-direction:column;gap:.45rem;border-top:1px solid var(--line);padding-top:.75rem}
+#ripsides h4,#orphans h4{margin:0;font-size:11px;font-weight:500;text-transform:uppercase;
+  letter-spacing:.08em;color:var(--dim)}
+#ripsides .side{display:grid;grid-template-columns:1.75rem minmax(0,1fr) auto auto;gap:.6rem;align-items:center;font-size:13px}
+#ripsides .side b{font:500 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+#ripsides .side span{color:#c7ccd1}
+#ripsides .side button.ghost{padding:.15rem .5rem;font-size:12.5px}
+#orphans{display:flex;flex-direction:column;gap:.5rem;border:1px solid var(--warn);border-radius:8px;
+  padding:.75rem;font-size:12.5px;line-height:1.5;color:#c7ccd1}
+#orphans h4{letter-spacing:.06em;font-weight:600;color:var(--warn)}
+#orphans p{margin:0}
+#orphans .row{display:flex;flex-wrap:wrap;gap:.4rem}
+#orphans .row button{padding:.3rem .65rem;font-size:12.5px}
+button.linky{padding:0;background:none;border:0;color:var(--accent);font:inherit;font-size:12.5px;white-space:nowrap}
+button.linky:hover{color:#8cc4f0}
+
+/* The panel opposite the form: the capture, or how far an upload has got. */
+.ripmeter{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:1rem;padding:1.15rem;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.ripmeter h2{margin:0;font-size:18px;font-weight:600;overflow-wrap:anywhere}
+.ripmeter > p{margin:0}
+.ripmeter > p.dim:empty{display:none}
+.ripmeter .bar{flex:none;height:6px;border-radius:3px}
+#pc-report{margin:0;max-height:14rem;overflow:auto;padding:.75rem;background:#0f1114;
+  border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;
+  font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c7ccd1}
+.row.now{display:flex;align-items:baseline;flex-wrap:wrap;gap:.35rem .85rem}
+.row.now .spacer{flex:1}
+.big-time{font:600 34px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+#rip-state{display:inline-flex;align-items:center;gap:.45rem;font-size:13px;overflow-wrap:anywhere}
+#rip-state::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--ghost)}
+#rip-state[data-on]{color:var(--end)}
+#rip-state[data-on]::before{background:var(--end)}
+#rip-state.working{color:var(--warn)}
+#rip-state.working::before{background:var(--warn)}
+#rip-auto{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);overflow-wrap:anywhere}
+#rip-auto.dim{color:var(--dim)}
+#rip-auto.err{color:#ff8080}
+.done-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem .75rem;
+  padding:.75rem;border:1px solid var(--start);border-radius:8px;font-size:13px;line-height:1.5}
+.done-box:has(> p:empty){display:none}
+.done-box:has(> p.err){border-color:#ff8080}
+.done-box > p{margin:0;min-width:0;overflow-wrap:anywhere;color:var(--fg)}
+.done-box > p.err{color:#ff8080;font-size:13px}
+.done-line:empty{display:none}
+p.done-line{margin:0;padding:.75rem;border:1px solid var(--start);border-radius:8px;font-size:13px;
+  line-height:1.5;overflow-wrap:anywhere}
+body[data-mode=punch] #rip-open-cut{display:none}
 #meter-box{display:flex;flex-direction:column;gap:.75rem;padding:1rem;
   background:#0f1114;border:1px solid var(--line);border-radius:8px}
 #meter{display:block;width:100%;height:112px}
 #meter-then{padding-top:.75rem;border-top:1px solid var(--line);font-size:11px;
   letter-spacing:.05em;text-transform:uppercase;color:var(--ghost)}
 #meter-history{display:block;width:100%;height:150px}
+.transport{align-items:center}
+.transport .spacer{flex:1}
+#rip-stop:not(:disabled){background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
+#rip-abandon:not(:disabled){color:var(--end)}
+#rip-listen.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
+.transport label.vol{gap:.5rem;margin:0;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ghost)}
+.transport label.vol input{width:7rem;accent-color:var(--accent);padding:0;background:none;border:0}
 
-/* capture lists belong under the form, not above its heading */
-#orphans,#ripsides{border-top:1px solid var(--line);padding-top:.6rem;margin-top:.2rem}
-#orphans h4,#ripsides h4{margin:0 0 .4rem;font-size:.75rem;font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
-#ripsides .row{display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem}
-#ripsides .row span{flex:1;font-size:12px}
-#ripsides .row button,#orphans .row button{flex:none}
-
+/* Encoding a side is most of a minute with nothing to report but that it is
+   still going. A sweep says that honestly; a percentage would be invented. */
+#rip-state.working::after{content:"";display:inline-block;width:5em;height:3px;
+  margin-left:.6em;vertical-align:middle;border-radius:2px;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  background-size:40% 100%;background-repeat:no-repeat;
+  animation:sweep 1.1s ease-in-out infinite}
+@keyframes sweep{from{background-position:-45% 0}to{background-position:145% 0}}
+@media (prefers-reduced-motion:reduce){
+  #rip-state.working::after{animation:none;background-position:50% 0}
+}
 
 /* A width rather than a floor, so a phone gets the screen less its margins. */
 dialog{--dlg:35rem;width:min(var(--dlg),calc(100vw - 2rem));max-width:none;
@@ -489,12 +541,6 @@ dialog .err:empty{display:none}
 #arc-plan{max-height:220px}
 .ok{color:var(--start)}
 
-#orphans{border:1px solid var(--warn);border-radius:8px;padding:.6rem;margin-bottom:.6rem;
-  font-size:12px;line-height:1.5}
-#orphans h4{margin:0 0 .3rem;font-size:.8rem;color:var(--warn);text-transform:uppercase;
-  letter-spacing:.04em}
-#orphans .row{margin-top:.4rem}
-
 #imp-pick{display:flex;flex-direction:column;gap:14px}
 #imp-done{display:flex;flex-direction:column;gap:14px}
 #imp-done-box{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--start);border-radius:8px}
@@ -502,9 +548,6 @@ dialog .err:empty{display:none}
   text-transform:uppercase;letter-spacing:.06em}
 #imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
 #imp-outwrap summary{cursor:pointer;color:var(--dim);font-size:.8rem;padding:.2rem 0}
-
-#rip-listen.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
-#rip-auto{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);min-height:1.4em}
 
 .vol{flex-direction:row;align-items:center;margin-left:auto}
 .vol input[type=range]{width:5.5rem;accent-color:var(--accent);padding:0;background:none;border:0}
@@ -534,52 +577,25 @@ table.keys kbd{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color
 .warn .mono{white-space:pre-wrap;overflow-wrap:anywhere}
 #imp-replace-what{color:var(--fg)}
 
-/* monitor volume sits in the button grid; the peak-hold line is the number you
-   set gain against, so it gets weight the transient meter does not */
-/* labelled, because a bare slider sitting among the transport buttons reads as
-   a record level - which is the one thing it cannot be */
-.ripform .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0}
-.ripform .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--ghost)}
-.ripform .row.btns label.vol input{width:100%;min-width:0}
-#rip-peak{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-#rip-peak-reset{flex:none}
-
-/* The capture pane is shared by Rip and Punch, so it hosts the same kinds of
-   control a form does - device selects, a button grid, the monitor slider.
-   These mirror the .ripform rules rather than widening them, because the
-   .ripmeter .row rule above styles the meter's own baseline-aligned rows and
-   must keep doing so. */
-.ripmeter .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem .75rem}
-.ripmeter .fields label{min-width:0}
-.ripmeter .fields select{min-width:0;width:100%}
-.ripmeter .row.btns{display:flex;gap:.5rem;margin-top:.2rem;align-items:center}
-.ripmeter .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
-  flex:1;overflow:hidden;text-overflow:ellipsis}
-.ripmeter .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0;flex:2}
-.ripmeter .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--ghost)}
-.ripmeter .row.btns label.vol input{width:100%;min-width:0}
-
-/* Encoding a side is most of a minute with nothing to report but that it is
-   still going. A sweep says that honestly; a percentage would be invented. */
-#rip-state.working::after{content:"";display:inline-block;width:5em;height:3px;
-  margin-left:.6em;vertical-align:middle;border-radius:2px;
-  background:linear-gradient(90deg,transparent,var(--accent),transparent);
-  background-size:40% 100%;background-repeat:no-repeat;
-  animation:sweep 1.1s ease-in-out infinite}
-@keyframes sweep{from{background-position:-45% 0}to{background-position:145% 0}}
-@media (prefers-reduced-motion:reduce){
-  #rip-state.working::after{animation:none;background-position:50% 0}
-}
-
 /* A phone: the columns stack, and a row of a table becomes a block of its own. */
 @media (max-width:48rem){
-  #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
+  #captureview{flex-direction:column;align-items:stretch;padding:1rem;gap:1.25rem;overflow-x:hidden}
   .ripform{width:100%}
-  .ripmeter{flex:none}
+  #captureview .ripform{flex:none;min-width:0}
+  .ripmeter{flex:none;padding:.85rem}
   #meter-box{padding:.75rem}
   #meter{height:138px}
+  #captureview .fields.device{grid-template-columns:1fr 1fr}
+  #captureview .fields.device label:first-child{grid-column:1/-1}
+  .autostop{white-space:normal}
+  .ripform input:not([type=checkbox]),.ripform select,.ripmeter .fields select{min-height:40px;font-size:16px}
+  #captureview .row.btns button,#rip-go,#pc-import,#orphans .row button,#ripsides .side button{min-height:40px}
+  #captureview .row.btns button{flex:1 1 auto}
+  button.linky{min-height:40px}
+  .transport .spacer{display:none}
+  .transport label.vol{flex:1 1 100%;min-height:40px}
+  .transport label.vol input{flex:1;width:auto;min-width:0}
+  #ripsides .side{grid-template-columns:1.5rem minmax(0,1fr) auto auto}
   #tapeview{display:block;overflow-y:auto;overflow-x:hidden}
   #cutview{display:block;overflow-y:auto;overflow-x:hidden}
   #cut-main{padding:.75rem 1rem 1rem;overflow:visible}

@@ -250,32 +250,36 @@
          capture pane below is shared - two sets of name fields would be two
          sources of truth for what gets written. -->
     <div class="ripform" id="sourceform">
-      <h2 id="source-title">Rip a side</h2>
+      <div class="source-head">
+        <span class="kicker">Capture</span>
+        <h2 id="source-title">Rip a side</h2>
+      </div>
       <div id="recordfields">
         <div class="fields">
           <label>Artist <input id="rip-artist" placeholder="artist"></label>
           <label>Album <input id="rip-album" placeholder="album"></label>
         </div>
+        <p class="dim mono" id="rip-slug"></p>
       </div>
       <div id="ripbits">
-        <p class="dim mono" id="rip-slug"></p>
         <div class="fields">
           <label>Side <select id="rip-side" title="a side this record already has is a re-rip of it"></select></label>
-          <label class="inline autostop" title="Uncheck for records with long quiet passages — an ambient stretch can sit 20 dB under the loud parts and still be the song. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
+          <label class="inline autostop" title="Uncheck for records with long quiet passages. The 35-minute hard cap applies either way."><input type="checkbox" id="rip-autostop" checked>
             Stop at the run-out</label>
         </div>
-        <div class="row btns">
-          <button id="rip-go">Start recording</button>
-        </div>
+        <p class="hint" id="rip-autostop-hint">Uncheck for records with long quiet
+          passages &mdash; an ambient stretch can sit 20 dB under the loud parts and
+          still be the song. The 35-minute hard cap applies either way.</p>
+        <button id="rip-go">Start recording</button>
         <div id="orphans" hidden></div>
         <div id="ripsides" hidden></div>
       </div>
       <div id="uploadbits" hidden>
-        <p class="dim">A file you already have &mdash; a download, or a capture
+        <p class="lead">A file you already have &mdash; a download, or a capture
           made somewhere else. It becomes side a of this record, and every step
           after that is the same as a rip.</p>
         <div class="row btns">
-          <button type="button" id="up-pick">Choose a file&hellip;</button>
+          <button type="button" id="up-pick" class="ghost">Choose a file&hellip;</button>
           <button type="button" id="up-go" disabled>Upload</button>
           <button type="button" id="up-cancel" class="ghost" hidden>Cancel</button>
         </div>
@@ -285,13 +289,16 @@
     </div>
 
     <div class="ripform" id="precutform" hidden>
-      <h2>Pre-cut album import</h2>
-      <p class="dim">An album that is already one file per track &mdash; a
+      <div class="source-head">
+        <span class="kicker">Import</span>
+        <h2>Pre-cut album import</h2>
+      </div>
+      <p class="lead">An album that is already one file per track &mdash; a
         download you bought. There is nothing to cut, so this goes straight to
         tagging: beets matches it, replaygain sets the levels, and the cover is
         fetched and embedded, exactly as a finished rip is.</p>
       <div class="row btns">
-        <button type="button" id="pc-pick">Choose a download&hellip;</button>
+        <button type="button" id="pc-pick" class="ghost">Choose a download&hellip;</button>
         <button type="button" id="pc-go" disabled>Upload</button>
         <button type="button" id="pc-cancel" class="ghost" hidden>Cancel</button>
       </div>
@@ -303,25 +310,24 @@
           <option value="skip">Skip it</option>
           <option value="merge">Merge them</option>
         </select></label>
-      <div class="row btns">
-        <button type="button" id="pc-import" hidden>Import this release</button>
-      </div>
+      <button type="button" id="pc-import" hidden>Import this release</button>
       <p class="err" id="pc-err"></p>
     </div>
 
     <div class="ripform" id="punchform" hidden>
-      <h2>Punch a track</h2>
-      <p class="dim">One track came out dirty &mdash; a skip, a click, a passage
+      <div class="source-head">
+        <span class="kicker">Repair</span>
+        <h2>Punch a track</h2>
+      </div>
+      <p class="lead">One track came out dirty &mdash; a skip, a click, a passage
         the stylus fought. Re-record just that track and swap it into the
         library. The boundaries are <b>fitted against the archived side</b>, so
         the replacement starts and ends exactly where the original did.</p>
-      <div class="fields">
-        <label class="wide">Track <select id="punch-track"></select></label>
-      </div>
+      <label>Track <select id="punch-track"></select></label>
       <p class="dim mono" id="punch-info"></p>
       <div class="row btns">
         <button id="punch-go" disabled>Record punch</button>
-        <button id="punch-locate" class="ghost" hidden>Find the track</button>
+        <button id="punch-locate" hidden>Find the track</button>
         <button id="punch-discard" class="ghost" hidden>Discard punch</button>
       </div>
       <p class="hint" id="punch-hint">Drop the needle a few seconds <b>before</b>
@@ -330,7 +336,7 @@
         <b>Stop &amp; encode</b> ends it like any other capture.</p>
       <div id="punch-found" hidden>
         <p class="mono" id="punch-fit"></p>
-        <div class="fields">
+        <div class="fields three">
           <label>Start <input id="punch-start" size="9" inputmode="decimal"></label>
           <label>End <input id="punch-end" size="9" inputmode="decimal"></label>
           <label>Length <input id="punch-len" size="9" disabled></label>
@@ -343,7 +349,7 @@
           <code>archive/&lt;album&gt;/_punched/</code>. Nothing is deleted.</p>
       </div>
       <p class="err" id="punch-err"></p>
-      <p class="dim" id="punch-done"></p>
+      <p class="done-line" id="punch-done"></p>
     </div>
 
     <!-- Shared by Rip and Punch: one capture device, one transport, one meter.
@@ -351,39 +357,43 @@
          device is selected, which is exactly how a rip ends up on the wrong
          input. -->
     <div class="ripmeter" id="capturepane">
-      <div class="fields">
+      <div class="fields device">
         <label>Device <select id="rip-device"></select></label>
         <label>Rate <select id="rip-rate"></select></label>
         <label>Depth <select id="rip-format"></select></label>
-      </div>
-      <div class="row btns">
-        <button id="rip-stop" class="ghost" disabled>Stop &amp; encode</button>
-        <button id="rip-abandon" class="ghost" disabled>Abandon</button>
-        <button id="rip-listen" class="ghost" disabled title="hear the capture live, about 2s behind">Listen</button>
-      </div>
-      <div class="row btns">
-        <label class="inline vol" title="How loud this sounds in your browser. It cannot change what is recorded — the capture is written from the device's own stream, before this. Record level is set on the interface itself, or in whatever software drives it.">
-          <span>monitor</span>
-          <input type="range" id="rip-vol" min="0" max="100" value="80"></label>
       </div>
       <label class="inline" id="rip-force-wrap" hidden
              title="the selected device does not look like the turntable"><input
              type="checkbox" id="rip-force"> record from it anyway</label>
       <p class="err" id="rip-err"></p>
-      <p class="dim" id="rip-done"></p>
-      <div class="row"><span id="rip-elapsed" class="big-time">0:00.00</span>
+      <div class="row now"><span id="rip-elapsed" class="big-time">0:00.00</span>
         <span id="rip-state" class="dim"></span>
         <span class="spacer"></span>
         <span class="dim" id="rip-auto"></span></div>
+      <!-- Above the meter, because a side with gaps in it is the one thing here
+           that should stop somebody while the record is still turning. -->
+      <div class="done-box">
+        <p class="dim" id="rip-done"></p>
+        <button type="button" id="rip-open-cut" class="linky">Open in Cut &rarr;</button>
+      </div>
       <div id="meter-box">
         <canvas id="meter"></canvas>
         <div id="meter-then">1&ndash;3&nbsp;kHz, last 30&nbsp;s</div>
         <canvas id="meter-history"></canvas>
       </div>
-      <p class="hint">The 1&ndash;3&nbsp;kHz bar is the one to watch. Arm-up handling
-        rumble is loud full-band but dead in this band; silent groove is quiet in
-        both; music is loud in both. Drop the needle when the band bar sits in
-        the <b>groove</b> zone, not below it.</p>
+      <div class="row btns transport">
+        <button id="rip-stop" class="ghost" disabled>Stop &amp; encode</button>
+        <button id="rip-abandon" class="ghost" disabled>Abandon</button>
+        <button id="rip-listen" class="ghost" disabled title="hear the capture live, about 2s behind">Listen</button>
+        <span class="spacer"></span>
+        <label class="inline vol" title="How loud this sounds in your browser. It cannot change what is recorded — the capture is written from the device's own stream, before this. Record level is set on the interface itself, or in whatever software drives it.">
+          <span>Monitor</span>
+          <input type="range" id="rip-vol" min="0" max="100" value="80"></label>
+      </div>
+      <p class="hint" id="meter-hint">The 1&ndash;3&nbsp;kHz bar is the one to watch. Arm-up
+        handling rumble is loud full-band but dead in this band; silent groove is
+        quiet in both; music is loud in both. Drop the needle when the band bar sits
+        in the <b>silent groove</b> zone, not below it.</p>
     </div>
 
     <!-- The column the meter occupies during a rip, showing the equivalent for
@@ -391,10 +401,13 @@
     <div class="ripmeter" id="uploadpane" hidden>
       <h2 id="up-what">Nothing chosen yet</h2>
       <p class="dim mono" id="up-target"></p>
-      <div class="row"><div class="bar" id="up-bar"><i></i></div></div>
+      <div class="bar" id="up-bar"><i></i></div>
       <p class="dim" id="up-state"></p>
-      <p class="dim" id="up-done"></p>
-      <p class="hint">Anything ffmpeg can read. It is re-encoded to FLAC on the
+      <div class="done-box">
+        <p id="up-done"></p>
+        <button type="button" id="up-open-cut" class="linky">Find boundaries in Cut &rarr;</button>
+      </div>
+      <p class="hint" id="up-hint">Anything ffmpeg can read. It is re-encoded to FLAC on the
         way in and checked that it decodes before it becomes a side &mdash; and
         a lossy source stays lossy, so this does not improve a download.
         Boundaries are found and checked by ear afterwards, in <b>Cut</b>.</p>
@@ -403,11 +416,13 @@
     <div class="ripmeter" id="precutpane" hidden>
       <h2 id="pc-what">Nothing chosen yet</h2>
       <p class="dim mono" id="pc-tracks"></p>
-      <div class="row"><div class="bar" id="pc-bar"><i></i></div></div>
+      <div class="bar" id="pc-bar"><i></i></div>
       <p class="dim" id="pc-state"></p>
       <pre id="pc-report" hidden></pre>
-      <p class="dim" id="pc-done"></p>
-      <p class="hint">Nothing is filed until you say so. beets is asked what the
+      <div class="done-box">
+        <p id="pc-done"></p>
+      </div>
+      <p class="hint" id="pc-hint">Nothing is filed until you say so. beets is asked what the
         album is with nothing to read, so it prints what it found and stops
         without moving a file &mdash; and the release you accept is the one
         pinned when it runs for real. The upload is cleared only once the

@@ -214,19 +214,10 @@ export function drawHistory(cv, seen, at) {
   const bars = historyBars(seen, at);
   for (const b of bars) {
     const x0 = b.from * right, x1 = b.to * right, y = Y(b.db);
-    c.fillStyle = "rgba(230,232,234,.3)";
+    c.fillStyle = "rgba(230,232,234,.2)";
     c.fillRect(x0, y, Math.max(1, x1 - x0), bottom - y);
     c.fillStyle = INK;
     c.fillRect(x0, y - 1, Math.max(1, x1 - x0), 2);
-  }
-  c.font = `10px ${SANS}`;
-  c.textBaseline = "middle";
-  c.textAlign = "left";
-  for (const z of BAND_ZONES) {
-    const top = Y(z.hi), low = Y(z.lo);
-    if (low - top < 10) continue;
-    c.fillStyle = "rgba(230,232,234,.72)";
-    c.fillText(z.label, 6, (top + low) / 2);
   }
   c.font = `10px ${MONO}`;
   c.textAlign = "right";
@@ -238,6 +229,20 @@ export function drawHistory(cv, seen, at) {
     c.textBaseline = db === 0 ? "top" : db === FLOOR ? "bottom" : "middle";
     c.fillText(minus(db), w, y);
   }
+  // Last, and with a dark edge: whatever the readings did, the names stay readable.
+  c.font = `10px ${SANS}`;
+  c.textBaseline = "middle";
+  c.textAlign = "left";
+  c.lineWidth = 3;
+  c.strokeStyle = "rgba(15,17,20,.75)";
+  for (const z of BAND_ZONES) {
+    const top = Y(z.hi), low = Y(z.lo);
+    if (low - top < 10) continue;
+    c.strokeText(z.label, 6, (top + low) / 2);
+    c.fillStyle = INK;
+    c.fillText(z.label, 6, (top + low) / 2);
+  }
+  c.font = `10px ${MONO}`;
   c.textBaseline = "bottom";
   c.fillStyle = FAINT;
   c.textAlign = "left";
@@ -249,7 +254,7 @@ export function drawHistory(cv, seen, at) {
     c.textBaseline = "middle";
     c.font = `12px ${SANS}`;
     c.fillStyle = DIM;
-    c.fillText("nothing to show until a capture is running", right / 2, bottom / 2);
+    c.fillText("nothing to show until a capture is running", right / 2, Y(-8));
   }
 }
 
