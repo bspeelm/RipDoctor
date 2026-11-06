@@ -110,6 +110,8 @@ def test_a_row_from_an_earlier_capture_ends_once_a_person_has_marked_it() -> Non
 def test_checked_is_offered_on_a_doubt_and_not_on_a_fit_or_a_settled_track() -> None:
     assert call("canCheck", {"forced": True, "settled": ""}) is True
     assert call("canCheck", {"placed": "earlier", "settled": ""}) is True
+    assert call("canCheck", {"placed": "length", "settled": ""}) is True
+    assert call("canCheck", {"placed": "length", "settled": "hand"}) is False
     assert call("canCheck", {"placed": "gap", "settled": ""}) is False
     assert call("canCheck", {"placed": "earlier", "settled": "ear"}) is False
     assert call("canCheck", None) is False

@@ -262,7 +262,7 @@ function railCheck(f) {
   const blocking = "Nothing placed from the catalogue is waiting on your ear.";
   const byLength = f.tracks.filter(placedByLength);
   if (byLength.length) {
-    return cutStep("check", "done", `${byLength.length} by length`, `${namedList(byLength.map((t) => t.title))} had no gap near a boundary, so ${byLength.length === 1 ? "it was" : "they were"} placed by length. Worth a listen; Cut does not wait on ${byLength.length === 1 ? "it" : "them"}.`);
+    return cutStep("check", "done", `${byLength.length} by length`, `${namedList(byLength.map((t) => t.title))} had no gap near a boundary, so ${byLength.length === 1 ? "it was" : "they were"} placed by length. Worth a listen, and Checked records that you did; Cut does not wait on ${byLength.length === 1 ? "it" : "them"}.`);
   }
   return cutStep("check", "done", f.tracks.some((t) => t.settled === "ear") ? "Checked" : "Clear", blocking);
 }
@@ -639,7 +639,7 @@ function trackRowView(t) {
   bnd.classList.add("c-bnd-cell");
   if (fromEarlier(t)) bnd.title = "this side was captured again after this was placed, so these times are positions on audio that has gone: run First pass or align, or listen to it here and press Checked";
   else if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
-  else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Cut does not wait on it";
+  else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Checked records that you did. Cut does not wait on it";
   tr.append(bnd);
   return tr;
 }

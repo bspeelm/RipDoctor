@@ -2748,6 +2748,9 @@ or `length`. A boundary belongs to both tracks that meet on it, so the track aft
 with no gap is `length` as well, through its start. The page says `Placed by length` in a
 quiet amber and the Check step names them.
 
+`Checked` works on it, and records that it was heard: moving the boundary and moving it
+back must not be the only way to say so. Like any check it is held by a later first pass.
+
 It does not stop Cut. A first or last track with no gap beside it is ordinary on a real
 pressing, and a block that fires on most records teaches people to press Checked without
 listening, which spends the one thing that makes the forced block worth having. The

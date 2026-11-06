@@ -568,6 +568,26 @@ def test_the_refusal_is_judged_on_the_plan_the_page_just_saved(
     assert post(build(service), "/api/split/album", service).status == 202
 
 
+def test_a_track_placed_by_length_can_be_marked_heard_without_moving_it(
+    tmp_path: Path,
+) -> None:
+    """The amber cleared only by moving the boundary, the complaint ADR-064 is about."""
+    service = a_service(tmp_path)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["placed"] = "length"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    service.runner = Cutting()
+    assert post(build(service), "/api/split/album", service).status == 202, (
+        "placed by length does not block a cut"
+    )
+
+    body["sides"][0]["tracks"][0]["settled"] = "ear"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    back = get(build(service), "/api/album/album", service).json()
+    track = back["tracks_by_side"]["a"][0]
+    assert (track["settled"], track["start"]) == ("ear", 1.0)
+
+
 def test_tick_clips_are_how_a_doubt_is_heard_so_they_are_not_refused(
     tmp_path: Path,
 ) -> None:
