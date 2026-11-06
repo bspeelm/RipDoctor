@@ -336,9 +336,14 @@ def lead_credited(listed: str, credit: Iterable[str]) -> bool:
     """The list's lead is on the credit, whoever else is, a leading The aside.
 
     A name is compared whole: a shared word is no agreement, and Various Artists names
-    nobody. A list crediting several names outright needs all of them.
+    nobody. A list crediting several names outright needs all of them. A credit that is
+    one name holding a comma is that name, so the list's words are asked about whole
+    before their lead is.
     """
     said = {_name(_exact(c)) for c in credit if _exact(c) != VARIOUS}
+    whole = _name(_LISTED_GUESTS.sub("", _CREDIT.sub("", _exact(listed))).strip())
+    if whole and whole in said:
+        return True
     ours = _name(_lead(_exact(listed)))
     return bool(ours) and (ours in said or all(frozenset((n,)) in said for n in ours))
 
@@ -553,8 +558,8 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
 
 
 def _offered(fits: Sequence[_Fit]) -> tuple[Choice, ...]:
-    """One of each album and recording, best first, and a copy the library has however
-    far down it comes. The best's own single stays offered past the cap: that is the
+    """One of each album and recording, best first, and any edition the library has even
+    where it repeats one. The best's own single stays offered past the cap: that is the
     way out of adding an album entry beside an edition already filed."""
     seen: set[tuple[str, str]] = set()
     kept: list[_Fit] = []

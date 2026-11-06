@@ -1277,3 +1277,19 @@ def test_a_remix_album_the_list_names_or_a_remix_it_says_is_still_accepted() -> 
     assert M.propose(wanted(), [named]).status == M.MATCHED
     said = edition(title="A Song (Club Mix)", album="Club Mixes", secondary=("Remix",))
     assert M.propose(wanted("A Song (Club Mix)"), [said]).status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    "name", ["Tyler, The Creator", "Sun, Moon & Stars", "Earth, Wind"]
+)
+def test_a_credit_holding_a_comma_went_to_review_against_itself(name: str) -> None:
+    got = M.propose(wanted(artist=name), [edition(artist=name, credit=(name,))])
+    assert got.status == M.MATCHED
+
+
+def test_a_comma_credit_is_not_agreed_by_a_name_it_only_shares_a_word_with() -> None:
+    got = M.propose(
+        wanted(artist="Tyler, The Creator"),
+        [edition(artist="Tyler Childers", credit=("Tyler Childers",))],
+    )
+    assert got.status == M.REVIEW
