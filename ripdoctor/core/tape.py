@@ -633,7 +633,11 @@ def _keeping_matches(tape: Tape, songs: tuple[Song, ...]) -> tuple[Song, ...]:
         if was is None:
             return song
         return replace(
-            song, proposal=was.proposal, settled_by=was.settled_by, skip=was.skip
+            song,
+            proposal=was.proposal,
+            settled_by=was.settled_by,
+            skip=was.skip,
+            unconfirmed=was.unconfirmed,
         )
 
     return tuple(kept_as(s) for s in songs)
