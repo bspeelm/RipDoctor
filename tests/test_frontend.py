@@ -1014,3 +1014,11 @@ def test_what_a_person_saw_of_their_empty_error_line_took_table_height() -> None
     msg = re.search(r"#tp-msg\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
     assert "min-height" not in msg
     assert "#tp-msg p:empty{display:none}" in css
+
+
+def test_opening_another_tape_left_the_first_one_s_job_on_its_rail() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (tape?.id !== id) break;" in body
+    after = body.split("stepIdle();")[1]
+    assert after.index("tape?.id !== id") < after.index("await loadTapes(id)")

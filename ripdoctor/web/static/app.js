@@ -2994,6 +2994,8 @@ async function watchTape() {
   let missed = 0, answered = -1;
   try {
     for (;;) {
+      // Another tape was opened. Its own job, if it has one, is what is watched now.
+      if (tape?.id !== id) break;
       let j;
       try {
         j = await api(`/api/job/${key}`);
@@ -3054,6 +3056,11 @@ async function watchTape() {
     tpWatchOp = "";
     tpJobStep = null;
     stepIdle();
+  }
+  if (tape?.id !== id) {
+    if (tape?.job && !tape.job.done) watchTape();
+    else if (tape) showTape(tape);
+    return;
   }
   await loadTapes(id);
   cutAfterLookup(id);
