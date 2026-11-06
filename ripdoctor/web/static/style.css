@@ -308,6 +308,7 @@ button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font
 .tp-status span{overflow:hidden;text-overflow:ellipsis}
 .tp-status.is-good{--c:var(--start)}
 .tp-status.is-warn{--c:var(--warn)}
+.tp-status.is-quiet{--c:color-mix(in srgb,var(--warn) 62%,var(--dim))}
 .tp-status.is-bad{--c:var(--end)}
 .tp-status i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c)}
 #tp-rows tr.tp-open td{white-space:normal;padding:.15rem .6rem .7rem 1rem}

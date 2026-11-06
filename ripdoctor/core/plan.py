@@ -15,10 +15,20 @@ TAIL = 1.5
 HAND = "hand"  # moved or placed by a person
 EAR = "ear"  # left where it was, and heard to be right
 
+# What a fit's boundary rests on. Absent, nothing says, which is every plan from
+# before the field and a track whose edges were handed to the fit: no claim is
+# made for it either way.
+GAP = "gap"  # its edges came from what was measured
+LENGTH = "length"  # an edge has no gap behind it, only the catalogue's arithmetic
+
 
 def _settled(value: Any) -> str:
     """An unknown value reads as absent, so it can never clear a doubt."""
     return str(value) if value in (HAND, EAR) else ""
+
+
+def _placed(value: Any) -> str:
+    return str(value) if value in (GAP, LENGTH) else ""
 
 
 class OldFormat(Exception):
@@ -122,6 +132,7 @@ class PlanTrack:
     # construction and says nothing about whether the boundary is right.
     forced: bool = False
     settled: str = ""
+    placed: str = ""
 
     @property
     def length(self) -> float:
@@ -170,6 +181,7 @@ class Plan:
                             forced=bool(t.get("forced", False))
                             and not _settled(t.get("settled")),
                             settled=_settled(t.get("settled")),
+                            placed=_placed(t.get("placed")),
                         )
                         for t in s.get("tracks", [])
                     ),
@@ -201,6 +213,7 @@ class Plan:
                             "cat": t.cat,
                             **({"forced": True} if t.forced else {}),
                             **({"settled": t.settled} if t.settled else {}),
+                            **({"placed": t.placed} if t.placed else {}),
                         }
                         for t in s.tracks
                     ],

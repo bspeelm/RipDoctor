@@ -7,10 +7,24 @@ from dataclasses import dataclass, replace
 from ripdoctor.core import gaps
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.gaps import Gap, GapSet, refine
-from ripdoctor.core.plan import LEAD, TAIL, Plan, PlanSide, PlanTrack, Spec, SpecSide
+from ripdoctor.core.plan import (
+    GAP,
+    LEAD,
+    LENGTH,
+    TAIL,
+    Plan,
+    PlanSide,
+    PlanTrack,
+    Spec,
+    SpecSide,
+    SpecTrack,
+)
 
 # A cut is never placed within this of its neighbour.
 MIN_SEPARATION = 0.2
+
+# The reason a fit gives for an end it could only work out from the catalogue.
+NO_GAP = "no gap"
 
 # A candidate gap must end this far after the track started, or the gap it just
 # began in is its own best match and every track collapses.
@@ -105,6 +119,20 @@ def _share_gap(
     return meeting, meeting
 
 
+def _rests_on(track: SpecTrack, reason: str, handed_over: bool, tracks: int) -> str:
+    """What a placed track's boundaries rest on, when the fit can say. ADR-064.
+
+    A boundary with no gap belongs to both tracks that meet on it, so the track
+    after one inherits the doubt through its start. The only track on a side
+    has no boundary with a neighbour, so no gap comes into it.
+    """
+    if track.settled:
+        return ""
+    if reason == NO_GAP or (handed_over and track.start is None):
+        return LENGTH
+    return "" if track.has_ear_edges or tracks == 1 else GAP
+
+
 def fit_side(
     side: SpecSide,
     env: Envelope,
@@ -117,6 +145,7 @@ def fit_side(
     """Place every track on one side. `env` and `gapset` must match."""
     out: list[Fitted] = []
     cur = side.start
+    handed_over = False  # the start this track inherits has no gap behind it
 
     for i, track in enumerate(side.tracks):
         last = i == len(side.tracks) - 1
@@ -145,7 +174,7 @@ def fit_side(
             gap = _pick_gap(gapset, want, cur, reach=track.cat * REACH)
             if gap is None:
                 end = nxt = min(want, duration)
-                reason = "no gap"
+                reason = NO_GAP
             else:
                 music_end, next_start = refine(env, gap.lo, gap.hi)
                 end, nxt = _share_gap(music_end, next_start, lead, tail)
@@ -168,12 +197,14 @@ def fit_side(
                     end=round(end, 2),
                     cat=track.cat,
                     settled=track.settled,
+                    placed=_rests_on(track, reason, handed_over, len(side.tracks)),
                 ),
                 reason=reason,
                 want_outside=want_outside,
             )
         )
 
+        handed_over = reason == NO_GAP
         if not last:
             following = side.tracks[i + 1]
             if following.start is not None:

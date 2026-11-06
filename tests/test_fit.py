@@ -9,6 +9,7 @@ actually fitted from it, so the guarantee is shown to hold end to end.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -535,3 +536,70 @@ def test_a_settled_track_on_a_forced_side_is_not_marked_as_placed_blind() -> Non
     assert side.tracks[0].settled == P.EAR
     assert not FIT.was_forced((held,))
     assert FIT.was_forced((held, blind))
+
+
+def test_a_track_with_no_gap_says_it_was_placed_by_length() -> None:
+    """It read "Fitted to gap" with a delta of zero and nothing said otherwise."""
+    env = build([(10, -80), (300, -25)])
+    fitted = fit_side(
+        spec_side(cat=60.0), env, G.find(env, below=G.BELOW), duration=310
+    )
+    assert [f.reason for f in fitted[:2]] == ["no gap", "no gap"]
+    assert fitted[0].track.placed == P.LENGTH
+    assert not fitted[0].track.forced
+
+
+def test_the_track_after_a_no_gap_boundary_inherits_its_start_from_arithmetic() -> None:
+    """Last on the side, its own end is the side's, and its start is still a sum."""
+    env = build([(10, -80), (300, -25)])
+    fitted = fit_side(
+        spec_side(cat=60.0), env, G.find(env, below=G.BELOW), duration=310
+    )
+    assert fitted[-1].reason == "side end"
+    assert fitted[-1].track.placed == P.LENGTH
+
+
+def test_tracks_found_on_gaps_say_so() -> None:
+    env, gapset = side_with_gaps()
+    fitted = fit_side(spec_side(), env, gapset, duration=208.0)
+    assert [f.track.placed for f in fitted] == [P.GAP, P.GAP, P.GAP]
+
+
+def test_a_settled_track_claims_nothing_about_a_gap() -> None:
+    env, gapset = side_with_gaps()
+    side = spec_side()
+    pinned = replace(side.tracks[0], start=10.0, end=70.0, settled=P.HAND)
+    held = replace(side, tracks=(pinned, *side.tracks[1:]))
+    assert fit_side(held, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_edges_handed_to_a_fit_with_nobody_named_claim_nothing() -> None:
+    """A saved spec has every edge ear-set, and those did not come from this fit."""
+    env, gapset = side_with_gaps()
+    side = spec_side()
+    pinned = replace(side.tracks[0], start=10.0, end=70.0)
+    held = replace(side, tracks=(pinned, *side.tracks[1:]))
+    assert fit_side(held, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_the_only_track_on_a_side_has_no_gap_to_claim() -> None:
+    env, gapset = side_with_gaps()
+    only = P.SpecSide("a", 10.0, 208.0, (P.SpecTrack(1, "One", 198.0),))
+    assert fit_side(only, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_what_a_fit_rests_on_is_kept_in_the_plan_and_absent_from_an_old_one() -> None:
+    track = {"number": 1, "title": "T", "start": 0.0, "end": 9.0, "cat": 9.0}
+    doc = {"slug": "s", "sides": [{"file": "side-a.flac", "tracks": [track]}]}
+    assert P.Plan.from_dict(doc).sides[0].tracks[0].placed == ""
+    assert "placed" not in P.Plan.from_dict(doc).to_dict()["sides"][0]["tracks"][0]
+
+    doc["sides"][0]["tracks"] = [{**track, "placed": "length"}]  # type: ignore[index]
+    plan = P.Plan.from_dict(doc)
+    assert plan.to_dict()["sides"][0]["tracks"][0]["placed"] == "length"
+
+
+def test_a_placed_value_nobody_knows_reads_as_absent() -> None:
+    track = {"number": 1, "start": 0.0, "end": 9.0, "placed": "gut feeling"}
+    doc = {"slug": "s", "sides": [{"file": "side-a.flac", "tracks": [track]}]}
+    assert P.Plan.from_dict(doc).sides[0].tracks[0].placed == ""

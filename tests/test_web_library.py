@@ -978,3 +978,19 @@ def test_a_pass_that_needed_no_forcing_says_so(tmp_path: Path) -> None:
     ).json()
     assert not body["error"], body["error"]
     assert body["result"]["forced"] == []
+
+
+def test_a_saved_plan_keeps_what_the_fit_rested_on_through_the_page(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    before = [
+        t.placed
+        for s in F.read_plan(service.layout.plan_file("album")).sides
+        for t in s.tracks
+    ]
+    assert "length" in before and "gap" in before
+    app = build(service)
+    shown = get(app, "/api/album/album", service).json()["tracks_by_side"]
+    assert [t["placed"] for s in shown.values() for t in s] == before

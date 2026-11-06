@@ -1495,3 +1495,19 @@ def test_the_first_pass_report_says_what_it_left_where_it_was() -> None:
     js = (STATIC / "app.js").read_text()
     assert "you set or checked left where" in js
     assert '(kept ? `${kept}.\\n\\n` : "") + r.report' in js
+
+
+def test_a_plan_that_does_not_say_what_a_fit_rested_on_makes_no_claim_about_a_gap() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    words = re.search(r"const PLACED_WORDS = .*", js).group(0)  # type: ignore[union-attr]
+    assert 'length: ["Placed by length", "quiet"]' in words
+    boundary = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'PLACED_WORDS[t.placed] ?? ["Fitted", "good"]' in boundary
+
+
+def test_a_track_placed_by_length_does_not_stop_cut() -> None:
+    js = (STATIC / "app.js").read_text()
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "placedByLength" not in cut and "length" not in cut.replace(".length", "")

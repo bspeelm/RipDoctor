@@ -139,6 +139,7 @@ def add(app: App, service: Service) -> None:
                         "cat": t.cat,
                         "forced": t.forced,
                         "settled": t.settled,
+                        "placed": t.placed,
                     }
                     for t in side.tracks
                 ]

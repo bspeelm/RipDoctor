@@ -250,8 +250,12 @@ function railCheck(f) {
     const titles = namedList(f.forced.map((t) => t.title));
     return cutStep("check", "todo", `${f.forced.length} to check`, `${titles} did not fit the gaps and ${f.forced.length === 1 ? "was" : "were"} placed from the catalogue.`);
   }
-  const heard = f.tracks.some((t) => t.settled === "ear");
-  return cutStep("check", "done", heard ? "All checked" : "Clear", "Nothing placed from the catalogue is waiting on your ear.");
+  const blocking = "Nothing placed from the catalogue is waiting on your ear.";
+  const byLength = f.tracks.filter(placedByLength);
+  if (byLength.length) {
+    return cutStep("check", "done", `${byLength.length} by length`, `${namedList(byLength.map((t) => t.title))} had no gap near a boundary, so ${byLength.length === 1 ? "it was" : "they were"} placed by length. Worth a listen; Cut does not wait on ${byLength.length === 1 ? "it" : "them"}.`);
+  }
+  return cutStep("check", "done", f.tracks.some((t) => t.settled === "ear") ? "Checked" : "Clear", blocking);
 }
 
 function railSave(f) {
@@ -546,16 +550,20 @@ function showSideMeta() {
 function tracks() { return S.bySide[S.side] || []; }
 function trackByNum(n) { return tracks().find((t) => t.number === n); }
 
-// Absent, the fit settled it, or the catalogue if the track is forced. ADR-064.
+// Nothing settled it, so the fit did, or the catalogue if the track is forced. A plan that
+// does not say what the fit rested on is only called fitted. ADR-064.
 const BOUNDARY_WORDS = { hand: ["Set by you", "good"], ear: ["Checked by ear", "good"] };
+const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by length", "quiet"] };
 function trackBoundary(t) {
-  return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : ["Fitted to gap", "good"]);
+  return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
 }
+const placedByLength = (t) => !t.settled && !t.forced && t.placed === "length";
 
 // A boundary moved is the person's, and nothing later moves it.
 function setByHand(t) {
   t.forced = false;
   t.settled = "hand";
+  t.placed = "";
 }
 
 // The row is read-only, and what edits it opens beneath it, one at a time. The open track is
@@ -599,6 +607,7 @@ function trackRowView(t) {
   const bnd = statusCell(trackBoundary(t));
   bnd.classList.add("c-bnd-cell");
   if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
+  else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Cut does not wait on it";
   tr.append(bnd);
   return tr;
 }

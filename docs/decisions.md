@@ -2684,11 +2684,25 @@ files cut before this existed are already judged. `ripdoctor split` on the comma
 line, which takes a plan by path and has no `Checked` to offer; a refusal there would
 send somebody to hand-edit the document to get past it.
 
-**A known gap in the wording.** `Fitted to gap` is what an absent field reads as, and
-that includes a track the fit placed with `no gap` near it. The plan does not record
-that case, so it is not flagged and does not block. Its delta is zero by construction,
-which is the shape ADR-061 marked `forced` for. That is an open question and not
-settled here.
+**A track placed by length is said to be, and does not block.** A fit can find no gap
+near a boundary and place it from the catalogue's arithmetic, on a side that otherwise
+fits. Its delta is zero by construction, the shape ADR-061 marked `forced` for, and it
+used to read `Fitted to gap`, which was false.
+
+So a fit records what each track rests on, in one more optional field: `placed` is `gap`
+or `length`. A boundary belongs to both tracks that meet on it, so the track after one
+with no gap is `length` as well, through its start. The page says `Placed by length` in a
+quiet amber and the Check step names them.
+
+It does not stop Cut. A first or last track with no gap beside it is ordinary on a real
+pressing, and a block that fires on most records teaches people to press Checked without
+listening, which spends the one thing that makes the forced block worth having. The
+catalogue-placed block stays for what it was for: a side whose whole placement was
+refused and then asked for.
+
+A plan from before the field cannot know, and a track whose edges were handed to the fit
+is not something the fit found. Those are absent and read `Fitted`, which is true of
+both and claims no gap.
 
 ### The keys
 
@@ -2700,7 +2714,7 @@ a boundary for good.
 
 ### The ceiling
 
-The ceiling moves 12,211 → 12,300 for the field, the first pass's new rule and the
+The ceiling moves 12,211 → 12,600 for the fields, the first pass's new rules and the
 refusal, and retires nothing. The budget counts Python, so the page's own growth is
 not in that number. The trim ADR-036 promised is still owed. The comment ratio does
 not move.
