@@ -119,9 +119,12 @@ walks through it. The name in brackets after each claim is the test that proves 
 Its boundaries are checked on the same waveform editor a record's are
 (`test_a_tape_s_waveform_is_the_rip_s_editor_and_player_and_not_a_copy_of_them`).
 A boundary you drag is yours and nothing moves it afterwards
-(`test_a_move_by_hand_is_the_person_s_and_nothing_afterwards_moves_it`), and one that
+(`test_a_move_by_hand_is_the_person_s_and_nothing_afterwards_moves_it`). It moves that song
+and no other, so audio left between two songs belongs to neither
+(`test_dragging_an_end_earlier_laid_the_next_song_onto_it_and_moves_no_other`), and one that
 would pass the song beside it is refused and goes back
-(`test_a_move_by_hand_past_a_neighbour_or_the_ends_is_refused`). The cut waits until
+(`test_a_move_by_hand_past_a_neighbour_or_the_ends_is_refused`). Two markers on one spot can
+be pulled apart (`test_markers_on_one_spot_can_be_pulled_apart_by_either_of_them`). The cut waits until
 every doubt is moved, accepted or skipped
 (`test_accepting_settles_a_doubt_and_the_cut_waits_until_it_is_settled`).
 
@@ -129,16 +132,27 @@ The page is one pipeline rail, one waveform and one table of songs, with a row t
 opens (`test_a_tape_s_songs_are_in_one_table`,
 `test_the_pipeline_rail_runs_in_order_with_archive_last`). Once the audio and the list are
 both in, boundaries and albums follow by themselves
-(`test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in`). A cut needs settled
+(`test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in`). A run that failed
+waits for you, even after a restart
+(`test_a_failed_run_waits_for_a_person_even_after_a_restart`), and Cut pressed during an
+automatic lookup runs when it ends
+(`test_cut_waits_behind_an_automatic_lookup_instead_of_being_turned_off`). A cut needs settled
 boundaries, and filing also needs every song's album
 (`test_a_cut_is_not_said_to_wait_on_an_album_and_a_file_is`). A row chooses its album from
 one line per option, and a choice more than 3 s from the list asks first, in that line
 (`test_an_option_is_one_line_of_columns_with_no_edition_jargon`,
-`test_a_release_far_from_the_list_is_asked_about_and_sent_again`).
+`test_a_release_far_from_the_list_is_asked_about_and_sent_again`). A page left open cannot
+put back a list that has changed since
+(`test_a_stale_page_reverted_a_row_and_is_refused_with_nothing_changed`), and if the server
+goes away while a job runs the page says so and carries on when it is back
+(`test_with_the_server_gone_the_page_kept_saying_working_and_now_says_so`).
 
 A filed song with no cover says so, and one uploaded image is embedded and set as its
 album's art (`test_a_filed_song_with_no_cover_says_so_and_one_with_a_cover_does_not`,
-`test_one_upload_embeds_and_sets_the_album_s_art_for_all_its_songs`). The Playlist step says
+`test_one_upload_embeds_and_sets_the_album_s_art_for_all_its_songs`). Only a song this tape
+filed can take one (`test_a_song_this_tape_only_found_could_take_a_cover_and_is_refused`), and
+what shares its folder keeps its modes
+(`test_a_cover_changed_the_mode_of_a_neighbour_s_file_and_touches_only_its_own`). The Playlist step says
 the file is written and no more, because whether a music server shows it is that server's
 to say (`test_the_playlist_step_claims_the_file_and_not_the_music_server`).
 
@@ -180,16 +194,34 @@ What it does with the list:
   takes evidence: a row with another recording id is another recording
   (`test_a_row_with_another_recording_id_never_owns_a_pinned_song`), and a row
   with the same title, artist and length but no id waits for you to listen
-  (`test_a_row_with_no_recording_id_is_for_a_person_to_confirm_on_a_pinned_song`).
+  (`test_a_row_with_no_recording_id_is_for_a_person_to_confirm_on_a_pinned_song`). A song
+  the lookup found in the library needs no cut
+  (`test_a_song_found_in_the_library_was_cut_anyway_and_needs_no_cut`).
+- **A wrong version is held for you.** A word in a title excuses only the version its
+  bracket or dash suffix names
+  (`test_a_word_in_a_title_excused_a_version_of_it_it_does_not_name`), and a guest clause
+  holding a version word is that version
+  (`test_a_guest_clause_ate_the_version_and_graded_exact_against_the_plain_title`).
 - **A filed song keeps its release**
   (`test_a_song_in_the_library_keeps_the_release_it_was_filed_as`), and a song whose
   filing failed can still be changed
-  (`test_a_song_whose_filing_failed_can_still_be_changed`).
+  (`test_a_song_whose_filing_failed_can_still_be_changed`). Finding boundaries again is refused
+  while the library holds a song
+  (`test_find_again_on_a_filed_song_used_to_move_it_and_is_refused`), and so is a new list,
+  until that copy is removed with beets
+  (`test_a_confirmed_new_list_dropped_the_lock_on_a_filed_song_and_is_refused`,
+  `test_a_new_list_after_beets_removes_the_copies_clears_filing_and_files_them_again`).
 - **The playlist is an `.m3u8` file** in the library's `Playlists` folder
   (`test_the_file_lands_in_the_library_playlists_folder_as_utf8`), with paths
   relative to it (`test_the_text_is_the_header_then_relative_lines_in_list_order_with_lf`).
 - **The uncut file is archived only once every song resolves**
   (`test_archive_is_refused_with_every_reason_while_a_song_is_unresolved`).
+
+A song from an album you hold in another version goes in as its own album entry and
+leaves your tracks unchanged
+(`test_merging_into_another_edition_once_rewrote_an_owned_album_so_it_keeps_both`), with the
+folder it lands in said only as far as your beets paths promise it
+(`test_a_note_promised_the_album_s_folder_where_paths_give_it_a_folder_of_its_own`).
 
 Filing a tape merges songs into albums, and beets crashes doing that when a library
 row holds a relative path, which an older library can. `ripdoctor doctor` counts
