@@ -1259,3 +1259,45 @@ def test_starting_over_gets_past_a_mark_the_new_release_has_no_place_for(
     body = a_second_pass(service, {"start_over": True})
     assert not body["error"], body["error"]
     assert 9 in [x["number"] for x in body["result"]["replaced"]]
+
+
+def an_overlap(service: Service) -> None:
+    """Track 2 moved back past the end of track 1, as a drag does and a save keeps."""
+    plan = F.read_plan(service.layout.plan_file("album"))
+    one, two = plan.sides[0].tracks[:2]
+    moved = tuple(
+        replace(t, start=one.end - 0.5, settled="hand") if t is two else t
+        for t in plan.sides[0].tracks
+    )
+    plan = replace(plan, sides=(replace(plan.sides[0], tracks=moved), *plan.sides[1:]))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+
+def with_tracks_to_overlap(tmp_path: Path):  # type: ignore[no-untyped-def]
+    service = prepared_service(
+        tmp_path, release([1000, 1000, 1000, 1000]), sides=("a",)
+    )
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    return service
+
+
+def test_an_overlap_keeps_the_save_and_what_the_person_did(tmp_path: Path) -> None:
+    service = with_tracks_to_overlap(tmp_path)
+    an_overlap(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"][
+        "a"
+    ]
+    assert shown[1]["start"] < shown[0]["end"]
+    assert page_saves(service)["ok"]
+    assert track_in(service, 2).settled == "hand"
+
+
+def test_the_archive_gates_409_is_the_overlap_saying_so(tmp_path: Path) -> None:
+    """Issue #54 could not say whether the two were linked. They are: the gate
+    validates the plan, and this is the refusal it gives."""
+    service = with_tracks_to_overlap(tmp_path)
+    assert get(build(service), "/api/archive/album", service).status == 200
+    an_overlap(service)
+    r = get(build(service), "/api/archive/album", service)
+    assert r.status == 409
+    assert "before track 1 ends" in r.json()["error"]

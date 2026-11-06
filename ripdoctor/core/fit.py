@@ -38,15 +38,30 @@ REACH = 0.5
 class OutOfSide(ValueError):
     """The tracks a side was given need more of it than the side has. ADR-045."""
 
-    def __init__(self, side: SpecSide, reached: float) -> None:
+    def __init__(self, side: SpecSide, bad: PlanTrack) -> None:
         want = sum(t.cat for t in side.tracks)
         span = side.end - side.start
+        held = [f"track {t.number}" for t in side.tracks if t.has_ear_edges]
+        where = (
+            f'track {bad.number} "{bad.title}" would start at {bad.start:.0f}s and '
+            f"end at {bad.end:.0f}s"
+        )
+        total = (
+            f"the {len(side.tracks)} tracks the catalogue puts here run {want:.0f}s "
+            f"against {span:.0f}s of music"
+        )
+        if held:
+            why = (
+                f"with the boundaries set on {' and '.join(held)} held where they "
+                "are. Move those"
+            )
+        elif want > span:
+            why = "so the release's durations do not match this pressing. Use"
+        else:
+            why = "so its durations do not line up with the gaps it found. Use"
         super().__init__(
-            f"side {side.letter}: the {len(side.tracks)} tracks the catalogue "
-            f"puts here run {want:.0f}s against {span:.0f}s of music, and the "
-            f"last one would start at {reached:.0f}s with the side ending at "
-            f"{side.end:.0f}s. The release's durations do not match this "
-            f"pressing - try another release, or place this side by ear."
+            f"side {side.letter}: {total}, and {where}, {why}. Try another "
+            "release, or place this side by ear."
         )
 
 
@@ -262,7 +277,7 @@ def fit_plan(
             )
             bad = next((f for f in fitted if f.track.end <= f.track.start), None)
         if bad is not None:
-            raise OutOfSide(side, bad.track.start)
+            raise OutOfSide(side, bad.track)
         working[side.letter] = fitted
         sides.append(to_side(side.letter, fitted))
     plan = Plan(

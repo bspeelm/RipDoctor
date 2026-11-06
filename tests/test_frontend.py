@@ -1596,3 +1596,24 @@ def test_a_split_takes_its_edges_from_the_rule_that_bounds_them() -> None:
     assert "splitEdges(t, at," in split
     assert "if (edges.refused) { status(edges.refused, true); return; }" in split
     assert "g.lo" not in split, "the page has its own idea of a gap's edges again"
+
+
+def test_a_boundary_moved_past_its_neighbour_is_said_and_left_there() -> None:
+    """It saved with no complaint and first surfaced as a refusal at Cut. Issue #54.
+    A drag, an arrow and a typed figure all come through setByHand, held above."""
+    js = (STATIC / "app.js").read_text()
+    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "trackOverlaps(t)" in helper and "now overlaps" in helper
+    assert "Left where you put it" in helper
+    for edge in ("t.start =", "t.end =", "t[edge] ="):
+        assert edge not in helper, "a person's boundary is not moved for them"
+    typed = re.search(r"function typedEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "setByHand(t)" in typed
+
+
+def test_the_row_and_the_rail_say_a_track_overlaps() -> None:
+    js = (STATIC / "app.js").read_text()
+    boundary = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "Overlaps" in boundary
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"Overlap"' in cut and "!!f.overlaps.length" in cut

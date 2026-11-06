@@ -603,3 +603,38 @@ def test_a_placed_value_nobody_knows_reads_as_absent() -> None:
     track = {"number": 1, "start": 0.0, "end": 9.0, "placed": "gut feeling"}
     doc = {"slug": "s", "sides": [{"file": "side-a.flac", "tracks": [track]}]}
     assert P.Plan.from_dict(doc).sides[0].tracks[0].placed == ""
+
+
+def test_a_side_held_by_set_boundaries_blames_them_and_not_the_last_track() -> None:
+    """It said the last one would start at 96 s with the side ending at 450 s, on a
+    side the catalogue fitted with room to spare. Issue #54."""
+    env = build([(10, -80), (440, -25)])
+    side = P.SpecSide(
+        "a",
+        10.0,
+        450.0,
+        (
+            P.SpecTrack(1, "One", 90.0, start=10.0, end=96.0, settled=P.HAND),
+            P.SpecTrack(2, "Two", 90.0),
+            P.SpecTrack(3, "Three", 90.0, start=50.0, end=300.0, settled=P.HAND),
+            P.SpecTrack(4, "Four", 90.0),
+        ),
+    )
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert "last one" not in said
+    assert 'track 2 "Two"' in said
+    assert "boundaries set on track 1 and track 3" in said
+
+
+def test_a_side_the_gaps_misled_does_not_blame_the_catalogues_total() -> None:
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert "last one" not in said
+    assert "another release" in said and "by ear" in said
+    assert "gaps it found" in said

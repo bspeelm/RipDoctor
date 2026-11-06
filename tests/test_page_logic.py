@@ -94,6 +94,13 @@ def test_a_part_shorter_than_half_a_second_is_refused() -> None:
     assert got["refused"] == "too close to an existing boundary"
 
 
+def test_two_tracks_sharing_audio_overlap_and_two_meeting_do_not() -> None:
+    a = {"number": 1, "start": 0.0, "end": 10.0}
+    assert call("overlapping", a, [a, {"number": 2, "start": 9.0, "end": 20.0}])
+    assert not call("overlapping", a, [{"number": 2, "start": 10.0, "end": 20.0}])
+    assert not call("overlapping", a, [{"number": 2, "start": 11.0, "end": 20.0}])
+
+
 def test_the_real_scripts_parse() -> None:
     done = check_js("--require")
     assert done.returncode == 0, done.stdout

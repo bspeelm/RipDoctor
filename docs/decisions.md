@@ -1417,6 +1417,11 @@ Naming the side, the number of tracks, the catalogue total against the measured
 span, and the two ways out — another release, or an ear-set boundary — is a
 finding somebody can act on.
 
+It names the track that actually has no room, rather than calling it the last one, and
+blames what is responsible. With boundaries held it names those tracks; a catalogue that
+fits but gaps that misled it say so; only a total that overruns the side blames the
+release's durations.
+
 ## ADR-046 — a record can have its sides in two places at once
 
 **Status:** accepted. Set by the author, 2026-09-08.
@@ -2738,6 +2743,20 @@ refused and then asked for.
 A plan from before the field cannot know, and a track whose edges were handed to the fit
 is not something the fit found. Those are absent and read `Fitted`, which is true of
 both and claims no gap.
+
+### A boundary moved past its neighbour
+
+It is kept, and said at the move. A drag, an arrow key and a typed figure can all carry
+a track's edge past the next track's, and this used to save with no complaint and first
+surface as a refusal at Cut. Clamping it would be the program moving a person's boundary
+for them, and refusing the move would throw away what they meant to do next: often it is
+one of two edges being fixed in turn. So the move stands, the status line says so at once,
+the row reads `Overlaps 3` in red, and the rail's Cut step waits with the reason. A save
+is allowed, because a save loses nothing.
+
+`GET /api/archive` answers 409 on such a plan and that is the overlap: the gate validates
+the plan it would gate on (`test_the_archive_gates_409_is_the_overlap_saying_so`). The
+rail says what it is waiting on instead of its usual line.
 
 ### The keys
 

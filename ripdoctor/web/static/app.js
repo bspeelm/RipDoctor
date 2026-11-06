@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { drawMeter, slugify, splitEdges } from "/ripui.js";
+import { drawMeter, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -280,10 +280,11 @@ function railCut(f) {
   const n = counted(f.tracks.length, "track", "tracks");
   const files = counted(f.review ?? 0, "file", "files");
   const later = S.dirty ? " Cutting saves your changes first." : "";
-  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.forced.length;
-  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length);
+  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length;
+  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length && !f.overlaps.length);
   if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
   if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.overlaps.length) return cutStep("cut", "todo", "Overlap", `Tracks ${namedList(f.overlaps.map((t) => t.number))} overlap. Move a boundary so they do not, and this can run.`);
   if (f.forced.length && !f.imported) return cutStep("cut", "wait", "Waiting", `Waiting on ${f.forced.length} to check.`);
   if (f.review) return S.dirty
     ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.${later}`)
@@ -305,7 +306,7 @@ function railArchive(f) {
   blue("#archive", !!f.arc?.ready);
   if (f.archived) return cutStep("archive", "done", "Archived", "The raw sides are in the archive.");
   if (f.arc?.ready) return cutStep("archive", "ready", "Ready", "Put the raw sides away and clean up.");
-  const why = f.arc?.why || "Enabled once the album is in the library";
+  const why = f.arc?.why || (f.overlaps.length ? "Waiting on the overlapping tracks" : "Enabled once the album is in the library");
   return cutStep("archive", "wait", "Waiting", `${why[0].toUpperCase()}${why.slice(1)}.`);
 }
 
@@ -330,6 +331,7 @@ function showCutRail() {
     recording: S.meta?.recording ?? [],
     tracks,
     forced: tracks.filter((t) => t.forced),
+    overlaps: tracks.filter((t) => trackOverlaps(t).length),
     review,
     arc,
     imported: !!arc?.library_tracks,
@@ -564,15 +566,22 @@ function trackByNum(n) { return tracks().find((t) => t.number === n); }
 const BOUNDARY_WORDS = { hand: ["Set by you", "good"], ear: ["Checked by ear", "good"] };
 const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by length", "quiet"], earlier: ["From an earlier capture", "warn"] };
 function trackBoundary(t) {
+  const over = trackOverlaps(t);
+  if (over.length) return [`Overlaps ${namedList(over.map((x) => x.number))}`, "bad"];
   return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
 }
+const trackOverlaps = (t) => overlapping(t, sideOf(t)).sort((a, b) => a.start - b.start);
+const sideOf = (t) => Object.values(S.bySide).find((list) => list.includes(t)) ?? [];
 const placedByLength = (t) => !t.settled && !t.forced && t.placed === "length";
 
-// A boundary moved is the person's, and nothing later moves it.
+// A boundary moved is the person's, and nothing later moves it, this included: one moved
+// past its neighbour stays there, and they are told at once, while it is theirs to undo.
 function setByHand(t) {
   t.forced = false;
   t.settled = "hand";
   t.placed = "";
+  const over = trackOverlaps(t);
+  if (over.length) status(`${t.number} \u201c${t.title}\u201d now overlaps ${over.map((x) => `${x.number} \u201c${x.title}\u201d`).join(" and ")}. Left where you put it; Cut will not run until they no longer overlap.`, true);
 }
 
 // The row is read-only, and what edits it opens beneath it, one at a time. The open track is

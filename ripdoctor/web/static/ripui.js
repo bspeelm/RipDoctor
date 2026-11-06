@@ -117,3 +117,8 @@ export function splitEdges(track, at, gaps) {
     return { refused: "too close to an existing boundary" };
   return { end, start, note };
 }
+
+// The tracks on this side that share audio with this one. Meeting at a point is not sharing.
+export function overlapping(track, list) {
+  return list.filter((x) => x !== track && track.start < x.end && x.start < track.end);
+}
