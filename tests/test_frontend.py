@@ -1720,6 +1720,30 @@ def test_merge_is_not_offered_where_beets_has_nothing_to_merge_by() -> None:
     assert "another album entry" in dialog[: dialog.index("</p>")]
 
 
+def test_a_tick_on_the_replace_panel_does_not_outlive_the_files_it_was_given_for() -> (
+    None
+):
+    """Ticked for one release, it stayed ticked when the release changed, and Replace
+    then removed files the tick had never been about."""
+    js = (STATIC / "app.js").read_text()
+    offer = js[js.index("function showReplaceOffer") :]
+    offer = offer[: offer.index("\n}\n")]
+    assert (
+        'if (!keepTick || named !== offered) $("#imp-replace").checked = false' in offer
+    )
+
+
+def test_an_earlier_answer_about_the_library_cannot_overwrite_a_later_one() -> None:
+    """A library listing can outlast the release it was asked about. Import stays
+    shut while it runs, because unticked it files a second copy beside the first."""
+    js = (STATIC / "app.js").read_text()
+    check = js[js.index("async function checkExisting()") :]
+    check = check[: check.index("\n}\n")]
+    assert check.count("if (asked !== existingAsked) return;") == 2
+    assert '$("#imp-go").disabled = true;' in check
+    assert '$("#imp-err").textContent = "";' in check
+
+
 def test_the_replace_panel_names_what_goes_for_the_release_in_use() -> None:
     js = (STATIC / "app.js").read_text()
     offer = js[js.index("function showReplaceOffer") :]

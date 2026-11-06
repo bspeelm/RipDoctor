@@ -3782,9 +3782,15 @@ function artNote(a) {
   return `   ·   art carried over (${a.size}, ${a.embedded}/${a.tracks} tracks)`;
 }
 
+// The tick is about the files named when it was given, so a different answer takes it
+// back: a release changed after ticking would otherwise replace files nobody agreed to.
+let offered = "";
+
 function showReplaceOffer(existing, { keepTick = false } = {}) {
   const box = $("#imp-replace-wrap");
-  if (!keepTick) $("#imp-replace").checked = false;
+  const named = existing ? `${existing.tracks}|${existing.where}|${existing.folders}` : "";
+  if (!keepTick || named !== offered) $("#imp-replace").checked = false;
+  offered = named;
   if (!existing) {
     box.hidden = true;
     $("#imp-go").disabled = false;
@@ -3824,13 +3830,22 @@ async function clearStale() {
 
 // Ask up front rather than finding out from a failed import. True regardless of
 // which path is taken, so it does not wait for a release id.
+// Only the latest question is answered: the release can change while the library is
+// being listed. Import waits for the answer, since unticked it would file a second copy.
+let existingAsked = 0;
+
 async function checkExisting() {
+  const asked = ++existingAsked;
+  $("#imp-err").textContent = "";
+  $("#imp-go").disabled = true;
   try {
     const mbid = encodeURIComponent(importMbid());
     const { existing, stale } = await api(`/api/library/existing/${S.slug}?mbid=${mbid}`);
+    if (asked !== existingAsked) return;
     showStale(stale);
     showReplaceOffer(existing, { keepTick: true });
   } catch {
+    if (asked !== existingAsked) return;
     showStale(null);
     // The import itself still refuses, so this is only the early warning - but
     // a warning that could not be checked must not read as one that was.
