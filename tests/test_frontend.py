@@ -1299,3 +1299,32 @@ def test_checked_keeps_the_boundaries_and_only_a_catalogue_placed_track_offers_i
     assert "const doubt = !!selectedTrack()?.forced;" in tools
     assert '$("#cut-checked").disabled = !doubt;' in tools
     assert '$("#cut-checked").onclick = checkSelected' in js
+
+
+def key_listener() -> str:
+    js = (STATIC / "app.js").read_text()
+    return js[js.index('addEventListener("keydown", (e) => {') :]
+
+
+def test_a_browser_shortcut_is_not_taken_for_the_record_s_keys() -> None:
+    """Ctrl-S split a track and alt-left nudged a marker while going back."""
+    keys = key_listener()
+    guard = keys.index("if (e.altKey || e.ctrlKey || e.metaKey) return;")
+    assert guard < keys.index("playOrPause();")
+
+
+def test_the_record_s_keys_did_not_stay_on_the_other_pages() -> None:
+    """S on the Rip page split a track in an editor nobody could see."""
+    keys = key_listener()
+    scoped = keys.index('!== "cut") return;')
+    assert scoped < keys.index("playOrPause();")
+    assert keys.index('if (e.key === "?")') < scoped
+
+
+def test_enter_on_a_control_presses_it_only_if_the_keyboard_went_there() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function enterIsTheControls\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert ':focus-visible")) return true;' in body
+    assert "e.preventDefault();" in body and "control.blur();" in body
+    keys = key_listener()
+    assert keys.index("enterIsTheControls(e)") < keys.index("tapeKey(e)")

@@ -4616,17 +4616,25 @@ function wire() {
     // a shortcut firing behind an open dialog once split a track while the
     // First-pass dialog had focus
     if (document.querySelector("dialog[open]")) return;
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && (e.repeat || enterIsTheControls(e))) return;
     if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }
+    // Alt-left is the browser going back, and ctrl-S its save. Shift is these keys' larger step.
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "?") { e.preventDefault(); $("#helpdlg").showModal(); return; }
+    if (e.key === "Escape") { player.stop(); return; }
+    // The record's editor is behind the other pages, where its keys would act unseen. It is
+    // the page a load starts on, before any mode has been set.
+    if ((document.body.dataset.mode ?? "cut") !== "cut") return;
     const t = selectedTrack();
     if (e.code === "Space") {
       e.preventDefault();
+      // A button keeps the focus after a press, and would be pressed again by this.
+      if (e.target.tagName === "BUTTON") e.target.blur();
       playOrPause();
     } else if (e.key === "a" || e.key === "A") {
       if (t) { e.preventDefault(); auditionSelected(); }
     } else if (e.key === "Enter") {
-      // A button that kept the focus after a press would be pressed again by this.
-      if (e.target.tagName === "BUTTON") { e.preventDefault(); e.target.blur(); }
-      $("#cut-checked").click();
+      e.preventDefault(); $("#cut-checked").click();
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
       e.preventDefault();
       nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
@@ -4636,12 +4644,21 @@ function wire() {
       e.preventDefault(); ed.fit();
     } else if (e.key === "z" || e.key === "Z") {
       if (t) { e.preventDefault(); zoomToSelected(); }
-    } else if (e.key === "?") {
-      e.preventDefault(); $("#helpdlg").showModal();
-    } else if (e.key === "Escape") { player.stop(); }
+    }
   });
 
   addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+}
+
+// Enter on a control reached from the keyboard presses that control. One that only kept the
+// focus after a mouse press lets go of it, or the key would press it again.
+function enterIsTheControls(e) {
+  const control = e.target.closest?.("button,a[href],summary");
+  if (!control) return false;
+  if (control.matches(":focus-visible")) return true;
+  e.preventDefault();
+  control.blur();
+  return false;
 }
 
 async function boot() {
