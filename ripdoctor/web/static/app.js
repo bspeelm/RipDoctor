@@ -344,6 +344,10 @@ async function reviewNext() {
     select(t.number, "start");
     ed.fitRange(t.start, t.end);
     document.querySelector("#tracks tr.sel")?.scrollIntoView({ block: "nearest" });
+    // On a phone the open rail is in front of what was just chosen.
+    $("#cut-rail").classList.remove("open");
+    $("#cut-rail-bar").setAttribute("aria-expanded", false);
+    $("#cut-wave").scrollIntoView({ block: "nearest" });
   } catch (e) { status(`could not open side ${letter}: ${e.message}`, true); }
 }
 
