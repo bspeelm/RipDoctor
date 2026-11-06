@@ -3207,20 +3207,32 @@ function tapeSwapEdge() {
   tapeChooseEdge(chosen ? (sel.edge === "start" ? "end" : "start") : sel.edge);
 }
 
+// A verdict is sent with the edges this page holds once any nudge has saved, so one on a
+// song moved elsewhere is refused. What the page believed is then what was wrong.
 function tapeJudge(send) {
   return settleSong(async () => {
-    const after = await send();
+    let after;
+    try {
+      after = await send();
+    } catch (e) {
+      if (e.status === 409 && tape) showTape(await api(`/api/tapes/${tape.id}`));
+      throw e;
+    }
     waveSay("");
     return after;
   });
 }
+function seenOf(key) {
+  const { start, end } = songOf(numberOf(key));
+  return start == null ? {} : { seen_start: start, seen_end: end };
+}
 function tapeAccept(song) {
   const key = keyOf(song.number);
-  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard }));
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard, ...seenOf(key) }));
 }
 function tapeSkip(song) {
   const key = keyOf(song.number);
-  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip }));
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip, ...seenOf(key) }));
 }
 
 function tapeZoom(by) {

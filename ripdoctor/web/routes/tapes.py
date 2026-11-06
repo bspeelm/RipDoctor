@@ -694,6 +694,13 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, "this tape has no audio yet - upload it first")
         return tape
 
+    def as_seen(tape: TP.Tape, song: TP.Song, body: dict[str, Any]) -> None:
+        """A verdict on a song is about the edges the sender was looking at. A caller
+        sending none has none in mind, which is what a song not yet placed has."""
+        if "seen_start" in body:
+            seen = _seconds(body, "seen_start"), _seconds(body, "seen_end")
+            TP.still_as_seen(tape, song, seen)
+
     def judged(tape: TP.Tape, change: Callable[[], TP.Tape]) -> H.Response:
         not_archived(tape)
         try:
@@ -719,14 +726,26 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
     @alongside
     def heard(r: H.Request, tape: TP.Tape) -> H.Response:
-        song, now_heard = song_of(tape, r), bool(r.json().get("heard", True))
-        return judged(tape, lambda: TP.hear(tape, song.number, now_heard))
+        song, body = song_of(tape, r), r.json()
+        now_heard = bool(body.get("heard", True))
+
+        def accepted() -> TP.Tape:
+            as_seen(tape, song, body)
+            return TP.hear(tape, song.number, now_heard)
+
+        return judged(tape, accepted)
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/skip")
     @alongside
     def skip(r: H.Request, tape: TP.Tape) -> H.Response:
-        song, skipped = song_of(tape, r), bool(r.json().get("skip", True))
-        return judged(tape, lambda: TP.skip(tape, song.number, skipped))
+        song, body = song_of(tape, r), r.json()
+        skipped = bool(body.get("skip", True))
+
+        def skipping() -> TP.Tape:
+            as_seen(tape, song, body)
+            return TP.skip(tape, song.number, skipped)
+
+        return judged(tape, skipping)
 
     @app.route("GET", "/api/tapes/([^/]+)/audio")
     def audio(r: H.Request) -> H.Response:
