@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ripdoctor.audio.runner import Runner, ToolMissing
-from ripdoctor.core.filing import Row, row_length, term
+from ripdoctor.core.filing import BESIDE, JOIN, NEW_ALBUM, Row, row_length, term
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
@@ -225,8 +225,14 @@ _NO_RELEASE = re.compile(r"^No matching release found.*$", re.M)
 
 # Apply the release; merge when the album is already filed; apply again, because
 # merging matches afresh. Whatever goes unasked stays unread, which does no harm.
-# Replace is not among them and never may be: it deletes the filed audio. ADR-060.
+# Replace is not among any of these and never may be: it deletes the filed audio.
+# ADR-060.
 TAPE_ANSWERS = b"A\nM\nA\n"
+# What a pinned run answers, once the library has said what it holds of that album. A
+# duplicate question nobody expected meets end of input, which stops the run safely.
+# Merging into another edition rewrites every owned track, so that goes beside it.
+# ADR-063.
+PINNED_ANSWERS = {NEW_ALBUM: b"A\n", JOIN: TAPE_ANSWERS, BESIDE: b"A\nK\n"}
 
 
 def answers(duplicates: str, *, matching: bool) -> bytes:
@@ -504,14 +510,21 @@ class Beets:
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
     def file_tape_run(
-        self, runner: Runner, directory: str, release: str = "", root: str = ""
+        self,
+        runner: Runner,
+        directory: str,
+        release: str = "",
+        root: str = "",
+        *,
+        how: str = BESIDE,
     ) -> TapeRun:
         """One directory, one album of a tape: pinned, or with no release its tags
         are taken as they stand. Reports and judges nothing, because a tape's album
-        is usually partial and every count `apply` trusts would misread it."""
+        is usually partial and every count `apply` trusts would misread it. A pinned
+        run is told `how` it meets the library, and left untold it merges nothing."""
         result = runner.run(
             self._argv(self._import(directory, release)),
-            stdin=TAPE_ANSWERS,
+            stdin=PINNED_ANSWERS[how] if release else TAPE_ANSWERS,
             timeout=3600,
         )
         return TapeRun(result.returncode, _plain(result.text + result.err), root)
@@ -693,6 +706,13 @@ class Beets:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
 
+    def album_rows(
+        self, runner: Runner, root: str, artist: str, album: str
+    ) -> tuple[Row, ...]:
+        """The rows under this album artist and album, with the release each is of."""
+        query = [term("albumartist", artist), term("album", album)]
+        return self._held(runner, root, query, 300.0)
+
     def held_rows(
         self,
         runner: Runner,
@@ -705,6 +725,11 @@ class Beets:
         if not terms:
             return ()
         query = [part for term in terms for part in (",", term)][1:]
+        return self._held(runner, root, query, timeout)
+
+    def _held(
+        self, runner: Runner, root: str, query: list[str], timeout: float
+    ) -> tuple[Row, ...]:
         result = runner.run(self._argv(["ls", "-f", _HELD, *query]), timeout=timeout)
         if not result.ok:
             raise ImportFailed(TapeRun(result.returncode, result.err).why())

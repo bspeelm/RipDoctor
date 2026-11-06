@@ -41,6 +41,7 @@ from ripdoctor.core.tape import (
 
 FAILED = "failed"
 FILE = "file"
+NEW_ALBUM, JOIN, BESIDE = "new album", "join", "beside"
 _SHOWN = {FAILED: 0, UNKNOWN: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 
@@ -373,6 +374,24 @@ def second_row(run: Run, rows: Sequence[Row]) -> str:
     if any(fold(r.album) == fold(run.album) for r in rows):
         return f"beets already held {run.album}, so it now has two album rows for it"
     return ""
+
+
+def joining(run: Run, rows: Sequence[Row]) -> str:
+    """How a pinned run meets the album rows already there. Merging rematches every
+    row of the album against the pinned release, so an owned track is renamed,
+    renumbered and retagged unless all of them are already that release. Anything else
+    goes beside them, and an empty or foreign album id is not that release."""
+    held = {r.release for r in rows if fold(r.album) == fold(run.album)}
+    if not held:
+        return NEW_ALBUM
+    return JOIN if held == {run.release} else BESIDE
+
+
+def beside_note(run: Run) -> str:
+    return (
+        f"beets already held {run.album} as another edition, so this is a second album "
+        "entry in the same folder, and your tracks there did not change"
+    )
 
 
 def recorded(

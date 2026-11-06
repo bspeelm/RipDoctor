@@ -297,15 +297,21 @@ class _Filing:
             TG.write_tags(self.runner, str(copy), _tags(run, track))
             copies[song.number] = copy
 
-        doubled = ""
-        if not run.release:
+        doubled, how = "", F.BESIDE
+        if run.release:
+            how = F.joining(
+                run,
+                self.beets.album_rows(self.runner, self.library, run.artist, run.album),
+            )
+            doubled = F.beside_note(run) if how == F.BESIDE else ""
+        else:
             query = [F.term("albumartist", run.artist), F.term("album", run.album)]
             doubled = F.second_row(run, self.rows(query))
         self.tape = F.begun(self.tape, copies)
         T.save(self.layout, self.tape)
         self.job.step(run.album, "importing with beets")
         took = self.beets.file_tape_run(
-            self.runner, str(where), run.release, self.library
+            self.runner, str(where), run.release, self.library, how=how
         )
 
         cleared, unclear = set(), ""

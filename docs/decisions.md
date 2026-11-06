@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,031, and
-at 3,331 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,055, and
+at 3,355 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2250,10 +2250,19 @@ settled. Songs on disk use their own numeric order, since a two-digit number und
 text sort puts song 100 before song 11.
 
 **Filing is one import per album.** A song with a release is a pinned import: title
-and track number are written first, then `import --search-id` runs with the answers
-apply, merge, apply. Joining an album already filed takes all three, and with only
-the first two the run stopped safely at end of input. A song with a release is not
-filed with lookup off, which made two album rows for one album when tried. A from-list
+and track number are written first, then `import --search-id` runs. Its answers depend
+on what the library holds under that album artist and album, read just before. With
+nothing held, apply alone. With every row already this release, apply, merge, apply:
+joining an album takes all three, and with only the first two the run stopped safely
+at end of input. With anything else held, apply, keep both. Merging rematches every row
+of the album against the pinned release, and measured on a real library it renamed,
+renumbered and retagged every owned track of another edition. Keeping both left the
+existing files byte-identical and made a second album row in the same folder, with its
+own cover and album gain, and a track number from its edition that may match one beside
+it. That is said on the song's outcome. Each later edition adds another entry, as does a
+later song of an edition held beside another, because merging there would take in both.
+A song with a release is not filed with lookup off, which made two album rows for one
+album when tried. A from-list
 song has no release to pin, so its album is one lookup-off run, numbered by its place
 among its album's songs on this tape, with no date, which a list does not carry. One
 with no album fails rather than being given one. A second album row is said on the

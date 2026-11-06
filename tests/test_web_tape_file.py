@@ -322,8 +322,103 @@ def test_a_pinned_run_sends_exactly_this_and_writes_only_title_and_number(
     assert len(argv) == 7
     runner = beet_of(service)
     at = runner.calls.index(argv)
-    assert runner.fed[at] == b"A\nM\nA\n"
+    assert runner.fed[at] == b"A\n"
     assert sorted(next(iter(runner.tags.values()))) == ["TITLE", "TRACKNUMBER"]
+
+
+def fed_to_import(service: Service) -> list[bytes]:
+    runner = beet_of(service)
+    return [f for c, f in zip(runner.calls, runner.fed, strict=True) if "import" in c]
+
+
+def album_row(service: Service, tape: str, release: str) -> None:
+    """A row of the album song 1 is pinned to, filed from `release`."""
+    beet_of(service).owns(
+        "Another",
+        album="Record rel-1",
+        albumartist="A Band",
+        mb_albumid=release,
+        length="9:00",
+    )
+
+
+def test_a_pinned_run_into_nothing_held_answers_only_the_release(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service) == [b"A\n", b"A\n"]
+    argv = imports_of(service)[0]
+    assert argv[3:5] == ("import", "--search-id")
+
+
+def test_a_pinned_run_joining_its_own_edition_merges(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    album_row(service, tape, "rel-1")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service) == [b"A\nM\nA\n", b"A\n"]
+    assert songs(service, tape)[0].filing_note == ""
+
+
+def test_merging_into_another_edition_once_rewrote_an_owned_album_so_it_keeps_both(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    album_row(service, tape, "rel-other")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service) == [b"A\nK\n", b"A\n"]
+    assert not [f for f in fed_to_import(service) if b"M" in f or b"R" in f]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "another edition" in one.filing_note
+    assert "second album entry" in one.filing_note
+    assert "did not change" in one.filing_note
+
+
+def test_a_library_holding_two_editions_is_never_merged_into_either(
+    service: Service,
+) -> None:
+    """Merging takes in every album row of that name, whichever it was pinned to."""
+    app = build(service)
+    tape = pinned(app, service)
+    album_row(service, tape, "rel-1")
+    album_row(service, tape, "rel-other")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nK\n"
+
+
+def test_an_owned_album_row_with_no_release_is_not_merged_into(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    album_row(service, tape, "")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nK\n"
+
+
+def test_a_library_that_cannot_say_what_it_holds_imports_nothing(
+    service: Service,
+) -> None:
+    """Which answer is safe depends on it, so a run does not go ahead on a guess."""
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    real = runner._ls
+
+    def locked(args: tuple[str, ...]) -> Result:
+        if "$mb_albumid" in args[args.index("-f") + 1]:
+            return Result(args, 1, b"", b"database is locked\n")
+        return real(args)
+
+    runner._ls = locked  # type: ignore[method-assign]
+    job = file_it(app, tape, service)
+    assert "did not file" in job["error"]
+    assert not imports_of(service)
+    assert "database is locked" in songs(service, tape)[0].filing_note
 
 
 @pytest.mark.parametrize("failing", [False, True])
@@ -337,8 +432,8 @@ def test_replace_is_never_sent_and_nothing_is_removed(
     if failing:
         runner.fails["rel-1"] = b"error: stdin stream ended\n"
     file_it(app, tape, service)
-    sent = [f for c, f in zip(runner.calls, runner.fed, strict=True) if "import" in c]
-    assert sent and all(f == b"A\nM\nA\n" for f in sent)
+    sent = fed_to_import(service)
+    assert sent and not [f for f in sent if b"R" in f]
     assert not [c for c in runner.calls if c[0] == "beet" and "remove" in c]
 
 
