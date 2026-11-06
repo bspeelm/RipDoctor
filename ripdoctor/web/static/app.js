@@ -1,4 +1,4 @@
-import { Editor, fmt } from "/editor.js";
+import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
 import { drawMeter, slugify } from "/ripui.js";
 
@@ -1255,7 +1255,7 @@ function showTape(t) {
   $("#tp-rows").replaceChildren(...(has ? t.songs.map(songRow) : []));
   renumberSongs();
   $("#tp-inside").replaceChildren(...(has ? t.inside.map((g) =>
-    el("li", null, `song ${g.song}: the silence at ${fmt(g.lo)} to ${fmt(g.hi)} stayed inside it`)) : []));
+    el("li", null, `song ${g.song}: the silence at ${fmtLong(g.lo)} to ${fmtLong(g.hi)} stayed inside it`)) : []));
   $("#tp-inside-title").hidden = !has || !t.inside.length;
   const doubts = has ? t.songs.filter((s) => s.reason && !s.heard && !s.skip) : [];
   $("#tp-reasons").replaceChildren(...doubts.map((s) => el("li", null, `song ${s.number}: ${s.reason}`)));
@@ -1475,12 +1475,12 @@ function showTapeTools() {
 function tapeReadout() {
   const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
   if (!t) {
-    $("#tp-ro-time").textContent = fmt(tpEd.playhead);
+    $("#tp-ro-time").textContent = fmtLong(tpEd.playhead);
     $("#tp-ro-song").textContent = ""; $("#tp-ro-gap").textContent = ""; $("#tp-ro-gap").className = "";
     return;
   }
   const v = t[sel.edge], len = t.end - t.start, d = len - t.cat;
-  $("#tp-ro-time").textContent = `${fmt(v)}  ${v.toFixed(2)}s`;
+  $("#tp-ro-time").textContent = `${fmtLong(v)}  ${v.toFixed(2)}s`;
   $("#tp-ro-song").textContent = `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s`
     + ` (list ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`;
   sayGap($("#tp-ro-gap"), v, tpEd.side?.gaps.band.gaps ?? []);
@@ -1546,7 +1546,7 @@ function moveSaid(before, after, num) {
     && (was(s.number).start !== s.start || was(s.number).end !== s.end));
   const unheard = moved.filter((s) => was(s.number).heard && !s.heard);
   const stale = after.ear.filter((r) => r.cut === "out of date").length;
-  const shown = moved.slice(0, 3).map((s) => `song ${s.number} (${fmt(s.start)} to ${fmt(s.end)})`);
+  const shown = moved.slice(0, 3).map((s) => `song ${s.number} (${fmtLong(s.start)} to ${fmtLong(s.end)})`);
   return [
     `Song ${num} is yours now, and nothing will move it.`,
     moved.length ? `Laid around it: ${shown.join(", ")}${moved.length > 3 ? ` and ${moved.length - 3} more` : ""}.` : "",
@@ -1648,7 +1648,7 @@ function wireTapeWave() {
     },
     (num, edge) => tapeSelect(num, edge, false),
     (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
-    { onDrop: tapeEdgeDropped, dragFrom: 3, coarse: 2, touchReach: 20, titles: true });
+    { onDrop: tapeEdgeDropped, long: true });
   tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
   $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
   $("#tp-prev").onclick = () => stepDoubt(-1);
@@ -1793,7 +1793,7 @@ function whyCell(song, row, t) {
   const said = song.reason || (row.doubtful ? MISMATCH_SAYS : "");
   if (said) td.append(el("div", row.doubtful ? "mark" : "dim", said));
   for (const g of t.inside.filter((i) => i.song === song.number)) {
-    const seek = el("button", "ghost tiny", `hear ${fmt(g.lo)} to ${fmt(g.hi)}`);
+    const seek = el("button", "ghost tiny", `hear ${fmtLong(g.lo)} to ${fmtLong(g.hi)}`);
     seek.type = "button";
     seek.title = "play from just before this silence";
     seek.disabled = !t.audio;
@@ -1899,7 +1899,7 @@ function songRow(song = {}) {
   length.placeholder = "m:ss";
   songCell(row, length);
   const placed = song.start != null && song.end != null;
-  row.append(el("td", "mono", placed ? `${fmt(song.start)} to ${fmt(song.end)}` : ""));
+  row.append(el("td", "mono", placed ? `${fmtLong(song.start)} to ${fmtLong(song.end)}` : ""));
   row.append(el("td", "mono", song.delta != null ? signed(song.delta) : ""));
   row.append(el("td", "mark", song.skip ? "skip" : song.set_by === "ear" ? "by ear"
     : song.heard ? "heard" : song.verdict ?? ""));

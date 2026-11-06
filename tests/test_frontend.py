@@ -320,3 +320,19 @@ def test_opening_a_tape_does_not_start_reading_its_audio() -> None:
     body = re.search(r"function showTapeWave\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tpPlayer.load" not in body
     assert "tpPlayer.load(url)" in js
+
+
+def test_a_wobble_on_a_long_timeline_moves_a_marker_by_the_wobble() -> None:
+    """The marker jumped to the pointer past the threshold, so a 3 px wobble saved a
+    person-set move of 42 s when pressed by a finger at the edge of its reach."""
+    js = (STATIC / "editor.js").read_text()
+    assert "const off = this.long ? x - this.xOf(at) : 0;" in js
+    assert "this.tOf(x - this.drag.off)" in js
+
+
+def test_only_a_long_timeline_gets_its_grid_its_clock_or_its_care() -> None:
+    js = (STATIC / "editor.js").read_text()
+    assert "const step = this.long && span > 3600" in js
+    assert "this.long ? fmtLong(t) : fmt(t)" in js
+    assert "return this.long && (this.t1 - this.t0)" in js
+    assert "this.opts" not in js

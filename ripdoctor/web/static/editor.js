@@ -9,6 +9,10 @@
 const DB_FLOOR = -95;          // bottom of both lanes
 const HIT_PX = 7;              // how close a click must be to grab a marker
 const OVERVIEW_H = 42;
+// A long timeline only. Far enough out, a slip of the hand is seconds of audio.
+const DRAG_FROM = 3;           // pixels a pointer must travel before a press is a move
+const COARSE = 2;              // seconds per pixel beyond which no marker can be grabbed
+const TOUCH_REACH = 20;        // how near a finger has to land to grab a marker
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const fmt = (t) => {
@@ -16,20 +20,17 @@ export const fmt = (t) => {
   return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 };
 
-const gridLabel = (t) => {
+/** `fmt`, with hours once there are any, for a timeline that long. */
+export const fmtLong = (t) => {
   if (t < 3600) return fmt(t);
   const m = Math.floor(t / 60), s = t - m * 60;
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s.toFixed(0).padStart(2, "0")}`;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
 };
 
 export class Editor {
-  // `opts` is for a timeline far longer than a side, where a marker is easy to grab
-  // by accident and hard to place. With none of it this is a side's editor.
-  //   onDrop(track, edge, landed)  a moved marker was let go, or the drag was lost
-  //   dragFrom     pixels a pointer must travel before a press on a marker is a move
-  //   coarse       seconds per pixel beyond which no marker can be grabbed
-  //   touchReach   how near a finger has to land to grab a marker
-  //   titles       name each stretch, and leave out a tag that would overlap another
+  // `opts.onDrop(track, edge, landed)`: a moved marker was let go, or the drag was lost.
+  // `opts.long`: a timeline far longer than a side, whose markers are easy to grab by
+  // accident and hard to place. Without it this is a side's editor, exactly.
   constructor(canvas, onChange, onSelect, onSeek, opts = {}) {
     this.cv = canvas;
     this.ctx = canvas.getContext("2d");
@@ -42,7 +43,8 @@ export class Editor {
     this.playhead = 0;
     this.sel = null;                  // {track, edge}
     this.drag = null;
-    this.opts = opts;
+    this.onDrop = opts.onDrop;
+    this.long = !!opts.long;
     this.frozen = false;              // drawn and played, but no marker can be moved
     this._bind();
   }
@@ -86,7 +88,7 @@ export class Editor {
 
   /** Too many seconds to a pixel to place a boundary by hand. */
   get tooCoarse() {
-    return (this.t1 - this.t0) / this.cv.clientWidth > (this.opts.coarse ?? Infinity);
+    return this.long && (this.t1 - this.t0) / this.cv.clientWidth > COARSE;
   }
 
   xOf(t) { return (t - this.t0) / (this.t1 - this.t0) * this.cv.clientWidth; }
@@ -199,15 +201,16 @@ export class Editor {
 
   _grid(c, L) {
     const span = this.t1 - this.t0;
-    const step = span > 14400 ? 3600 : span > 7200 ? 1800 : span > 3600 ? 600 : span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
+    const step = this.long && span > 3600 ? (span > 14400 ? 3600 : span > 7200 ? 1800 : 600)
+      : span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
     c.strokeStyle = "#20242b"; c.fillStyle = "#5a626c";
     c.font = "10px ui-monospace,monospace"; c.lineWidth = 1;
     let clear = -Infinity;
     for (let t = Math.ceil(this.t0 / step) * step; t < this.t1; t += step) {
       const x = Math.round(this.xOf(t)) + 0.5;
       c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-      if (this.opts.titles && x < clear) continue;
-      const label = gridLabel(t);
+      if (this.long && x < clear) continue;
+      const label = this.long ? fmtLong(t) : fmt(t);
       c.fillText(label, x + 3, L.over.top - 4);
       clear = x + c.measureText(label).width + 8;
     }
@@ -230,7 +233,7 @@ export class Editor {
   }
 
   _markers(c, L) {
-    if (this.opts.titles) { this._namedMarkers(c, L); return; }
+    if (this.long) { this._namedMarkers(c, L); return; }
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const x = this.xOf(t[edge]);
@@ -403,12 +406,15 @@ export class Editor {
         this.drag = { mode: "overview" };
         return;
       }
-      const touch = e.pointerType === "touch" && this.opts.touchReach;
-      const h = touch ? this.hit(x, y, touch) : this.hit(x, y);
+      const h = this.long && e.pointerType === "touch" ? this.hit(x, y, TOUCH_REACH) : this.hit(x, y);
       if (h) {
         this.sel = { track: h.track, edge: h.edge };
         this.onSelect?.(h.track, h.edge);
-        this.drag = { mode: "marker", ...h, x, moved: false };
+        // On a long timeline the marker keeps its distance from the pointer, so a
+        // press off-centre that wobbles moves it by the wobble and no more.
+        const at = this.long ? this.tracks.find((t) => t.number === h.track)[h.edge] : null;
+        const off = this.long ? x - this.xOf(at) : 0;
+        this.drag = { mode: "marker", ...h, x, off, moved: false };
       } else {
         this.drag = { mode: "pan", x, t0: this.t0, moved: false };
       }
@@ -425,9 +431,9 @@ export class Editor {
       if (this.drag.mode === "overview") {
         this.centerOn(x / this.cv.clientWidth * this.side.duration);
       } else if (this.drag.mode === "marker") {
-        if (!this.drag.moved && Math.abs(x - this.drag.x) < (this.opts.dragFrom ?? 0)) return;
+        if (this.long && !this.drag.moved && Math.abs(x - this.drag.x) < DRAG_FROM) return;
         this.drag.moved = true;
-        this.onChange(this.drag.track, this.drag.edge, this.tOf(x));
+        this.onChange(this.drag.track, this.drag.edge, this.tOf(x - this.drag.off));
       } else {
         this.drag.moved = Math.abs(x - this.drag.x) > 3;
         const span = this.t1 - this.t0;
@@ -450,13 +456,13 @@ export class Editor {
       }
       const was = this.drag;
       this.drag = null;
-      if (was?.mode === "marker" && was.moved) this.opts.onDrop?.(was.track, was.edge, true);
+      if (was?.mode === "marker" && was.moved) this.onDrop?.(was.track, was.edge, true);
     };
     cv.addEventListener("pointerup", up);
     cv.addEventListener("pointercancel", () => {
       const was = this.drag;
       this.drag = null;
-      if (was?.mode === "marker" && was.moved) this.opts.onDrop?.(was.track, was.edge, false);
+      if (was?.mode === "marker" && was.moved) this.onDrop?.(was.track, was.edge, false);
     });
     window.addEventListener("resize", () => this.render());
   }
