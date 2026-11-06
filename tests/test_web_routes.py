@@ -758,6 +758,49 @@ def test_aligning_keeps_a_boundary_as_a_persons_but_not_as_heard(
     assert got["result"]["aligned"][0]["tracks"][0]["settled"] == "hand"
 
 
+def an_aligned_track(tmp_path: Path, monkeypatch, **marks) -> dict:  # type: ignore[no-untyped-def,type-arg]
+    from ripdoctor.core.xcorr import Transform
+
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0].update(marks)
+    plan = R._plan_from("album", body)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    monkeypatch.setattr(
+        R, "fit_side", lambda *a, **k: (Transform(offset=2.0, scale=1.0), (), 0.01)
+    )
+    monkeypatch.setattr(R, "true_duration", lambda *a, **k: 60.0)
+    got = post(build(service), "/api/align/album", service).json()
+    return got["result"]["aligned"][0]["tracks"][0]  # type: ignore[no-any-return]
+
+
+def test_a_forced_track_is_still_in_doubt_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Align read the spec, which has no word for it, so the row said Fitted."""
+    moved = an_aligned_track(tmp_path, monkeypatch, forced=True)
+    assert moved["forced"] is True
+    assert moved["start"] == 3.0
+
+
+def test_a_track_placed_by_length_still_says_so_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    moved = an_aligned_track(tmp_path, monkeypatch, placed="length")
+    assert moved["placed"] == "length"
+
+
+def test_a_settled_track_is_not_called_forced_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    moved = an_aligned_track(tmp_path, monkeypatch, forced=True, settled="ear")
+    assert "forced" not in moved
+    assert moved["settled"] == "hand"
+
+
 def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:
     """One side that will not carry is not a failed record."""
     service = a_service(tmp_path)

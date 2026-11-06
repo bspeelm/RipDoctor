@@ -12,10 +12,13 @@ from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
 from ripdoctor.core.plan import (
+    GAP,
     HAND,
+    LENGTH,
     BadPlan,
     OldFormat,
     Plan,
+    PlanTrack,
     Spec,
     as_it_stands,
     letter_of,
@@ -389,6 +392,7 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
         if saved
         else None
     )
+    kept = {t.number: t for t in placed.tracks} if placed else {}
     if placed and placed.audio == C.stamp_of(new):
         raise AlignError(
             f"side {side.letter}'s boundaries are already on this capture, so "
@@ -414,24 +418,34 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
                 f"track {t.number} maps to {start:.2f}-{end:.2f}, outside the "
                 f"new side (0-{duration:.2f})"
             )
-        tracks.append(
-            {
-                "number": t.number,
-                "title": t.title,
-                "start": round(start, 2),
-                "end": round(end, 2),
-                "cat": t.cat,
-                # A person's boundary, carried. Not yet heard on this capture, so
-                # a check by ear does not come across as one.
-                **({"settled": HAND} if t.settled else {}),
-            }
-        )
+        tracks.append(_row(t, start, end, kept.get(t.number)))
     return {
         "side": side.letter,
         "offset": round(transform.offset, 3),
         "drift_ms_per_min": round(transform.drift_ms_per_min, 1),
         "check_miss": round(miss, 3),
         "tracks": tracks,
+    }
+
+
+def _row(t: Any, start: float, end: float, was: PlanTrack | None) -> dict[str, Any]:
+    """One track of an aligned side, saying only what is still true of it.
+
+    A person's boundary, carried, is theirs but not yet heard on this capture, so
+    a check by ear does not come across as one. `forced` and `length` are about
+    what its place rests on, which a transform does not change. The spec has no
+    word for either, so they come from the plan it was written with.
+    """
+    placed = was.placed if was and was.placed in (GAP, LENGTH) else ""
+    return {
+        "number": t.number,
+        "title": t.title,
+        "start": round(start, 2),
+        "end": round(end, 2),
+        "cat": t.cat,
+        **({"settled": HAND} if t.settled else {}),
+        **({"forced": True} if was and was.forced else {}),
+        **({"placed": placed} if placed else {}),
     }
 
 
