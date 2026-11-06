@@ -209,12 +209,17 @@ class Beet:
     def _ls(self, args: tuple[str, ...]) -> Result:
         if self.ls_fails:
             return Result(args, 1, b"", b"database is locked\n")
-        terms = [t.split(":", 1) for t in args[args.index("-f") + 2 :]]
+        alternatives: list[list[list[str]]] = [[]]
+        for term in args[args.index("-f") + 2 :]:
+            if term == ",":
+                alternatives.append([])
+            else:
+                alternatives[-1].append(term.split(":", 1))
         asked = [k.removeprefix("$") for k in args[args.index("-f") + 1].split("\x1f")]
         lines = [
             "\x1f".join(r.get(k, "") for k in asked)
             for r in self.rows
-            if all(holds(r.get(k, ""), v) for k, v in terms)
+            if any(all(holds(r.get(k, ""), v) for k, v in t) for t in alternatives)
         ]
         return Result(args, 0, "\n".join(lines).encode(), b"")
 
@@ -2046,6 +2051,67 @@ def test_a_new_list_is_refused_when_beets_cannot_say_a_copy_is_gone(
     assert not file_it(app, tape, service)["error"]
     beet_of(service).ls_fails = True
     assert send_csv(app, tape, service, TWO, confirm=True).status == 409
+
+
+def beets_asked(service: Service) -> list[tuple[str, ...]]:
+    """Every `beet ls` from here on, without changing what it answers."""
+    runner = beet_of(service)
+    original = runner.run
+    seen: list[tuple[str, ...]] = []
+
+    def run(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if "ls" in argv:
+            seen.append(tuple(str(a) for a in argv))
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    runner.run = run  # type: ignore[method-assign]
+    return seen
+
+
+def test_a_new_list_asked_beets_once_for_every_filed_song_on_the_request_thread(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    Path(one.path).unlink()
+    beet_of(service).run(("beet", "remove", "-f", f"path:{one.path}"))
+    asked = beets_asked(service)
+    said = send_csv(app, tape, service, TWO, confirm=True)
+    assert len(asked) == 1, asked
+    assert f"path:{one.path}" in asked[0] and f"path:{two.path}" in asked[0]
+    assert said.status == 409 and "song 2 (Two)" in said.json()["error"]
+    assert "song 1" not in said.json()["error"]
+
+
+def test_a_new_list_with_a_boundary_set_by_ear_asked_beets_before_refusing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    set_by_ear = (replace(current.songs[0], set_by=TP.EAR), current.songs[1])
+    T.save(service.layout, replace(current, songs=set_by_ear))
+    asked = beets_asked(service)
+    said = send_csv(app, tape, service, TWO, confirm=True)
+    assert said.status == 409 and "set by ear" in said.json()["error"]
+    assert asked == []
+
+
+def test_a_new_list_is_answered_plainly_when_beets_runs_out_of_time(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = songs(service, tape)
+    timing_out(service, "ls")
+    said = send_csv(app, tape, service, TWO, confirm=True)
+    assert said.status == 503
+    assert "did not answer in time" in said.json()["error"]
+    assert songs(service, tape) == before
 
 
 def test_a_new_list_cleared_not_confirmed_and_could_import_a_second_copy(

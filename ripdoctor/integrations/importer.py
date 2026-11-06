@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -800,6 +801,17 @@ class Beets:
             return ()
         query = [part for term in terms for part in (",", term)][1:]
         return self._held(runner, root, query, timeout)
+
+    def rows_at(
+        self, runner: Runner, root: str, paths: Collection[str], timeout: float
+    ) -> set[str]:
+        """Which of these files beets has a row for, in one query. A path ending in a
+        comma cannot be asked about alone or in a list, so it is taken to be there."""
+        unaskable = {p for p in paths if p.endswith(",")}
+        terms = tuple(f"path:{p}" for p in sorted(set(paths) - unaskable))
+        return unaskable | {
+            r.path for r in self.held_rows(runner, root, terms, timeout)
+        }
 
     def _held(
         self, runner: Runner, root: str, query: list[str], timeout: float

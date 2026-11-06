@@ -29,6 +29,8 @@ from ripdoctor.work.jobs import Busy, Job
 
 CHUNK = 8 * 1024 * 1024
 MAX_UPLOAD = 16 * 1024 * 1024 * 1024
+# Someone is waiting on the page, and a list can be sent again.
+ASKING_BEETS = 20.0
 
 
 def _size(body: dict[str, Any]) -> int:
@@ -218,22 +220,25 @@ def add(app: App, service: Service) -> None:
         return H.ok(view(changed))
 
     def gone_from_library(tape: TP.Tape) -> set[str]:
-        """The filed paths beets has no row for now. Whatever cannot be asked is taken
-        to be still there, which is the side that refuses."""
+        """The filed paths beets has no row for now, asked in one query since this is
+        the request's own thread. A failure to ask is taken as still there, which is the
+        side that refuses, and running out of time is said at once. A person's boundary
+        refuses the list whatever beets says, so beets is not asked."""
         library = service.settings.library
+        filed = {s.path for s in tape.songs if s.filing in TF.FINISHED and s.path}
         found = IMP.choose(service.runner, service.settings.importer, service.state_dir)
-        if not library or not isinstance(found, IMP.Beets):
+        if tape.has_ear or not filed or not library or not isinstance(found, IMP.Beets):
             return set()
-        gone = set()
-        for song in tape.songs:
-            if song.filing not in TF.FINISHED or not song.path:
-                continue
-            try:
-                if not found.holds_path(service.runner, library, song.path):
-                    gone.add(song.path)
-            except (IMP.ImportFailed, ToolMissing, ToolFailed, TimedOut):
-                continue  # refused below, on the side of the song still being there
-        return gone
+        try:
+            return filed - found.rows_at(service.runner, library, filed, ASKING_BEETS)
+        except TimedOut as e:
+            raise H.HttpError(
+                503,
+                "the library did not answer in time, so the list was not changed - "
+                "try again",
+            ) from e
+        except (IMP.ImportFailed, ToolMissing, ToolFailed):
+            return set()
 
     def with_list(
         tape: TP.Tape, songs: tuple[TP.Song, ...], confirmed: bool
