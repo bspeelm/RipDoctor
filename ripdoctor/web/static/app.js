@@ -1411,9 +1411,10 @@ function stepCut(t) {
   const skipped = t.songs.filter((s) => s.skip).map((s) => s.number);
   const left = skipped.length ? ` ${songsNamed(skipped)} left out, by your choice.` : "";
   const refused = !!t.cut_refusal || !t.audio;
-  tpAction("#tp-cut", !t.playlist.done, !refused && !t.all_cut, refused || t.all_cut);
+  tpAction("#tp-cut", !t.playlist.done && !t.all_cut, !refused, refused);
   $("#tp-cut").textContent = failed.length || stale ? "Cut again" : "Cut";
   if (t.playlist.done) return tpStep("cut", "done", "Cleared", "The cuts were cleared once the songs were proved filed.");
+  if (!t.songs.length) return tpStep("cut", "wait", "Waiting", "Needs the song list.");
   if (t.all_cut && !t.cut_refusal) return tpStep("cut", "done", "Cut", `${counted(live, "file", "files")} written.${left}`);
   if (t.cut_refusal) {
     const waits = cutWaits(t);
@@ -1436,7 +1437,7 @@ function stepFile(t) {
   const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
   const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).map((o) => o.number).sort((a, b) => a - b) : [];
   const refused = !!t.file_refusal;
-  tpAction("#tp-file-songs", !t.playlist.done, !refused && !t.all_filed, refused || t.all_filed);
+  tpAction("#tp-file-songs", !t.playlist.done && !t.all_filed, !refused, refused);
   $("#tp-file-songs").textContent = failed.length ? "File again" : "File";
   if (t.all_filed) return tpStep("file", "done", "Filed", "Every song is in the library.");
   if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
@@ -2013,6 +2014,8 @@ function tapeSelect(num, edge, fit, picked = false) {
   tpOpen = num;
   waveSay("");
   if (opening) showSongs(tape);
+  // The open part first: the row itself is what must end up in view if both cannot.
+  document.querySelector(`#tp-rows tr[data-song="${num}"] + .tp-open`)?.scrollIntoView({ block: "nearest" });
   document.querySelector(`#tp-rows tr[data-song="${num}"]`)?.scrollIntoView({ block: "nearest" });
 }
 

@@ -236,6 +236,7 @@ button.tp-quiet:hover{color:var(--end)}
   color:var(--ghost);border-bottom:1px solid var(--line)}
 #tp-table td{padding:.5rem .75rem;border-bottom:1px solid #1f232a;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
+#tp-rows tr{scroll-margin-top:2.6rem}
 #tp-rows tr[data-song]{cursor:pointer}
 #tp-rows tr[data-song]:hover td{background:#1a1e24}
 #tp-rows tr.sel td,#tp-rows tr.tp-open td{background:#20262e}
