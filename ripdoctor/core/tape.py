@@ -36,6 +36,8 @@ PENDING = "pending"
 START, END = "start", "end"
 CUT, CUT_FAILED = "cut", "failed"
 NOT_CUT, OUT_OF_DATE, SKIPPED = "not cut", "out of date", "skipped"
+ALREADY, FILED, UNKNOWN = "already", "filed", "unknown"
+FINISHED = frozenset((ALREADY, FILED))
 
 # In bytes, and short of a filesystem's 255: a superseded cut wears a timestamp.
 CUT_TITLE_BYTES = 200
@@ -840,14 +842,59 @@ def _song_at(tape: Tape, number: int) -> Song:
     raise BadEdge(f"{tape.name} has no song {number}")
 
 
+def label(song: Song) -> str:
+    return f"song {song.number} ({song.title})"
+
+
+def edges_held(song: Song) -> str:
+    """Why these edges stay as they are, or nothing. The library's copy was cut from
+    them, and one not confirmed may be there."""
+    if song.filing == UNKNOWN:
+        return (
+            f"{label(song)} is not confirmed, and the library may already hold it, so "
+            "its boundaries stay as they are until a read-back answers - press File "
+            "again"
+        )
+    if song.filing not in FINISHED:
+        return ""
+    return (
+        f"{label(song)} is already in the library, so its boundaries stay as they are "
+        "- to cut it again, remove that copy with beets and load the list again"
+    )
+
+
+def _crossing(tape: Tape, song: Song, start: float, end: float) -> str:
+    """Why a moved edge passes the song beside it, or nothing. Whichever way a boundary
+    has to go, the edge moving away from its partner can go first and a found partner
+    follows, so a refusal here never leaves a boundary with no way to get there."""
+    before = [s for s in tape.songs if s.number < song.number]
+    after = [s for s in tape.songs if s.number > song.number]
+    if before and start != song.start and start < (at := before[-1].end or 0.0):
+        return (
+            f"that overlaps song {before[-1].number}, which ends at {clock(at)} - "
+            "move that one first"
+        )
+    if after and end != song.end and end > (at := after[0].start or end):
+        return (
+            f"that overlaps song {after[0].number}, which starts at {clock(at)} - "
+            "move that one first"
+        )
+    return ""
+
+
 def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
     """A person's boundary, which every other song not set by ear is laid around.
 
-    Ear-set songs keep list order against each other, near or far, because `place`
-    relies on them to split the list.
+    No edge passes the song beside it, whoever set that one, and ear-set songs keep
+    list order against each other, near or far, because `place` relies on them to split
+    the list. Nothing the library holds or may hold moves, whether it is this song or
+    one laid around it.
     """
     music = music_of(tape)
-    _song_at(tape, number)
+    song = _song_at(tape, number)
+    held = edges_held(song)
+    if held:
+        raise BadEdge(held)
     if not (math.isfinite(start) and math.isfinite(end)):
         raise BadEdge("a boundary has to be a number of seconds")
     if not 0.0 <= start < end <= tape.duration:
@@ -865,6 +912,9 @@ def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
                 f"that overlaps song {other.number}, which you set by ear to "
                 f"{other.start:.3f} to {other.end:.3f} - change that one first"
             )
+    crossing = _crossing(tape, song, start, end)
+    if crossing:
+        raise BadEdge(crossing)
     placed = _changed(
         tape,
         number,
@@ -873,7 +923,11 @@ def set_edges(tape: Tape, number: int, start: float, end: float) -> Tape:
         set_by=EAR,
         heard=False,
     )
-    return place(placed, music)
+    moved = place(placed, music)
+    for was, now in zip(tape.songs, moved.songs, strict=True):
+        if (was.start, was.end) != (now.start, now.end) and (held := edges_held(was)):
+            raise BadEdge(f"that would move a song beside it: {held}")
+    return moved
 
 
 def hear(tape: Tape, number: int, heard: bool = True) -> Tape:
@@ -918,10 +972,6 @@ def ear_order(tape: Tape) -> tuple[Song, ...]:
 def cut_name(song: Song, count: int) -> str:
     title = safe_filename(song.title).encode()[:CUT_TITLE_BYTES]
     return f"{file_number(song.number, count)} {title.decode(errors='ignore')}.flac"
-
-
-def label(song: Song) -> str:
-    return f"song {song.number} ({song.title})"
 
 
 def cut_refusal(tape: Tape) -> str:

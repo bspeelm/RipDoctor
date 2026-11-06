@@ -294,14 +294,6 @@ def test_a_tape_s_waveform_is_the_rip_s_editor_and_player_and_not_a_copy_of_them
     ]
 
 
-def test_every_edge_the_tapes_page_sends_is_guarded() -> None:
-    js = (STATIC / "app.js").read_text()
-    assert js.count("/songs/${num}/edges`, { start, end, guarded: true })") == 1
-    assert "/edges`" not in js.replace(
-        "/songs/${num}/edges`, { start, end, guarded: true })", ""
-    )
-
-
 def test_a_refused_move_puts_the_marker_back_and_says_why() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"async function saveTapeEdges\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]

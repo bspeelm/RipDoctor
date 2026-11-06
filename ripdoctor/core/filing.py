@@ -16,23 +16,31 @@ from ripdoctor.core.match import (
     search_artists,
 )
 from ripdoctor.core.tape import (
+    ALREADY as ALREADY,
+)
+from ripdoctor.core.tape import (
     CUT,
     LENGTH_TOLERANCE,
     PENDING,
     SKIPPED,
-    BadEdge,
     Song,
     Tape,
-    clock,
     cut_refusal,
     cut_status,
     label,
-    set_edges,
+)
+from ripdoctor.core.tape import (
+    FILED as FILED,
+)
+from ripdoctor.core.tape import (
+    FINISHED as FINISHED,
+)
+from ripdoctor.core.tape import (
+    UNKNOWN as UNKNOWN,
 )
 
-ALREADY, FILED, FAILED, UNKNOWN = "already", "filed", "failed", "unknown"
+FAILED = "failed"
 FILE = "file"
-FINISHED = frozenset((ALREADY, FILED))
 _SHOWN = {FAILED: 0, UNKNOWN: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 
@@ -463,59 +471,6 @@ def choice_refusal(song: Song) -> str:
         f"{label(song)} is already in the library, so its release stays as it is - to "
         "file another edition, remove that copy with beets and load the list again"
     )
-
-
-def _edges_held(song: Song) -> str:
-    """Why these edges stay as they are, or nothing. The library's copy was cut from
-    them, and one not confirmed may be there."""
-    if song.filing == UNKNOWN:
-        return (
-            f"{label(song)} is not confirmed, and the library may already hold it, so "
-            "its boundaries stay as they are until a read-back answers - press File "
-            "again"
-        )
-    if song.filing not in FINISHED:
-        return ""
-    return (
-        f"{label(song)} is already in the library, so its boundaries stay as they are "
-        "- to cut it again, remove that copy with beets and load the list again"
-    )
-
-
-def _crossing(tape: Tape, song: Song, start: float, end: float) -> str:
-    """Why a moved edge passes the song beside it, or nothing. Whichever way a boundary
-    has to go, the edge moving away from its partner can go first and a found partner
-    follows, so a refusal here never leaves a boundary with no way to get there."""
-    before = [s for s in tape.songs if s.number < song.number]
-    after = [s for s in tape.songs if s.number > song.number]
-    if before and start != song.start and start < (at := before[-1].end or 0.0):
-        return (
-            f"that overlaps song {before[-1].number}, which ends at {clock(at)} - "
-            "move that one first"
-        )
-    if after and end != song.end and end > (at := after[0].start or end):
-        return (
-            f"that overlaps song {after[0].number}, which starts at {clock(at)} - "
-            "move that one first"
-        )
-    return ""
-
-
-def moved_by_hand(tape: Tape, number: int, start: float, end: float) -> Tape:
-    """`set_edges` held to what a person can be shown: no edge passes the song beside
-    it, and nothing in the library moves, whether it was the song dragged or one laid
-    around it."""
-    song = next((s for s in tape.songs if s.number == number), None)
-    if song is None:
-        raise BadEdge(f"{tape.name} has no song {number}")
-    refused = _edges_held(song) or _crossing(tape, song, start, end)
-    if refused:
-        raise BadEdge(refused)
-    moved = set_edges(tape, number, start, end)
-    for was, now in zip(tape.songs, moved.songs, strict=True):
-        if (was.start, was.end) != (now.start, now.end) and (held := _edges_held(was)):
-            raise BadEdge(f"that would move a song beside it: {held}")
-    return moved
 
 
 def status(song: Song) -> str:

@@ -1709,24 +1709,28 @@ def test_a_song_not_confirmed_keeps_its_release_until_a_read_back_answers(
     assert len(runner.imports) == imported
 
 
-def test_a_boundary_moved_on_a_filed_song_is_recut_and_never_filed_twice(
+def test_a_boundary_on_a_filed_song_is_refused_and_it_is_never_filed_twice(
     service: Service,
 ) -> None:
     app = build(service)
     tape = pinned(app, service)
     assert not file_it(app, tape, service)["error"]
-    before = len(beet_of(service).imports)
-    filed_at = songs(service, tape)[1].path
-    current = songs(service, tape)[1]
+    before = T.read(service.layout, tape)
+    imports = len(beet_of(service).imports)
+    current = before.songs[1]
     body = {"start": current.start, "end": (current.end or 0.0) - 0.5}
-    assert post(app, f"/api/tapes/{tape}/songs/2/edges", service, body).status == 200
-    assert post(app, f"/api/tapes/{tape}/file", service).status == 409
+    refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
+    assert refused.status == 409
+    assert "already in the library" in refused.json()["error"]
+    assert T.read(service.layout, tape) == before
     assert cut(app, tape, service).status == 202
     assert not job_of(app, tape, service)["error"]
-    assert not file_it(app, tape, service)["error"]
+    answer = post(app, f"/api/tapes/{tape}/file", service)
+    assert answer.status == 202
+    assert not job_of(app, tape, service)["error"]
     two = songs(service, tape)[1]
-    assert (two.filing, two.path) == (F.FILED, filed_at)
-    assert len(beet_of(service).imports) == before
+    assert (two.filing, two.path) == (F.FILED, current.path)
+    assert len(beet_of(service).imports) == imports
 
 
 def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
@@ -1751,21 +1755,6 @@ def test_a_new_list_clears_filing_and_filing_again_finds_the_library_s_copy(
     one = songs(service, tape)[0]
     assert (one.filing, one.path) == (F.ALREADY, filed_at)
     assert len(beet_of(service).imports) == before
-
-
-def test_a_filed_song_s_boundary_cannot_be_dragged_and_the_library_s_copy_stands(
-    service: Service,
-) -> None:
-    app = build(service)
-    tape = pinned(app, service)
-    assert not file_it(app, tape, service)["error"]
-    before = T.read(service.layout, tape)
-    current = before.songs[1]
-    body = {"start": current.start, "end": (current.end or 0.0) - 0.5, "guarded": True}
-    refused = post(app, f"/api/tapes/{tape}/songs/2/edges", service, body)
-    assert refused.status == 409
-    assert "already in the library" in refused.json()["error"]
-    assert T.read(service.layout, tape) == before
 
 
 def test_a_release_held_by_a_lost_import_is_freed_by_filing_again(

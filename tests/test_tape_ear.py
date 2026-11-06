@@ -61,14 +61,20 @@ def test_an_ear_set_edge_is_not_moved_by_placing_again_or_by_a_neighbour_s_edit(
 
 
 def test_setting_an_edge_lays_the_found_neighbours_around_it() -> None:
-    tape = TP.set_edges(three(), 2, 101.0, 250.0)
-    assert tape.songs[2].start >= 250.0
+    tape = TP.set_edges(three(), 2, 101.0, 190.0)
+    assert tape.songs[2].start == 190.0
     assert tape.songs[2].set_by == TP.FOUND
+
+
+def test_an_edge_may_not_pass_a_found_neighbour_either() -> None:
+    before = three()
+    with pytest.raises(TP.BadEdge, match="overlaps song 3, which starts at 3:24"):
+        TP.set_edges(before, 2, 101.0, 250.0)
 
 
 def test_a_found_neighbour_that_moved_is_no_longer_heard() -> None:
     tape = TP.hear(TP.hear(three(), 1), 3)
-    tape = TP.set_edges(tape, 2, 101.0, 250.0)
+    tape = TP.set_edges(tape, 2, 101.0, 190.0)
     assert tape.songs[0].heard, "song 1 did not move"
     assert not tape.songs[2].heard, "what was heard is not where song 3 is now"
 
@@ -120,7 +126,10 @@ def test_meeting_a_neighbour_s_ear_set_edge_exactly_is_not_an_overlap() -> None:
 
 def test_an_ear_start_at_zero_still_bounds_the_songs_before_it() -> None:
     """Zero is a position, and was read as no position at all."""
-    tape = TP.set_edges(three(), 2, 0.0, 100.0)
+    tape = three()
+    first, second, third = tape.songs
+    ear = replace(second, start=0.0, end=100.0, set_by=TP.EAR)
+    tape = TP.place(replace(tape, songs=(first, ear, third)), TP.music_of(tape))
     assert tape.songs[0].end <= 0.0, "song 1 has nowhere left to be"
     assert "no room" in TP.cut_refusal(TP.hear(tape, 1))
 

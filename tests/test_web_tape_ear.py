@@ -40,10 +40,6 @@ def placed(app, service: Service, text: str = ONE_DOUBT) -> str:  # type: ignore
     return tape
 
 
-def guarded(song: float, start: float, end: float) -> tuple[str, dict]:
-    return f"songs/{song}/edges", {"start": start, "end": end, "guarded": True}
-
-
 # ------------------------------------------------------------------- the waveform
 
 
@@ -96,7 +92,8 @@ def test_a_drag_is_saved_as_the_person_s_and_a_re_run_leaves_it(
 ) -> None:
     app = build(service)
     tape = placed(app, service)
-    url, body = guarded(2, 6.5, 11.0)
+    url = "songs/2/edges"
+    body = {"start": 6.5, "end": 11.0}
     answer = post(app, f"/api/tapes/{tape}/{url}", service, body)
     assert answer.status == 200, answer.text
     process(app, tape, service)
@@ -118,7 +115,8 @@ def test_an_impossible_drag_is_refused_with_its_reason_and_changes_nothing(
     app = build(service)
     tape = placed(app, service)
     before = T.read(service.layout, tape)
-    url, body = guarded(2, start, end)
+    url = "songs/2/edges"
+    body = {"start": start, "end": end}
     refused = post(app, f"/api/tapes/{tape}/{url}", service, body)
     assert refused.status == 409
     assert said in refused.json()["error"]
@@ -130,7 +128,8 @@ def test_moving_a_boundary_settles_that_song_s_doubt(
 ) -> None:
     app = build(service)
     tape = placed(app, service)
-    url, body = guarded(2, 6.5, 11.0)
+    url = "songs/2/edges"
+    body = {"start": 6.5, "end": 11.0}
     view = post(app, f"/api/tapes/{tape}/{url}", service, body).json()
     assert not {r["number"]: r for r in view["ear"]}[2]["doubtful"]
 

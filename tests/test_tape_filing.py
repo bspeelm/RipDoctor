@@ -500,11 +500,11 @@ def three_placed(**filing: str) -> TP.Tape:
 
 
 def test_a_move_by_hand_is_the_person_s_and_nothing_afterwards_moves_it() -> None:
-    tape = F.moved_by_hand(three_placed(), 2, 101.0, 202.5)
+    tape = TP.set_edges(three_placed(), 2, 101.0, 202.5)
     song = tape.songs[1]
     assert (song.start, song.end, song.set_by) == (101.0, 202.5, TP.EAR)
     again = TP.place(tape, TP.music_of(tape))
-    beside = F.moved_by_hand(again, 1, 0.5, 100.5)
+    beside = TP.set_edges(again, 1, 0.5, 100.5)
     for later in (again, beside):
         assert (later.songs[1].start, later.songs[1].end) == (101.0, 202.5)
 
@@ -525,14 +525,14 @@ def test_a_move_by_hand_past_a_neighbour_or_the_ends_is_refused(
     number: int, start: float, end: float, said: str
 ) -> None:
     with pytest.raises(TP.BadEdge, match=said):
-        F.moved_by_hand(three_placed(), number, start, end)
+        TP.set_edges(three_placed(), number, start, end)
 
 
 def test_an_edge_left_alone_is_never_what_a_move_is_refused_for() -> None:
     tape = three_placed()
     overlapping = replace(tape.songs[1], start=99.0)
     tape = replace(tape, songs=(tape.songs[0], overlapping, tape.songs[2]))
-    assert F.moved_by_hand(tape, 2, 99.0, 201.0).songs[1].end == 201.0
+    assert TP.set_edges(tape, 2, 99.0, 201.0).songs[1].end == 201.0
 
 
 def test_the_edge_moving_away_from_its_partner_can_always_go_first() -> None:
@@ -552,8 +552,8 @@ def test_the_edge_moving_away_from_its_partner_can_always_go_first() -> None:
     )
     assert tape.songs[1].start == 102.0
     with pytest.raises(TP.BadEdge, match="overlaps song 1"):
-        F.moved_by_hand(tape, 2, 92.0, 202.0)
-    moved = F.moved_by_hand(tape, 1, 0.0, 90.0)
+        TP.set_edges(tape, 2, 92.0, 202.0)
+    moved = TP.set_edges(tape, 1, 0.0, 90.0)
     assert moved.songs[1].start == 92.0
     assert moved.songs[1].set_by == TP.FOUND
 
@@ -562,26 +562,26 @@ def test_the_edge_moving_away_from_its_partner_can_always_go_first() -> None:
 def test_a_song_the_library_holds_or_may_hold_is_not_moved_by_hand(filing: str) -> None:
     tape = three_placed(s2=filing)
     with pytest.raises(TP.BadEdge, match=r"song 2 .*its boundaries stay"):
-        F.moved_by_hand(tape, 2, 102.5, 202.0)
+        TP.set_edges(tape, 2, 102.5, 202.0)
 
 
 def test_a_song_whose_filing_failed_can_still_be_moved() -> None:
     tape = three_placed(s2=F.FAILED)
-    assert F.moved_by_hand(tape, 2, 102.5, 202.0).songs[1].start == 102.5
+    assert TP.set_edges(tape, 2, 102.5, 202.0).songs[1].start == 102.5
 
 
 def test_a_move_that_would_lay_a_filed_song_elsewhere_is_refused() -> None:
     tape = three_placed(s3=F.FILED)
     with pytest.raises(TP.BadEdge, match="would move a song beside it: song 3"):
-        F.moved_by_hand(tape, 2, 102.0, 190.0)
+        TP.set_edges(tape, 2, 102.0, 190.0)
 
 
 def test_a_move_that_leaves_a_filed_neighbour_where_it_is_goes_through() -> None:
     tape = three_placed(s3=F.FILED)
-    moved = F.moved_by_hand(tape, 2, 102.0, 202.5)
+    moved = TP.set_edges(tape, 2, 102.0, 202.5)
     assert (moved.songs[2].start, moved.songs[2].end) == (204.0, 304.0)
 
 
 def test_a_move_for_a_song_not_on_the_list_is_refused() -> None:
     with pytest.raises(TP.BadEdge, match="no song 9"):
-        F.moved_by_hand(three_placed(), 9, 1.0, 2.0)
+        TP.set_edges(three_placed(), 9, 1.0, 2.0)

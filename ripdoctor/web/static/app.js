@@ -1565,7 +1565,7 @@ async function saveTapeEdges(num, start, end) {
   }
   tpEd.frozen = true;
   try {
-    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`, { start, end, guarded: true });
+    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`, { start, end });
     showTape(after);
     tapeSelect(num, tpEd.sel?.edge ?? "start", false);
     waveSay(moveSaid(before, after, num));

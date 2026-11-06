@@ -497,12 +497,9 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/edges")
     @settled
     def edges(r: H.Request, tape: TP.Tape) -> H.Response:
-        """`guarded` is what the page sends, so that what it can show as impossible is
-        refused here too. Without it, moving a filed song is taken and needs a recut."""
         song, body = song_of(tape, r), r.json()
         start, end = _seconds(body, TP.START), _seconds(body, TP.END)
-        move = TF.moved_by_hand if body.get("guarded") else TP.set_edges
-        return judged(tape, lambda: move(tape, song.number, start, end))
+        return judged(tape, lambda: TP.set_edges(tape, song.number, start, end))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/heard")
     @settled
