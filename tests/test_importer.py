@@ -956,3 +956,19 @@ def test_owned_asks_by_recording_and_by_artist_or_only_by_artist_with_no_id() ->
     runner = FakeRunner()
     _beets().owned(runner, "/lib", "", "A Band")
     assert [c[-1] for c in runner.calls] == [F.term("artist", "A Band")]
+
+
+@pytest.mark.parametrize(
+    ("art", "sent"),
+    [
+        ("/lib/Ca$$h/$title/cov$album.jpg", "/lib/Ca$$$$h/$$title/cov$$album.jpg"),
+        ("/lib/50% Off/%upper{x}.jpg", "/lib/50$% Off/$%upper{x}.jpg"),
+        ("/lib/plain/cover.jpg", "/lib/plain/cover.jpg"),
+    ],
+)
+def test_a_dollar_or_percent_in_a_cover_s_path_was_read_as_a_template(
+    art: str, sent: str
+) -> None:
+    runner = FakeRunner()
+    _beets().set_art(runner, "7", art)
+    assert runner.calls[-1][-1] == f"artpath={sent}"

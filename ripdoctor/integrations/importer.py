@@ -627,10 +627,12 @@ class Beets:
 
     def set_art(self, runner: Runner, album: str, art: str) -> str:
         """The album row's own art, so a song joining it later is given the same.
-        Nothing is moved or rewritten by this, which is what `-M -W` say."""
+        Nothing is moved or rewritten by this, which is what `-M -W` say. `modify` reads
+        a value as a template, so what a path means as one is escaped."""
+        value = art.replace("$", "$$").replace("%", "$%")
         return self._complaint(
             runner,
-            ["modify", "-a", "-y", "-M", "-W", f"id:{album}", f"artpath={art}"],
+            ["modify", "-a", "-y", "-M", "-W", f"id:{album}", f"artpath={value}"],
             120,
         )
 
