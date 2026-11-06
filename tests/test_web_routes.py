@@ -524,6 +524,58 @@ def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
     assert body["result"]["unreadable"], "an unreadable track was reported as fine"
 
 
+def with_a_forced_track(service: Service) -> Service:
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["forced"] = True
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    return service
+
+
+def test_a_track_placed_from_the_catalogue_blocks_the_cut_and_is_named(
+    tmp_path: Path,
+) -> None:
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    r = post(build(service), "/api/split/album", service)
+    assert r.status == 409
+    assert '1 "One"' in r.json()["error"] and "Checked" in r.json()["error"]
+    assert not service.runner.calls, "a refused cut must not reach ffmpeg"
+    assert not list(service.layout.review_dir("album").glob("*.flac"))
+
+
+def test_a_refused_cut_leaves_the_last_cut_where_it_is(tmp_path: Path) -> None:
+    """The stale files are cleared inside the job. Clearing them first would cost
+    somebody their cut for pressing a button that said no."""
+    service = with_a_forced_track(a_service(tmp_path))
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    assert post(build(service), "/api/split/album", service).status == 409
+    assert (review / "01 One.flac").is_file()
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_the_refusal_is_judged_on_the_plan_the_page_just_saved(
+    tmp_path: Path, who: str
+) -> None:
+    """Cut saves for itself first, so a check not yet saved when it was pressed
+    has to count by the time the server looks."""
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0].update(forced=False, settled=who)
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    assert post(build(service), "/api/split/album", service).status == 202
+
+
+def test_tick_clips_are_how_a_doubt_is_heard_so_they_are_not_refused(
+    tmp_path: Path,
+) -> None:
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    assert post(build(service), "/api/clips/album", service).status == 202
+
+
 def test_who_settled_a_track_reaches_the_page_and_comes_back(tmp_path: Path) -> None:
     service = a_service(tmp_path)
     body = a_plan_body()

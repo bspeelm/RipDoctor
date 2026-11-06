@@ -210,6 +210,18 @@ class Plan:
         }
 
 
+def cut_refusal(plan: Plan) -> str:
+    """Why this plan may not be cut yet, naming every track, or nothing. ADR-064."""
+    waiting = [t for side in plan.sides for t in side.tracks if t.forced]
+    if not waiting:
+        return ""
+    names = ", ".join(f'{t.number} "{t.title}"' for t in waiting)
+    return (
+        f"placed from the catalogue and not yet checked: {names}. Listen to each "
+        "and press Checked, or move its boundary."
+    )
+
+
 def validate(plan: Plan, durations: dict[str, float] | None = None) -> None:
     """Refuse a plan that cannot be cut, with the reason."""
     seen: dict[int, str] = {}

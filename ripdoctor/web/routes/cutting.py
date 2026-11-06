@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio.split import cut_one, plan_cuts, tick_one, verify
-from ripdoctor.core.plan import BadPlan, OldFormat, PlanTrack, validate
+from ripdoctor.core.plan import BadPlan, OldFormat, PlanTrack, cut_refusal, validate
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
@@ -61,6 +61,11 @@ def add(app: App, service: Service) -> None:
         """Cut, then verify. A file that will not decode is not a track."""
         slug = slug_of(r)
         plan = _plan(service, slug)
+        # Judged here, on the saved plan: the page saves for itself before it
+        # asks, so an edit it has just made is already in what this reads.
+        refused = cut_refusal(plan)
+        if refused:
+            raise H.HttpError(409, refused)
         source = layout.album_dir(slug)
         dest = layout.review_dir(slug)
 

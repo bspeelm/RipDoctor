@@ -1140,13 +1140,15 @@ def test_the_header_is_the_tabs_and_the_record_picker() -> None:
 
 
 def test_cut_saves_for_itself_and_no_rail_state_waits_on_a_save() -> None:
-    """Asking first is how three nudged boundaries once cut the old ones."""
+    """Asking first is how three nudged boundaries once cut the old ones.
+
+    A track still to check does stop it, which is a different thing. ADR-064."""
     js = (STATIC / "app.js").read_text()
     split = re.search(r"async function split\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "if (S.dirty && !(await save())) return;" in split
     step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     disabled = re.search(r'\$\("#split"\)\.disabled = (.*);', step).group(1)  # type: ignore[union-attr]
-    assert "dirty" not in disabled and "forced" not in disabled
+    assert "dirty" not in disabled
 
 
 def test_the_rail_says_why_the_archive_gate_is_shut() -> None:
@@ -1155,10 +1157,14 @@ def test_the_rail_says_why_the_archive_gate_is_shut() -> None:
     assert "f.arc?.why" in step
 
 
-def test_a_catalogue_placed_track_offers_review_and_does_not_stop_the_cut() -> None:
+def test_a_catalogue_placed_track_offers_review_and_the_rail_waits_on_it() -> None:
     js = (STATIC / "app.js").read_text()
     assert "forced: tracks.filter((t) => t.forced)" in js
     assert '$("#cut-review").onclick = reviewNext' in js
+    step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "|| !!f.forced.length;" in step
+    assert "Waiting on ${f.forced.length} to check." in step
+    assert step.index("f.forced.length && !f.imported") < step.index("if (f.review)")
 
 
 def test_every_page_keeps_the_status_line_and_the_console() -> None:

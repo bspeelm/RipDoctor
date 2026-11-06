@@ -244,3 +244,21 @@ def test_a_persons_judgement_ends_the_doubt_in_any_document() -> None:
 def test_a_settled_value_nobody_knows_cannot_clear_a_doubt() -> None:
     track = only_track(a_track_doc(forced=True, settled="maybe"))
     assert track.forced and not track.settled
+
+
+def test_a_cut_is_refused_naming_each_track_still_to_check() -> None:
+    plan = P.Plan.from_dict(
+        a_plan_doc(
+            a_track_doc(forced=True),
+            a_track_doc(number=2, title="Two", forced=True, start=10.0, end=20.0),
+            a_track_doc(number=3, title="Three", start=20.0, end=30.0),
+        )
+    )
+    said = P.cut_refusal(plan)
+    assert '1 "One"' in said and '2 "Two"' in said and "Three" not in said
+    assert "Checked" in said
+
+
+def test_a_plan_with_nothing_to_check_has_no_refusal() -> None:
+    plan = P.Plan.from_dict(a_plan_doc(a_track_doc(settled=P.EAR), a_track_doc()))
+    assert P.cut_refusal(plan) == ""

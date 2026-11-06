@@ -2700,6 +2700,7 @@ a boundary for good.
 
 ### The ceiling
 
-The argument here is the same as ADR-063's and no better: the ceiling moves 12,211 →
-12,750 for this page and retires nothing, and the trim ADR-036 promised is still owed.
-The comment ratio does not move.
+The ceiling moves 12,211 → 12,300 for the field, the first pass's new rule and the
+refusal, and retires nothing. The budget counts Python, so the page's own growth is
+not in that number. The trim ADR-036 promised is still owed. The comment ratio does
+not move.

@@ -261,15 +261,17 @@ function railSave(f) {
   return cutStep("save", "done", "Saved", "The plan on disk is what you see.");
 }
 
-// Never disabled by an unsaved edit or an unchecked track: pressing it saves first.
+// Never disabled by an unsaved edit: pressing it saves first. A track still to check does
+// stop it, and the server says the same to anything that asks past this button. ADR-064.
 function railCut(f) {
   const n = counted(f.tracks.length, "track", "tracks");
   const files = counted(f.review ?? 0, "file", "files");
   const later = S.dirty ? " Cutting saves your changes first." : "";
-  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting;
+  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.forced.length;
   blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length);
   if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
   if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.forced.length && !f.imported) return cutStep("cut", "wait", "Waiting", `Waiting on ${f.forced.length} to check.`);
   if (f.review) return S.dirty
     ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.${later}`)
     : cutStep("cut", "done", "Cut", `${files} in review/.`);
