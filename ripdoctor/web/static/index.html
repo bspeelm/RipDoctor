@@ -551,9 +551,11 @@
           </section>
           <section id="album-panel">
             <h3>Album</h3>
-            <label>Artist <input id="md-artist" placeholder="required"></label>
-            <label>Album <input id="md-album" placeholder="required"></label>
-            <label id="md-year">Year <input id="md-date" size="6" placeholder="2015"></label>
+            <div id="md-names">
+              <label id="md-who">Artist <input id="md-artist" placeholder="required"></label>
+              <label>Album <input id="md-album" placeholder="required"></label>
+              <label>Year <input id="md-date" size="6" placeholder="2015"></label>
+            </div>
             <p class="dim" id="md-note">What you type here is what gets written &mdash;
               it overrides the release title, qualifiers and all.</p>
             <hr>
