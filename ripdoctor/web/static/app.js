@@ -3020,6 +3020,7 @@ async function watchTape() {
   tapeWatching = true;
   const { id, key } = tape;
   for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  $("#tp-next-act").hidden = true;
   tpEd.frozen = true;
   let missed = 0, answered = -1;
   try {

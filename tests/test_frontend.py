@@ -1067,3 +1067,11 @@ def test_a_marker_s_tag_says_what_it_stands_for_and_a_time_stays_readable() -> N
     labels = re.search(r"\n  _timeLabels\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "if (!this.long) return;" in labels
     assert "if (this.long) this.labels.push({ label, x });" in js
+
+
+def test_the_header_s_button_went_on_offering_what_a_job_just_started_refuses() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#tp-next-act").hidden = true;' in body
+    nxt = re.search(r"function showNext\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tapeWatching && !cutWouldWait(tape)" in nxt
