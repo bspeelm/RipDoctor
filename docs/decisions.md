@@ -2864,7 +2864,7 @@ a boundary for good.
 
 ### The ceiling
 
-The ceiling moves 12,211 → 12,600 for the fields, the first pass's new rules and the
-refusal, and retires nothing. The budget counts Python, so the page's own growth is
+The ceiling moves 12,211 → 12,900 for the fields, the first pass's new rules, the
+refusals, and the exact selection a replace now removes by, and retires nothing. The budget counts Python, so the page's own growth is
 not in that number. The trim ADR-036 promised is still owed. The comment ratio does
 not move.
