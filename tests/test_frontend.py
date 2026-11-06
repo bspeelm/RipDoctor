@@ -893,3 +893,11 @@ def test_an_older_answer_does_not_undo_a_save_beside_a_lookup() -> None:
     watched = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "if (saves === tpSaves && !tpSaving) showTape(fresh);" in watched
     assert "tpEd.frozen = tapeHeld()" in watched
+
+
+def test_a_far_option_asked_its_question_inside_a_section_that_had_closed() -> None:
+    """On a settled song a click on it collapsed Change the album, question and all."""
+    js = (STATIC / "app.js").read_text()
+    choose = re.search(r"function chooseRelease\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert choose.index("state.open = false") < choose.index("state.open = true")
+    assert choose.index("state.ask = {") < choose.index("state.open = true")

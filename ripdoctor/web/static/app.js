@@ -1902,6 +1902,7 @@ function chooseRelease(song, release, o, more = {}) {
   state.open = false;
   return settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`, { release, ...more, ...extra }), (e) => {
     state.ask = { release, said: (o && farWords(song, o)) || `${e.message}.`, more };
+    state.open = true;
     showSongs(tape);
   });
 }
