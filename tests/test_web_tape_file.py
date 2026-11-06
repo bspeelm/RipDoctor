@@ -88,6 +88,12 @@ class Beet:
         self.gain_fails = False
         self.ls_fails = False
         self.album_path = "$albumartist/$album/$track $title"
+        self.new_row = ""
+        self.repoint_fails = False
+        self.repoint_stays = False
+        self.empty_rows: dict[str, set[int]] = {}
+        self.album_removed: list[str] = []
+        self.album_gained: list[str] = []
 
     def __getattr__(self, name: str) -> object:
         return getattr(self.inner, name)
@@ -149,6 +155,8 @@ class Beet:
                 if self.album_ids(r) == int(args[-1].removeprefix("album_id:"))
             ]
             return Result(args, 0, "\n".join(same).encode(), b"")
+        if "modify" in args and "-a" not in args:
+            return self._repoint(args)
         if "modify" in args:
             self.art = args[-1].removeprefix("artpath=")
             return Result(args, 0, b"", b"")
@@ -156,6 +164,8 @@ class Beet:
             return self._embed(args)
         if "replaygain" in args:
             return self._gain(args)
+        if "ls" in args and "-a" in args:
+            return self._album_rows(args)
         if "ls" in args:
             return self._ls(args)
         if "import" in args:
@@ -165,12 +175,31 @@ class Beet:
         return answer
 
     def album_ids(self, row: dict[str, str]) -> int:
+        if "album_row" in row:
+            return int(row["album_row"])
         names = list(dict.fromkeys(r["album"] for r in self.rows))
         return names.index(row["album"]) + 1
+
+    def _album_rows(self, args: tuple[str, ...]) -> Result:
+        release = args[-1].removeprefix("mb_albumid:")
+        held = {self.album_ids(r) for r in self.rows if r.get("mb_albumid") == release}
+        ids = sorted(held | self.empty_rows.get(release, set()))
+        return Result(args, 0, "\n".join(map(str, ids)).encode(), b"")
+
+    def _repoint(self, args: tuple[str, ...]) -> Result:
+        if self.repoint_fails:
+            return Result(args, 1, b"", b"database is locked\n")
+        was = int(args[-2].removeprefix("album_id:"))
+        now = args[-1].removeprefix("album_id=")
+        for row in self.rows:
+            if self.album_ids(row) == was and not self.repoint_stays:
+                row["album_row"] = now
+        return Result(args, 0, b"", b"")
 
     def _row(self, copy: Path, where: Path, key: str) -> dict[str, str]:
         told = self.tags[str(copy)]
         return {
+            **({"album_row": self.new_row} if self.new_row else {}),
             "title": told[TG_TITLE],
             "artist": told.get("ARTIST", "A Band"),
             "albumartist": told.get("ALBUMARTIST", "A Band"),
@@ -194,6 +223,12 @@ class Beet:
     def _gain(self, args: tuple[str, ...]) -> Result:
         if self.gain_fails:
             return Result(args, 1, b"", b"error: Fatal replay gain error\n")
+        if "-a" in args:
+            self.album_gained.append(args[-1])
+            for row in self.rows:
+                if f"id:{self.album_ids(row)}" == args[-1]:
+                    Path(row["path"]).chmod(0o600)
+            return Result(args, 0, b"", b"")
         where = Path(args[-1].removeprefix("path:"))
         self.gained.add(str(where))
         where.chmod(0o600)
@@ -202,6 +237,13 @@ class Beet:
     def _remove(self, args: tuple[str, ...]) -> Result:
         if self.remove_fails:
             return Result(args, 1, b"", b"database is locked\n")
+        if "-a" in args:
+            self.album_removed.append(args[-1])
+            gone = int(args[-1].removeprefix("id:"))
+            self.rows = [r for r in self.rows if self.album_ids(r) != gone]
+            for rows in self.empty_rows.values():
+                rows.discard(gone)
+            return Result(args, 0, b"", b"")
         wanted = args[-1].removeprefix("path:")
         self.rows = [r for r in self.rows if r["path"] != wanted]
         return Result(args, 0, b"", b"")
@@ -2651,3 +2693,143 @@ def test_a_truly_empty_library_files_its_first_album(service: Service) -> None:
     assert not beet_of(service).rows
     assert not file_it(app, tape, service)["error"]
     assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+
+
+# ------------------------------------------------------- a later song of a held edition
+
+
+def held_beside(service: Service) -> Path:
+    """Another edition of the album song 1 is pinned to, and that release's own row, in
+    the folder a new row of it lands in. Hand back the other edition's track."""
+    beet = beet_of(service)
+    other = beet.owns(
+        "Another",
+        album="Record rel-1",
+        albumartist="A Band",
+        mb_albumid="rel-other",
+        length="9:00",
+        album_row="1",
+        file=str(beet.library / "rel-1" / "01 Another.flac"),
+    )
+    beet.owns(
+        "A Sibling",
+        album="Record rel-1",
+        albumartist="A Band",
+        mb_albumid="rel-1",
+        length="9:00",
+        album_row="2",
+        file=str(beet.library / "rel-1" / "07 A Sibling.flac"),
+    )
+    beet.new_row = "3"
+    return other
+
+
+def beet_calls(service: Service, word: str) -> list[tuple[str, ...]]:
+    return [c for c in beet_of(service).calls if c[0] == "beet" and word in c]
+
+
+def test_a_later_song_of_a_held_edition_once_made_another_row_and_cover_and_now_joins(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nK\n"
+    no_art = str(Path(service.state_dir) / IMP.NO_ART_FILE)
+    assert imports_of(service)[0][:3] == ("beet", "--config", no_art)
+    assert "auto: no" in Path(no_art).read_text()
+
+    beet = beet_of(service)
+    modified = beet_calls(service, "modify")
+    assert [c[3:] for c in modified] == [
+        ("modify", "-y", "-M", "-W", "album_id:3", "album_id=2")
+    ]
+    assert beet.album_removed == ["id:3"]
+    assert beet.album_gained == ["id:2"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "separate" not in one.filing_note
+    joined = [r for r in beet.rows if r["title"] == "One"]
+    assert [r["album_row"] for r in joined] == ["2"]
+
+
+def test_a_song_joining_its_row_never_asks_about_the_other_editions_rows(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    other = held_beside(service)
+    before = other.read_bytes()
+    other.chmod(0o640)
+    assert not file_it(app, tape, service)["error"]
+    beet = beet_of(service)
+    assert not [f for f in fed_to_import(service) if b"M" in f or b"R" in f]
+    assert "id:1" not in beet.album_gained and "id:1" not in beet.album_removed
+    assert [c for c in beet_calls(service, "modify") if "album_id:1" in c] == []
+    assert other.read_bytes() == before and stat.S_IMODE(other.stat().st_mode) == 0o640
+
+
+def test_gaining_an_album_gives_back_the_modes_of_its_row_alone(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    assert not file_it(app, tape, service)["error"]
+    sibling = next(r for r in beet_of(service).rows if r["title"] == "A Sibling")
+    assert stat.S_IMODE(Path(sibling["path"]).stat().st_mode) == 0o664
+
+
+def test_a_row_that_would_not_join_is_said_and_the_song_stays_filed(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    beet_of(service).repoint_fails = True
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "separate album entry" in one.filing_note
+    assert "locked" in one.filing_note
+    assert beet_of(service).album_removed == []
+
+
+def test_a_row_still_holding_files_is_never_removed_since_that_forgets_them(
+    service: Service,
+) -> None:
+    """`beet remove -a` drops an album row's tracks with it."""
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    beet_of(service).repoint_stays = True
+    assert not file_it(app, tape, service)["error"]
+    assert beet_of(service).album_removed == []
+    assert "separate album entry" in songs(service, tape)[0].filing_note
+
+
+def test_paths_that_give_each_row_a_folder_go_beside_with_their_own_art(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    beet_of(service).album_path = "$albumartist/%aunique{}$album/$track $title"
+    assert not file_it(app, tape, service)["error"]
+    override = str(Path(service.state_dir) / IMP.OVERRIDE_FILE)
+    assert imports_of(service)[0][:3] == ("beet", "--config", override)
+    assert fed_to_import(service)[0] == b"A\nK\n"
+    assert not beet_calls(service, "modify")
+    assert "separate album entry" in songs(service, tape)[0].filing_note
+
+
+def test_a_release_held_alone_is_merged_and_not_joined_by_hand(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    album_row(service, tape, "rel-1")
+    assert not file_it(app, tape, service)["error"]
+    assert fed_to_import(service)[0] == b"A\nM\nA\n"
+    assert not beet_calls(service, "modify")

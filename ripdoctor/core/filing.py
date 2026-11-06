@@ -58,7 +58,7 @@ from ripdoctor.core.tape import (
 
 FAILED = "failed"
 FILE = "file"
-NEW_ALBUM, JOIN, BESIDE = "new album", "join", "beside"
+NEW_ALBUM, JOIN, BESIDE, ADDING = "new album", "join", "beside", "adding"
 _SHOWN = {FAILED: 0, UNKNOWN: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 
@@ -617,11 +617,14 @@ def joining(run: Run, rows: Sequence[Row]) -> str:
     so only the album's name can be compared here. Merging rematches every row of that
     album against the pinned release, so an owned track is renamed, renumbered and
     retagged unless all of them are already that release. Anything else goes beside
-    them, and an empty or foreign album id is not that release."""
+    them, and an empty or foreign album id is not that release. A release held among
+    others cannot be merged for the same reason, and is added to its own row by hand."""
     held = {r.release for r in rows if fold(r.album) == fold(run.album)}
     if not held:
         return NEW_ALBUM
-    return JOIN if held == {run.release} else BESIDE
+    if held == {run.release}:
+        return JOIN
+    return ADDING if run.release in held else BESIDE
 
 
 def beside_note(run: Run) -> str:

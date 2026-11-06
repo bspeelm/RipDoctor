@@ -376,6 +376,16 @@ def test_a_second_album_row_is_said_when_the_album_is_there_already() -> None:
     assert "one more album entry" in F.second_row(run, [a_row(album="a record")])
 
 
+def test_a_release_held_beside_another_is_added_to_and_never_merged() -> None:
+    run = F.Run("rel-b", "A Band", "A Record", ())
+    a = a_row(album="A Record")
+    rows = [replace(a, release="rel-a"), replace(a, release="rel-b")]
+    assert F.joining(run, rows) == F.ADDING
+    assert F.joining(run, rows[:1]) == F.BESIDE
+    assert F.joining(run, rows[1:]) == F.JOIN
+    assert F.joining(run, []) == F.NEW_ALBUM
+
+
 # ---------------------------------------------------------------- the song's state
 
 

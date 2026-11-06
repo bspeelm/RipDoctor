@@ -2434,9 +2434,28 @@ existing files byte-identical and made a second album row, with its own cover an
 gain, in the same folder unless the library's path format has `%aunique`, and a track
 number from its edition that may match one beside it. That is said on the song's outcome,
 which does not count the entries, since it reads tracks and not album rows. Each later edition
-adds another entry, as does a later song of an edition held beside another, because merging
-there would take in both. Each entry fetches its own cover, because a shared art path would
-have removing one entry delete the other's.
+adds another entry. Each entry fetches its own cover, because a shared art path would have
+removing one entry delete the other's.
+
+**A later song of an edition held beside another** joins that edition's row, and takes in
+nothing else. Merging cannot do it, because merging would take in both. So the import keeps both
+with fetching off, since the row it arrives on is about to go and a cover fetched for it would
+stay behind as a file nothing names. Then `modify album_id` moves that row's tracks to the
+release's oldest row with `-M -W`, the row left empty is removed, and album gain is computed again
+for that row alone. Measured on 2.1.0 with both editions in one folder: the other edition stayed
+byte-identical over three filings, 18 tracks stood on 2 album rows, no cover file was added, the
+new song took the row's art, and its siblings' only change was their album gain. Only the rows of
+that release are named, and `remove -a` forgets whatever is on the row, so a row is removed only
+once it is asked and found empty. A row of the release in another folder is left apart and said,
+and with paths that could part them, the import goes beside as any other edition does. A kill
+between the two steps leaves an empty row, which `beet ls -a -f '$path'` crashes on until the next
+filing of that release clears it. A row that will not join leaves the song filed, and says so. Earlier separate rows of the release
+join at that point too, since they are that release.
+
+The other way to make beets' own merge do this does not work. Stamping the row with an `album_id`
+attribute and setting `duplicate_keys` to it did find only that row, once. On a second try it
+crashed with `empty album for album id` and left the album's tracks with no album row at all.
+The ceiling moves 12,600 → 12,620 for joining a row, and retires nothing.
 
 Adding `mb_albumid` to beets' `duplicate_keys` looks like the way out and is not. Measured on
 2.1.0, beets builds the question's query from the match, whose release id is called `album_id`,

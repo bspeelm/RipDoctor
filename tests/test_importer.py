@@ -1080,3 +1080,46 @@ def test_an_empty_library_beets_cannot_answer_for_is_not_called_fresh(
     fake = FakeRunner().expect("ls", returncode=1, stderr=b"database is locked")
     with pytest.raises(I.ImportFailed, match="locked"):
         I.Beets().off_its_mount(fake, str(tmp_path / "lib"))
+
+
+# ------------------------------------------------------------ joining a release's rows
+
+
+def test_rows_of_one_release_in_different_folders_stay_as_they_are() -> None:
+    fake = (
+        FakeRunner()
+        .expect(lambda a: "-a" in a and "ls" in a, stdout=b"4\n9\n")
+        .expect("album_id:4", stdout=b"/lib/one/1.flac\n")
+        .expect("album_id:9", stdout=b"/lib/two/2.flac\n")
+    )
+    assert I.Beets().join_release(fake, "/lib", "rel") == ("4", 0, 1)
+    assert not [c for c in fake.calls if "modify" in c or "remove" in c]
+
+
+def test_a_row_left_empty_by_a_kill_is_cleared_and_counted_as_nothing() -> None:
+    fake = (
+        FakeRunner()
+        .expect(lambda a: "-a" in a and "ls" in a, stdout=b"4\n9\n")
+        .expect("album_id:4", stdout=b"/lib/one/1.flac\n")
+    )
+    assert I.Beets().join_release(fake, "/lib", "rel") == ("4", 0, 0)
+    assert fake.calls[-1][1:] == ("remove", "-a", "-f", "id:9")
+    assert not [c for c in fake.calls if "modify" in c]
+
+
+def test_one_row_of_a_release_has_nothing_to_join() -> None:
+    fake = FakeRunner().expect("ls", stdout=b"4\n")
+    assert I.Beets().join_release(fake, "/lib", "rel") == ("4", 0, 0)
+    assert len(fake.calls) == 1
+
+
+def test_gaining_an_album_names_that_row_alone() -> None:
+    fake = FakeRunner()
+    assert I.Beets().album_gain(fake, "4") == ""
+    assert fake.calls == [("beet", "replaygain", "-a", "-f", "id:4")]
+
+
+def test_the_override_that_fetches_no_art_changes_nothing_else(tmp_path: Path) -> None:
+    beets = I.Beets.with_override(tmp_path)
+    said = Path(beets.no_art).read_text()
+    assert said == I.OVERRIDE + "fetchart:\n  auto: no\n"

@@ -22,7 +22,15 @@ from pathlib import Path
 from typing import Protocol
 
 from ripdoctor.audio.runner import Runner, ToolMissing
-from ripdoctor.core.filing import BESIDE, JOIN, NEW_ALBUM, Row, row_length, term
+from ripdoctor.core.filing import (
+    ADDING,
+    BESIDE,
+    JOIN,
+    NEW_ALBUM,
+    Row,
+    row_length,
+    term,
+)
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
@@ -236,7 +244,12 @@ FROM_LIST_ANSWERS = b"K\n"
 # Apply the release; merge; apply again, because merging matches afresh. A duplicate
 # question nobody expected meets end of input, which stops the run safely. Merging into
 # another edition rewrites every owned track, so that goes beside it. ADR-063.
-PINNED_ANSWERS = {NEW_ALBUM: b"A\n", JOIN: b"A\nM\nA\n", BESIDE: b"A\nK\n"}
+PINNED_ANSWERS = {
+    NEW_ALBUM: b"A\n",
+    JOIN: b"A\nM\nA\n",
+    BESIDE: b"A\nK\n",
+    ADDING: b"A\nK\n",
+}
 
 
 def answers(duplicates: str, *, matching: bool) -> bytes:
@@ -260,6 +273,11 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 # one; and the duplicate question, which a configured `remove` answers by deleting
 # the filed audio, before any answer sent here is read. ADR-042, ADR-063.
 OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n  duplicate_action: ask\n"
+
+# For a song going into a row that has its art: the row it arrives on is about to go,
+# and a cover fetched for that would stay behind as a file nothing names.
+NO_ART = OVERRIDE + "fetchart:\n  auto: no\n"
+NO_ART_FILE = "beets-override-no-art.yaml"
 
 # Only for the weak matches beets does ask about: it lists the candidates and
 # this declines them, which is the right outcome, because a look that had to
@@ -302,6 +320,7 @@ class Beets:
     config: str = ""
     preview_config: str = ""
     preview_db: str = ""
+    no_art: str = ""
 
     @classmethod
     def with_override(cls, state_dir: str | Path) -> Beets:
@@ -314,7 +333,14 @@ class Beets:
         look.write_text(
             PREVIEW.format(db=db, files=where.parent / "beets-preview-files")
         )
-        return cls(config=str(where), preview_config=str(look), preview_db=str(db))
+        no_art = where.parent / NO_ART_FILE
+        no_art.write_text(NO_ART)
+        return cls(
+            config=str(where),
+            preview_config=str(look),
+            preview_db=str(db),
+            no_art=str(no_art),
+        )
 
     def available(self, runner: Runner) -> bool:
         return runner.which("beet") is not None
@@ -549,8 +575,9 @@ class Beets:
         are taken as they stand. Reports and judges nothing, because a tape's album
         is usually partial and every count `apply` trusts would misread it. A pinned
         run is told `how` it meets the library, and left untold it merges nothing."""
+        config = self.no_art if release and how == ADDING else ""
         result = runner.run(
-            self._argv(self._import(directory, release)),
+            self._argv(self._import(directory, release), config),
             stdin=PINNED_ANSWERS[how] if release else FROM_LIST_ANSWERS,
             timeout=3600,
         )
@@ -665,6 +692,9 @@ class Beets:
         album = _plain(result.text).strip()
         if not result.ok or not album.isdigit():
             raise ImportFailed(f"beets has no album for {path}")
+        return album, self.files_on(runner, root, album)
+
+    def files_on(self, runner: Runner, root: str, album: str) -> tuple[str, ...]:
         rows = runner.run(
             self._argv(["ls", "-f", "$path", f"album_id:{album}"]), timeout=300
         )
@@ -672,7 +702,58 @@ class Beets:
             why = TapeRun(rows.returncode, rows.err).why()
             raise ImportFailed(f"beets could not list that album: {why}")
         files = [line for line in _plain(rows.text).split("\n") if line.strip()]
-        return album, tuple(str(_rooted(root, line)) for line in files)
+        return tuple(str(_rooted(root, line)) for line in files)
+
+    def join_release(
+        self, runner: Runner, root: str, release: str
+    ) -> tuple[str, int, int]:
+        """This release's album rows into its oldest, so a later song of an edition held
+        beside another is one album. Only rows move: other editions are never named, no
+        file is touched, and a row is removed only with nothing left on it, since that
+        forgets what is. Says the row kept, how many joined it and how many sit in
+        another folder and stay. Running it again finishes what a kill interrupted."""
+        result = runner.run(
+            self._argv(["ls", "-a", "-f", "$id", f"mb_albumid:{release}"]), timeout=300
+        )
+        if not result.ok:
+            raise ImportFailed(TapeRun(result.returncode, result.err).why())
+        rows = _plain(result.text).split()
+        files = {r: self.files_on(runner, root, r) for r in rows} if rows[1:] else {}
+        full = [r for r in rows if files.get(r)]
+        kept = full[0] if full else "".join(rows[:1])
+        joined = apart = 0
+        for row in rows:
+            if row == kept:
+                continue
+            if files[row] and any(not _beside(files[kept], f) for f in files[row]):
+                apart += 1
+                continue
+            if files[row]:
+                self._moved_rows(runner, row, kept)
+                if self.files_on(runner, root, row):
+                    raise ImportFailed(f"album row {row} still holds files")
+                joined += 1
+            self._dropped_row(runner, row)
+        return kept, joined, apart
+
+    def _moved_rows(self, runner: Runner, row: str, kept: str) -> None:
+        said = self._complaint(
+            runner,
+            ["modify", "-y", "-M", "-W", f"album_id:{row}", f"album_id={kept}"],
+            120,
+        )
+        if said:
+            raise ImportFailed(said)
+
+    def _dropped_row(self, runner: Runner, row: str) -> None:
+        said = self._complaint(runner, ["remove", "-a", "-f", f"id:{row}"], 120)
+        if said:
+            raise ImportFailed(said)
+
+    def album_gain(self, runner: Runner, album: str) -> str:
+        """Every file of this album row together, and no other row's. `-f` because beets
+        otherwise sees a gain in the row, and a song arriving has changed what it is."""
+        return self._complaint(runner, ["replaygain", "-a", "-f", f"id:{album}"], 3600)
 
     def set_art(self, runner: Runner, album: str, art: str) -> str:
         """The album row's own art, so a song joining it later is given the same.
@@ -868,6 +949,10 @@ def _apart_by(album_path: str) -> bool | None:
         return True
     fields = set(_PATH_FIELD.findall(folders))
     return None if "%" in folders or fields != {"album", "albumartist"} else False
+
+
+def _beside(files: tuple[str, ...], path: str) -> bool:
+    return bool(files) and Path(files[0]).parent == Path(path).parent
 
 
 def _one_file(path: str) -> str:
