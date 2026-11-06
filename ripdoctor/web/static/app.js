@@ -1413,14 +1413,30 @@ const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const stepBox = (id) => document.getElementById(`tp-st-${id}`);
 
 // `why` is what will not fit in a line, kept one press away.
-function tpStep(id, kind, state, detail, why = "") {
-  const box = stepBox(id);
+function railStep(box, kind, state, detail, why = "") {
   box.dataset.kind = kind;
-  box.querySelector(".tp-state").textContent = state;
-  box.querySelector(".tp-detail").textContent = detail;
-  const more = box.querySelector(".tp-why");
+  box.querySelector(".step-state").textContent = state;
+  box.querySelector(".step-detail").textContent = detail;
+  const more = box.querySelector(".step-why");
   more.hidden = !why;
   more.querySelector("p").textContent = why;
+}
+
+const tpStep = (id, ...said) => railStep(stepBox(id), ...said);
+
+// On a phone a rail is this one line, saying what is next, until it is opened.
+function railBarSays(bar, box) {
+  bar.querySelector("span").textContent = box
+    ? `${box.querySelector("b").textContent}: ${box.querySelector(".step-state").textContent}` : "Done";
+  bar.dataset.kind = box?.dataset.kind ?? "done";
+}
+
+function railOpens(rail, bar) {
+  bar.onclick = () => {
+    const open = rail.classList.toggle("open");
+    bar.setAttribute("aria-expanded", open);
+    if (open) rail.scrollIntoView({ block: "start" });
+  };
 }
 
 // Only what this step can do, and the blue one is the next thing to press.
@@ -1612,7 +1628,7 @@ function stepArchive(t) {
 function stepNow() {
   const id = TP_STEPS.find((s) => stepBox(s).dataset.kind !== "done");
   if (!id) return null;
-  const button = [...stepBox(id).querySelectorAll(".tp-acts button")]
+  const button = [...stepBox(id).querySelectorAll(".step-acts button")]
     .find((b) => !b.hidden && !b.disabled && !b.classList.contains("ghost"));
   return { id, button };
 }
@@ -1628,9 +1644,7 @@ function showNext() {
   act.textContent = now?.button?.textContent ?? "";
   act.onclick = () => now?.button?.click();
   const box = now && stepBox(now.id);
-  const word = box ? `${box.querySelector("b").textContent}: ${box.querySelector(".tp-state").textContent}` : "Done";
-  $("#tp-rail-bar").querySelector("span").textContent = word;
-  $("#tp-rail-bar").dataset.kind = box?.dataset.kind ?? "done";
+  railBarSays($("#tp-rail-bar"), box);
   if (!now || tpRailOn === now.id) return;
   tpRailOn = now.id;
   box.scrollIntoView({ block: "nearest" });
@@ -1660,7 +1674,7 @@ function showLeft() {
 function stepBusy(id) {
   const box = stepBox(id);
   box.dataset.kind = "run";
-  box.querySelector(".tp-state").textContent = "Working";
+  box.querySelector(".step-state").textContent = "Working";
   box.append($("#tp-progress"));
   $("#tp-progress").hidden = false;
 }
@@ -3016,7 +3030,7 @@ async function heartbeat() {
 function serverGone() {
   lostContact();
   status("The server can't be reached. Trying again…", true);
-  if (tpJobStep) stepBox(tpJobStep).querySelector(".tp-state").textContent = "No contact";
+  if (tpJobStep) stepBox(tpJobStep).querySelector(".step-state").textContent = "No contact";
 }
 
 // Also what a reload lands in when a job is still going.
@@ -4193,11 +4207,7 @@ function wire() {
   $("#tp-rematch").onclick = () => matchTape(true);
   $("#tp-next-album").onclick = stepAlbum;
   $("#tp-all-list").onclick = () => { tpAllAsk = true; showRail(tape); };
-  $("#tp-rail-bar").onclick = () => {
-    const open = $("#tp-rail").classList.toggle("open");
-    $("#tp-rail-bar").setAttribute("aria-expanded", open);
-    if (open) $("#tp-rail").scrollIntoView({ block: "start" });
-  };
+  railOpens($("#tp-rail"), $("#tp-rail-bar"));
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;

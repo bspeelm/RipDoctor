@@ -956,7 +956,7 @@ def test_file_from_my_list_was_faint_on_a_row_where_it_was_the_way_forward() -> 
     options = re.search(r"function releaseOptions\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'wayForward ? "tiny" : "tp-quiet"' in options
     css = (STATIC / "style.css").read_text()
-    primary = re.search(r"\.tp-group button\.primary[^{]*\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    primary = re.search(r"\.tool-group button\.primary[^{]*\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
     assert "var(--accent)" in primary
 
 
@@ -966,7 +966,7 @@ def test_a_reason_is_on_its_step_and_a_step_waiting_keeps_its_button() -> None:
     step = re.search(r"function stepBoundaries\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert ".title" not in step and "t.place_refusal) return tpStep" in step
     css = (STATIC / "style.css").read_text()
-    assert ".tp-step[data-kind=wait] .tp-acts{display:none}" not in css
+    assert ".step[data-kind=wait] .step-acts{display:none}" not in css
     playlist = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert '"File written", name,' in playlist
 
@@ -1042,17 +1042,18 @@ def test_on_a_phone_the_rail_was_a_long_way_above_a_doubtful_song() -> None:
     """1,361 px of it, with nothing pointing to it. It is one line now, and stays."""
     assert 'id="tp-rail-bar"' in tape_markup()
     js = (STATIC / "app.js").read_text()
-    assert '$("#tp-rail").classList.toggle("open")' in js
+    assert 'railOpens($("#tp-rail"), $("#tp-rail-bar"))' in js
+    assert 'rail.classList.toggle("open")' in js
     css = (STATIC / "style.css").read_text()
     narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
-    assert "#tp-rail:not(.open) > :not(#tp-rail-bar){display:none}" in narrow
-    assert "#tp-rail:not(.open){position:sticky;top:0" in narrow
+    assert ".rail:not(.open) > :not(.rail-bar){display:none}" in narrow
+    assert ".rail:not(.open){position:sticky;top:0" in narrow
 
 
 def test_a_finger_needs_forty_pixels_on_the_toolbar_and_a_row() -> None:
     css = (STATIC / "style.css").read_text()
     narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
-    assert ".tp-group button{min-height:40px;min-width:40px" in narrow
+    assert ".tool-group button{min-height:40px;min-width:40px" in narrow
     for row_button in (".tp-moves button", ".tp-rel-quiet button", ".tp-ask button"):
         assert row_button in narrow
     assert "min-height:40px;min-width:40px}" in narrow

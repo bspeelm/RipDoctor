@@ -55,16 +55,16 @@
   <!-- A tape is not a record: its own page, its own picker, and nothing shared with
        the capture view but the stylesheet. ADR-063. -->
   <div id="tapeview" hidden>
-    <aside id="tp-rail" aria-label="Pipeline">
-      <button type="button" id="tp-rail-bar" aria-expanded="false"><i></i><span></span></button>
+    <aside id="tp-rail" class="rail" aria-label="Pipeline">
+      <button type="button" id="tp-rail-bar" class="rail-bar" aria-expanded="false"><i></i><span></span></button>
       <h2>Pipeline</h2>
-      <section class="tp-step" id="tp-st-recording" title="One uncut recording of the whole tape.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Recording</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts">
+      <section class="step" id="tp-st-recording" title="One uncut recording of the whole tape.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Recording</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
             <button type="button" id="tp-file-pick">Choose a file&hellip;</button>
             <button type="button" id="tp-go">Resume</button>
             <button type="button" id="tp-cancel" class="ghost">Cancel</button>
@@ -72,38 +72,38 @@
           <input type="file" id="tp-file" accept="audio/*,video/*" hidden>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-list" title="A CSV with the columns playlist, owned, position, title, artist, album, duration, or add the songs by hand. Either way they stay editable.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Song list</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts">
+      <section class="step" id="tp-st-list" title="A CSV with the columns playlist, owned, position, title, artist, album, duration, or add the songs by hand. Either way they stay editable.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Song list</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
             <button type="button" id="tp-csv-pick">Load CSV&hellip;</button>
             <button type="button" id="tp-list-add" class="ghost">Add a song</button>
           </div>
           <input type="file" id="tp-csv" accept=".csv,text/csv" hidden>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-boundaries" title="The list is laid over the silences in list order, and whatever does not fit is flagged for you rather than reordered.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Boundaries</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts">
+      <section class="step" id="tp-st-boundaries" title="The list is laid over the silences in list order, and whatever does not fit is flagged for you rather than reordered.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Boundaries</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
             <button type="button" id="tp-review-next">Review next</button>
             <button type="button" id="tp-process">Find boundaries</button>
           </div>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-albums" title="Find the album each song belongs to. What is in doubt waits for you, and you can change any of them.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Albums</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts">
+      <section class="step" id="tp-st-albums" title="Find the album each song belongs to. What is in doubt waits for you, and you can change any of them.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Albums</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
             <button type="button" id="tp-match">Match songs</button>
             <button type="button" id="tp-next-album">Choose next</button>
             <button type="button" id="tp-all-list" class="ghost"></button>
@@ -112,40 +112,40 @@
           <div id="tp-all-ask" hidden></div>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-cut" title="A song that fails to cut is marked, and the rest carry on.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Cut</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts"><button type="button" id="tp-cut">Cut</button></div>
+      <section class="step" id="tp-st-cut" title="A song that fails to cut is marked, and the rest carry on.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Cut</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts"><button type="button" id="tp-cut">Cut</button></div>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-file" title="Each album gets its own run through beets. A song the library already has is not filed again. One album failing stops no other, and filing again does only what is unfinished.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>File</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts"><button type="button" id="tp-file-songs">File</button></div>
+      <section class="step" id="tp-st-file" title="Each album gets its own run through beets. A song the library already has is not filed again. One album failing stops no other, and filing again does only what is unfinished.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>File</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts"><button type="button" id="tp-file-songs">File</button></div>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-playlist" title="This file drives the music server, which follows changes to it. Removing a tape, or deleting the file, does not remove its playlist there.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Playlist</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts"><button type="button" id="tp-playlist">Write playlist</button></div>
+      <section class="step" id="tp-st-playlist" title="This file drives the music server, which follows changes to it. Removing a tape, or deleting the file, does not remove its playlist there.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Playlist</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts"><button type="button" id="tp-playlist">Write playlist</button></div>
         </div>
       </section>
-      <section class="tp-step" id="tp-st-archive" title="The uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.">
-        <i class="tp-mark"></i>
-        <div class="tp-step-body">
-          <div class="tp-step-head"><b>Archive</b><span class="tp-state"></span></div>
-          <p class="tp-detail"></p>
-          <details class="tp-why" hidden><summary>Why</summary><p></p></details>
-          <div class="tp-acts"><button type="button" id="tp-archive">Archive</button></div>
+      <section class="step" id="tp-st-archive" title="The uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Archive</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts"><button type="button" id="tp-archive">Archive</button></div>
         </div>
       </section>
       <input type="file" id="tp-cover-file" accept="image/*" hidden>
@@ -160,7 +160,7 @@
         <h1>New tape</h1>
         <p class="dim">One uncut recording, and the ordered list of the songs in it.</p>
         <label>Name <input id="tp-name" placeholder="name" autocomplete="off"></label>
-        <div class="tp-acts">
+        <div class="step-acts">
           <button type="submit" id="tp-create">Create</button>
           <button type="button" id="tp-new-cancel" class="ghost">Cancel</button>
         </div>
@@ -201,26 +201,26 @@
               <span id="tp-ro-gap"></span>
             </div>
             <div id="tp-tools">
-              <div class="tp-group">
+              <div class="tool-group">
                 <button type="button" data-nav id="tp-prev" title="the song before"><span>Prev</span><kbd>K</kbd></button>
                 <button type="button" data-nav id="tp-next" title="the next song"><span>Next</span><kbd>J</kbd></button>
                 <button type="button" id="tp-doubt" title="the next song to check (shift-N for the one before)"><span>Next doubt</span><kbd>N</kbd></button>
               </div>
-              <div class="tp-group">
+              <div class="tool-group">
                 <button type="button" id="tp-edge-start" title="choose this song's start to move"><span>Start</span><kbd>E</kbd></button>
                 <button type="button" id="tp-edge-end" title="choose this song's end to move"><span>End</span><kbd>E</kbd></button>
                 <button type="button" id="tp-minus" title="move the chosen edge back 0.05 s (shift for 0.5 s)"><span>&minus;</span><kbd>,</kbd></button>
                 <button type="button" id="tp-plus" title="move the chosen edge on 0.05 s (shift for 0.5 s)"><span>+</span><kbd>.</kbd></button>
               </div>
-              <div class="tp-group">
+              <div class="tool-group">
                 <button type="button" id="tp-play" title="play this song, or from the playhead"><span>Play song</span><kbd>Space</kbd></button>
                 <button type="button" id="tp-hear" title="across the selected boundary, with a tick on it"><span>Hear boundary</span><kbd>H</kbd></button>
               </div>
-              <div class="tp-group">
+              <div class="tool-group">
                 <button type="button" id="tp-accept" title="the found edges are right, by ear"><span>Accept</span><kbd>A</kbd></button>
                 <button type="button" id="tp-skip" title="a damaged song is not cut, and stays named"><span>Skip</span><kbd>S</kbd></button>
               </div>
-              <div class="tp-group">
+              <div class="tool-group">
                 <button type="button" id="tp-song" title="the selected song"><span>Song</span><kbd>Z</kbd></button>
                 <button type="button" data-nav id="tp-whole" title="the whole tape"><span>Whole</span><kbd>Z</kbd></button>
                 <span class="tp-zoom">Zoom</span>
