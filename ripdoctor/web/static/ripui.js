@@ -118,6 +118,13 @@ export function splitEdges(track, at, gaps) {
   return { end, start, note };
 }
 
+// Its times are positions on a capture since replaced, and nobody has said otherwise.
+export const fromEarlier = (t) => t.placed === "earlier" && !t.settled;
+
+// Whether "Checked" has anything to say about this track. A fit's own boundary is not in
+// doubt, and marking it would call a thing heard that nothing asked anyone to hear.
+export const canCheck = (t) => !!t && !t.settled && (!!t.forced || fromEarlier(t));
+
 // The tracks on this side that share audio with this one. Meeting at a point is not sharing.
 export function overlapping(track, list) {
   return list.filter((x) => x !== track && track.start < x.end && x.start < track.end);

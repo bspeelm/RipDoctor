@@ -16,6 +16,7 @@ from ripdoctor.core.plan import (
     SpecSide,
     SpecTrack,
     holding_only_current,
+    letter_of,
     validate,
 )
 from ripdoctor.core.sides import assign_sides, music_span
@@ -458,7 +459,7 @@ def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
 
 def _released(gone: Released) -> dict[str, Any]:
     return {
-        "side": F.letter_of(gone.file),
+        "side": letter_of(gone.file),
         "number": gone.track.number,
         "title": gone.track.title,
         "why": gone.why,

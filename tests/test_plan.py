@@ -259,6 +259,86 @@ def test_a_cut_is_refused_naming_each_track_still_to_check() -> None:
     assert "Checked" in said
 
 
+def test_a_cut_is_refused_on_times_from_a_replaced_capture_with_the_ways_out() -> None:
+    plan = P.Plan.from_dict(
+        a_plan_doc(
+            a_track_doc(placed=P.EARLIER),
+            a_track_doc(number=2, title="Two", start=10.0, end=20.0, placed=P.EARLIER),
+            a_track_doc(number=3, title="Three", start=20.0, end=30.0, settled=P.HAND),
+        )
+    )
+    said = P.cut_refusal(plan)
+    assert "side a was captured again" in said
+    assert '1 "One"' in said and '2 "Two"' in said and "Three" not in said
+    assert "First pass" in said and "Align from archive" in said and "Checked" in said
+
+
+def test_a_track_from_a_replaced_capture_is_named_once_even_if_also_in_doubt() -> None:
+    plan = P.Plan.from_dict(a_plan_doc(a_track_doc(forced=True, placed=P.EARLIER)))
+    assert P.cut_refusal(plan).count('1 "One"') == 1
+    assert "captured again" in P.cut_refusal(plan)
+
+
+def test_a_replaced_capture_and_a_doubt_on_another_side_are_both_said() -> None:
+    doc = a_plan_doc(a_track_doc(placed=P.EARLIER))
+    doc["sides"].append(
+        {
+            "file": "side-b.flac",
+            "tracks": [
+                a_track_doc(number=2, title="Two", start=1.0, end=9.0, forced=True)
+            ],
+        }
+    )
+    said = P.cut_refusal(P.Plan.from_dict(doc))
+    assert '1 "One"' in said and '2 "Two"' in said and "not yet checked" in said
+
+
+def test_a_persons_mark_on_a_replaced_capture_is_not_refused() -> None:
+    plan = P.Plan.from_dict(a_plan_doc(a_track_doc(placed=P.EARLIER, settled=P.EAR)))
+    assert P.cut_refusal(plan) == ""
+
+
+def stamped(stamp: str, **track: object) -> P.Plan:
+    doc = a_plan_doc(a_track_doc(**track))
+    doc["sides"][0]["audio"] = stamp
+    return P.Plan.from_dict(doc)
+
+
+def test_a_check_made_on_a_row_shown_as_earlier_survives_the_save_as_heard_here() -> (
+    None
+):
+    """The page only says `earlier` after the re-rip, so this is not a stale tab."""
+    plan, released = P.saved_over(
+        stamped("", placed=P.EARLIER, settled=P.EAR),
+        stamped("old"),
+        {"side-a.flac": "new"},
+    )
+    track = plan.sides[0].tracks[0]
+    assert (track.settled, track.placed) == (P.EAR, "")
+    assert not released
+
+
+def test_a_check_from_a_tab_older_than_the_re_rip_is_still_let_go() -> None:
+    plan, released = P.saved_over(
+        stamped("", settled=P.EAR),
+        stamped("old", settled=P.EAR),
+        {"side-a.flac": "new"},
+    )
+    track = plan.sides[0].tracks[0]
+    assert (track.settled, track.placed) == ("", P.EARLIER)
+    assert released
+
+
+def test_a_check_on_a_side_already_saved_over_comes_out_heard_here() -> None:
+    plan, _released = P.saved_over(
+        stamped("", placed=P.EARLIER, settled=P.EAR),
+        stamped("new", placed=P.EARLIER),
+        {"side-a.flac": "new"},
+    )
+    assert plan.sides[0].tracks[0].placed == ""
+    assert not P.cut_refusal(plan)
+
+
 def test_a_plan_with_nothing_to_check_has_no_refusal() -> None:
     plan = P.Plan.from_dict(a_plan_doc(a_track_doc(settled=P.EAR), a_track_doc()))
     assert P.cut_refusal(plan) == ""

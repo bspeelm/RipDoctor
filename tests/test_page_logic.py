@@ -101,6 +101,20 @@ def test_two_tracks_sharing_audio_overlap_and_two_meeting_do_not() -> None:
     assert not call("overlapping", a, [{"number": 2, "start": 11.0, "end": 20.0}])
 
 
+def test_a_row_from_an_earlier_capture_ends_once_a_person_has_marked_it() -> None:
+    assert call("fromEarlier", {"placed": "earlier", "settled": ""}) is True
+    assert call("fromEarlier", {"placed": "earlier", "settled": "ear"}) is False
+    assert call("fromEarlier", {"placed": "gap", "settled": ""}) is False
+
+
+def test_checked_is_offered_on_a_doubt_and_not_on_a_fit_or_a_settled_track() -> None:
+    assert call("canCheck", {"forced": True, "settled": ""}) is True
+    assert call("canCheck", {"placed": "earlier", "settled": ""}) is True
+    assert call("canCheck", {"placed": "gap", "settled": ""}) is False
+    assert call("canCheck", {"placed": "earlier", "settled": "ear"}) is False
+    assert call("canCheck", None) is False
+
+
 def test_the_real_scripts_parse() -> None:
     done = check_js("--require")
     assert done.returncode == 0, done.stdout

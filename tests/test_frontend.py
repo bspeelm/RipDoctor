@@ -1170,7 +1170,7 @@ def test_a_catalogue_placed_track_offers_review_and_the_rail_waits_on_it() -> No
     assert "forced: tracks.filter((t) => t.forced)" in js
     assert '$("#cut-review").onclick = reviewNext' in js
     step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "|| !!f.forced.length;" in step
+    assert "|| !!f.forced.length" in step and "|| !!f.earlier.length;" in step
     assert "Waiting on ${f.forced.length} to check." in step
     assert step.index("f.forced.length && !f.imported") < step.index("if (f.review)")
 
@@ -1298,18 +1298,15 @@ def test_the_first_pass_no_longer_warns_it_replaces_what_a_person_corrected() ->
     assert "Boundaries you set or checked stay where they are" in asked
 
 
-def test_checked_keeps_the_boundaries_and_only_a_catalogue_placed_track_offers_it() -> (
-    None
-):
+def test_checked_keeps_the_boundaries_and_only_a_track_in_doubt_offers_it() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function checkSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "if (!t?.forced) return;" in body
+    assert "if (!canCheck(t)) return;" in body
     assert "t.forced = false" in body and 't.settled = "ear"' in body
     assert "markDirty()" in body, "it waits for a save like any other edit"
     assert "t.start" not in body and "t.end" not in body
     tools = re.search(r"function showCutTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "const doubt = !!selectedTrack()?.forced;" in tools
-    assert '$("#cut-checked").disabled = !doubt;' in tools
+    assert '$("#cut-checked").disabled = !canCheck(selectedTrack());' in tools
     assert '$("#cut-checked").onclick = checkSelected' in js
 
 

@@ -32,6 +32,11 @@ def _placed(value: Any) -> str:
     return str(value) if value in (GAP, LENGTH, EARLIER) else ""
 
 
+def letter_of(filename: str) -> str:
+    stem = filename.rsplit("/", 1)[-1]
+    return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
+
+
 class OldFormat(Exception):
     """A superseded contiguous-cuts plan. Refused, never converted."""
 
@@ -138,6 +143,12 @@ class PlanTrack:
     @property
     def length(self) -> float:
         return self.end - self.start
+
+    @property
+    def on_replaced_audio(self) -> bool:
+        """Its times are positions on a capture since replaced, and nobody has
+        said otherwise. A person's mark made since is about what is there now."""
+        return self.placed == EARLIER and not self.settled
 
     @property
     def delta(self) -> float:
@@ -312,31 +323,72 @@ def saved_over(
             sides.append(replace(side, audio=was.audio if was else ""))
             continue
         if was is None or not was.audio or was.audio == now:
-            sides.append(replace(side, audio=now))
+            tracks = tuple(_heard_here(t) for t in side.tracks)
+            sides.append(replace(side, tracks=tracks, audio=now))
             continue
         placed = {t.number: t for t in was.tracks}
-        tracks = []
+        kept = []
         for t in side.tracks:
+            if t.placed == EARLIER and t.settled == EAR:
+                kept.append(_heard_here(t))
+                continue
             prior = placed.get(t.number)
             same = prior is not None and (prior.start, prior.end) == (t.start, t.end)
             if prior is not None and same and prior.settled:
                 released.append(
                     Released(side.file, prior, "that side has been captured again")
                 )
-            tracks.append(_from_earlier(t) if same else t)
-        sides.append(replace(side, tracks=tuple(tracks), audio=now))
+            kept.append(_from_earlier(t) if same else t)
+        sides.append(replace(side, tracks=tuple(kept), audio=now))
     return replace(plan, sides=tuple(sides)), tuple(released)
 
 
+def _heard_here(t: PlanTrack) -> PlanTrack:
+    """A check by ear on a row the page was showing as from an earlier capture.
+
+    The page only ever says `earlier` after the capture was replaced, so the two
+    together cannot come from a tab older than the re-rip: they are somebody
+    listening to the audio that is there now, and the time is theirs.
+    """
+    return replace(t, placed="") if t.placed == EARLIER and t.settled else t
+
+
 def cut_refusal(plan: Plan) -> str:
-    """Why this plan may not be cut yet, naming every track, or nothing. ADR-064."""
-    waiting = [t for side in plan.sides for t in side.tracks if t.forced]
-    if not waiting:
-        return ""
-    names = ", ".join(f'{t.number} "{t.title}"' for t in waiting)
+    """Why this plan may not be cut yet, naming every track, or nothing. ADR-064.
+
+    Give it the plan `as_it_stands`: what was saved says nothing about a capture
+    replaced since it was written.
+    """
+    said = [
+        _on_replaced_audio(letter_of(side.file), gone)
+        for side in plan.sides
+        if (gone := [t for t in side.tracks if t.on_replaced_audio])
+    ]
+    waiting = [
+        t
+        for side in plan.sides
+        for t in side.tracks
+        if t.forced and not t.on_replaced_audio
+    ]
+    if waiting:
+        said.append(
+            f"placed from the catalogue and not yet checked: {_names(waiting)}. "
+            "Listen to each and press Checked, or move its boundary."
+        )
+    return " ".join(said)
+
+
+def _names(tracks: list[PlanTrack]) -> str:
+    return ", ".join(f'{t.number} "{t.title}"' for t in tracks)
+
+
+def _on_replaced_audio(letter: str, tracks: list[PlanTrack]) -> str:
     return (
-        f"placed from the catalogue and not yet checked: {names}. Listen to each "
-        "and press Checked, or move its boundary."
+        f"side {letter} was captured again after these were placed, so their times "
+        f"are positions on audio that has gone: {_names(tracks)}. Run First pass, "
+        "which keeps what you have set since, or Align from archive if the earlier "
+        "capture is there. A track you have listened to on this capture can be "
+        "marked Checked, or moved."
     )
 
 

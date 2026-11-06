@@ -1156,6 +1156,109 @@ def test_a_boundary_moved_after_a_re_rip_is_a_judgement_about_the_new_capture(
     assert track_in(service, 1).end == new_end
 
 
+def cut(service: Service) -> H.Response:
+    return post(build(service), "/api/split/album", service)
+
+
+def test_a_cut_of_a_replaced_side_is_refused_by_name_before_anything_is_saved(
+    tmp_path: Path,
+) -> None:
+    """The rail said Ready over rows reading "From an earlier capture", and cutting
+    would have used times from audio that was gone."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+
+    r = cut(service)
+    assert r.status == 409
+    said = r.json()["error"]
+    assert "side a was captured again" in said
+    assert "First pass" in said and "Align from archive" in said
+    assert (review / "01 One.flac").is_file(), "a refused cut leaves the last one"
+
+
+def test_a_save_does_not_turn_a_replaced_sides_times_into_something_to_cut(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    page_saves(service)
+    assert cut(service).status == 409
+
+
+def test_moving_some_boundaries_on_a_new_capture_names_only_the_rest(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    page_saves(service, {2: track_in(service, 2).end - 0.5})
+    said = cut(service).json()["error"]
+    assert "side b was captured again" in said
+    assert '3 "Track 3"' in said and '4 "Track 4"' in said
+    assert '2 "Track 2"' not in said
+
+
+def test_only_the_replaced_sides_tracks_are_named(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    said = cut(service).json()["error"]
+    assert '1 "Track 1"' not in said and '2 "Track 2"' in said
+
+
+def test_a_first_pass_gets_out_and_keeps_what_was_moved(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    new_end = track_in(service, 2).end - 0.5
+    page_saves(service, {2: new_end})
+    assert cut(service).status == 409
+
+    a_second_pass(service)
+    assert track_in(service, 2).end == new_end, "what they set stays"
+    assert cut(service).status == 202
+
+
+def test_every_track_moved_on_the_new_capture_can_be_cut_with_no_first_pass(
+    tmp_path: Path,
+) -> None:
+    """Somebody with no catalogue entry and no archive has this and Checked left."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    moved = {t["number"]: t["end"] - 0.5 for rows in shown.values() for t in rows}
+    page_saves(service, moved)
+    assert cut(service).status == 202
+
+
+def test_checked_on_a_row_from_an_earlier_capture_is_a_way_out(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()
+    for rows in shown["tracks_by_side"].values():
+        for t in rows:
+            if t["placed"] == "earlier":
+                t["settled"] = "ear"
+    reply = post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {
+            "album": "A",
+            "artist": "B",
+            "sides": [
+                {"letter": k, "tracks": v} for k, v in shown["tracks_by_side"].items()
+            ],
+        },
+    ).json()
+    assert reply["released"] == []
+    assert track_in(service, 1).settled == "ear"
+    assert track_in(service, 1).placed == ""
+    assert cut(service).status == 202
+
+
 def test_saving_on_the_same_audio_leaves_every_mark_alone(tmp_path: Path) -> None:
     service, _plain = a_fit_with_a_mark(tmp_path)
     assert page_saves(service)["released"] == []

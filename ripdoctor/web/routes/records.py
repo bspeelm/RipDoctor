@@ -18,6 +18,7 @@ from ripdoctor.core.plan import (
     Plan,
     Spec,
     as_it_stands,
+    letter_of,
     saved_over,
 )
 from ripdoctor.core.xcorr import AlignError
@@ -138,7 +139,7 @@ def add(app: App, service: Service) -> None:
             # not. Taking them raw here put the plan's empty strings back over
             # a record whose name only the spec still had.
             out["tracks_by_side"] = {
-                F.letter_of(side.file): [
+                letter_of(side.file): [
                     {
                         "number": t.number,
                         "title": t.title,
@@ -384,7 +385,7 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
     # the new one would be moved by it, a person's included.
     saved = _saved_plan_or_none(layout, slug)
     placed = (
-        next((s for s in saved.sides if F.letter_of(s.file) == side.letter), None)
+        next((s for s in saved.sides if letter_of(s.file) == side.letter), None)
         if saved
         else None
     )

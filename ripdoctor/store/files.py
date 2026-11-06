@@ -9,7 +9,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.plan import LEAD, TAIL, Plan, Spec, SpecSide, SpecTrack
+from ripdoctor.core.plan import (
+    LEAD,
+    TAIL,
+    Plan,
+    Spec,
+    SpecSide,
+    SpecTrack,
+    letter_of,
+)
 from ripdoctor.store.safety import under
 
 # Side files are named by letter, and the letter is opaque - a single-track
@@ -272,11 +280,6 @@ def forget(layout: Layout, slug: str) -> bool:
     with suppress(OSError):
         under(layout.raw, slug).rmdir()
     return True
-
-
-def letter_of(filename: str) -> str:
-    stem = filename.rsplit("/", 1)[-1]
-    return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
 
 
 def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:

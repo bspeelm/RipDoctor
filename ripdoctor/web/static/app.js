@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { drawMeter, overlapping, slugify, splitEdges } from "/ripui.js";
+import { canCheck, drawMeter, fromEarlier, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -234,7 +234,7 @@ function railRip(f) {
 }
 
 function sidesFromEarlier() {
-  return (S.meta?.sides ?? []).filter((letter) => (S.bySide[letter] || []).some((t) => t.placed === "earlier"));
+  return (S.meta?.sides ?? []).filter((letter) => (S.bySide[letter] || []).some(fromEarlier));
 }
 
 function railFirstPass(f) {
@@ -280,11 +280,18 @@ function railCut(f) {
   const n = counted(f.tracks.length, "track", "tracks");
   const files = counted(f.review ?? 0, "file", "files");
   const later = S.dirty ? " Cutting saves your changes first." : "";
-  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length;
-  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length && !f.overlaps.length);
+  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length || !!f.earlier.length;
+  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length && !f.overlaps.length && !f.earlier.length);
   if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
   if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
   if (f.overlaps.length) return cutStep("cut", "todo", "Overlap", `Tracks ${namedList(f.overlaps.map((t) => t.number))} overlap. Move a boundary so they do not, and this can run.`);
+  // Cut again from the new audio, this would be times from the old: being in the library
+  // already is no reason to let it, and a re-rip is when a filed record gets here.
+  if (f.earlier.length) {
+    const held = f.earlier.length === 1 ? "1 track still has its time" : `${f.earlier.length} tracks still have their times`;
+    const align = $("#realign").hidden ? "" : ", or Align from archive";
+    return cutStep("cut", "wait", "Waiting", `Side ${namedList(sidesFromEarlier())} was captured again, so ${held} from the earlier capture. Run First pass${align}. Anything you have moved stays where it is; a track you have listened to on this capture can be marked Checked.`);
+  }
   if (f.forced.length && !f.imported) return cutStep("cut", "wait", "Waiting", `Waiting on ${f.forced.length} to check.`);
   if (f.review) return S.dirty
     ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.${later}`)
@@ -331,6 +338,7 @@ function showCutRail() {
     recording: S.meta?.recording ?? [],
     tracks,
     forced: tracks.filter((t) => t.forced),
+    earlier: tracks.filter(fromEarlier),
     overlaps: tracks.filter((t) => trackOverlaps(t).length),
     review,
     arc,
@@ -568,7 +576,8 @@ const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by lengt
 function trackBoundary(t) {
   const over = trackOverlaps(t);
   if (over.length) return [`Overlaps ${namedList(over.map((x) => x.number))}`, "bad"];
-  return BOUNDARY_WORDS[t.settled] ?? (t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
+  return BOUNDARY_WORDS[t.settled] ?? (fromEarlier(t) ? PLACED_WORDS.earlier
+    : t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
 }
 const trackOverlaps = (t) => overlapping(t, sideOf(t)).sort((a, b) => a.start - b.start);
 const sideOf = (t) => Object.values(S.bySide).find((list) => list.includes(t)) ?? [];
@@ -628,8 +637,8 @@ function trackRowView(t) {
   tr.append(dr);
   const bnd = statusCell(trackBoundary(t));
   bnd.classList.add("c-bnd-cell");
-  if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
-  else if (t.placed === "earlier") bnd.title = "this side was captured again after this was placed, so these times are positions on audio that has gone";
+  if (fromEarlier(t)) bnd.title = "this side was captured again after this was placed, so these times are positions on audio that has gone: run First pass or align, or listen to it here and press Checked";
+  else if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
   else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Cut does not wait on it";
   tr.append(bnd);
   return tr;
@@ -812,7 +821,7 @@ function stepTrack(by) {
 // save, which Cut does for itself.
 function checkSelected() {
   const t = selectedTrack();
-  if (!t?.forced) return;
+  if (!canCheck(t)) return;
   t.forced = false;
   t.settled = "ear";
   markDirty(); updateReadout(); renderTracks();
@@ -836,9 +845,8 @@ function showCutTools() {
   }
   for (const id of ["#cut-minus", "#cut-plus"]) $(id).disabled = !armed;
   for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side"]) $(id).disabled = !ed.side;
-  const doubt = !!selectedTrack()?.forced;
-  $("#cut-checked").disabled = !doubt;
-  $("#cut-checked").classList.toggle("primary", doubt);
+  $("#cut-checked").disabled = !canCheck(selectedTrack());
+  $("#cut-checked").classList.toggle("primary", !!selectedTrack()?.forced);
   $("#cut-play").querySelector("span").textContent = player.playing ? "Pause" : "Play";
 }
 
@@ -3930,6 +3938,8 @@ async function refreshAlignButton() {
     // reported by a flag on the raw entry, not as a second row
     const a = albums.find((x) => x.slug === S.slug);
     b.hidden = !(a && a.where === "raw" && a.archived_copy);
+    // The rail offers this by name, and it was drawn before this was known.
+    showCutRail();
   } catch { /* leave it hidden */ }
 }
 

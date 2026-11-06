@@ -2700,8 +2700,22 @@ saves for itself, as Cut does.
 
 **Before anything is run,** a replaced side's rows read `From an earlier capture`, in
 amber, and the First pass step says so. This is the page refusing to call an old time
-`Set by you` or `Fitted to gap`. It does not stop Cut: that is a separate question, and
-is not decided here.
+`Set by you` or `Fitted to gap`.
+
+**Cut refuses those rows.** They are positions on audio that has gone, so a cut from them
+lands wherever those numbers happen to fall on the new capture. `POST /api/split` answers
+409 naming the side and the tracks, judged against what is on disk rather than what was
+saved, and the rail's Cut step waits with the same ways out. It does not matter that the
+record is already filed: a re-rip of a filed record is the usual way here.
+
+Nothing about this may be a dead end, and somebody can arrive having already moved
+boundaries on the new capture. So a track they moved is theirs and is never named, a first
+pass holds it and fits the rest, and Align carries only the rows still marked. `Checked`
+clears a row as well, because a time can turn out right on the new capture and a record with
+no catalogue entry and no archive has nothing else short of nudging every boundary. A press
+on such a row is a claim about what is there now, and the server can tell it from a stale
+tab's old mark: the page only says `earlier` after the re-rip, so `earlier` and `ear`
+together cannot be left over from before it.
 
 **Saving cannot launder an old mark.** A save moves the side's stamp to the capture on
 disk, so a time unchanged from the plan it replaces is marked `placed: earlier`, loses its
