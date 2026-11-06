@@ -1385,9 +1385,10 @@ function reviewRow(song) {
   change.append(paste, listButton);
   // What the library holds, or may hold, was filed as this choice, and the route
   // refuses another.
-  if (CHOICE_HELD[song.filing]) {
+  const held = CHOICE_HELD[song.import_begun ? "unknown" : song.filing];
+  if (held) {
     for (const c of change.querySelectorAll("input, select, button")) c.disabled = true;
-    change.append(el("div", "dim", CHOICE_HELD[song.filing]));
+    change.append(el("div", "dim", held));
   }
   row.append(change);
   return row;

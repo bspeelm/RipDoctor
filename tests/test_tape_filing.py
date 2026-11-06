@@ -476,6 +476,15 @@ def test_a_person_owning_a_copy_is_finished_and_theirs() -> None:
     assert F.outcomes(F.person_owns(tape, 1))[0]["settled_by"] == M.PERSON
 
 
+@pytest.mark.parametrize("state", [TP.PENDING, F.FAILED])
+def test_a_song_sent_to_beets_with_no_answer_yet_keeps_its_release(state: str) -> None:
+    """A server dying mid-import left this open: another choice would look for another
+    recording, find no row, and import a second copy of the song."""
+    song = a_song(1, "One", filing=state, import_begun=True)
+    assert "press File again" in F.choice_refusal(song)
+    assert not F.choice_refusal(replace(song, import_begun=False))
+
+
 # ------------------------------------------------------------- moving by hand
 
 

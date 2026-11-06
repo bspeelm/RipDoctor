@@ -263,7 +263,7 @@ def test_a_song_in_the_library_or_not_confirmed_offers_no_other_release() -> Non
     held = re.search(r"const CHOICE_HELD = \{.*?\n\};", js, re.S).group(0)  # type: ignore[union-attr]
     assert all(f"{state}:" in held for state in ("filed", "already", "unknown"))
     body = re.search(r"function reviewRow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    rest = body.split("if (CHOICE_HELD[song.filing])", 1)[1]
+    rest = body.split('CHOICE_HELD[song.import_begun ? "unknown" : song.filing]', 1)[1]
     assert 'change.querySelectorAll("input, select, button")' in rest
     assert "c.disabled = true" in rest
 

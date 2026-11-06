@@ -1766,3 +1766,26 @@ def test_a_filed_song_s_boundary_cannot_be_dragged_and_the_library_s_copy_stands
     assert refused.status == 409
     assert "already in the library" in refused.json()["error"]
     assert T.read(service.layout, tape) == before
+
+
+def test_a_release_held_by_a_lost_import_is_freed_by_filing_again(
+    service: Service,
+) -> None:
+    """The server died with the song at beets: the choice waits, and File answers."""
+    app = build(service)
+    tape = pinned(app, service)
+    current = T.read(service.layout, tape)
+    T.save(
+        service.layout,
+        replace(
+            current,
+            songs=tuple(replace(s, import_begun=True) for s in current.songs),
+        ),
+    )
+    url = f"/api/tapes/{tape}/songs/1/from-list"
+    refused = post(app, url, service)
+    assert refused.status == 409
+    assert "press File again" in refused.json()["error"]
+    assert not file_it(app, tape, service)["error"]
+    assert {s.import_begun for s in songs(service, tape)} == {False}
+    assert {s.filing for s in songs(service, tape)} == {F.FILED}
