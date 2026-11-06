@@ -46,16 +46,15 @@ header strong{letter-spacing:.02em}
    it rather than a field in its own right. */
 .pick{width:9rem;flex:none}
 
-/* A select sizes itself to its widest option, not its selected one, so one long
-   album title set the whole header's width and pushed the last actions off the
-   right edge. min-width:0 is what lets a flex item shrink below its content at
-   all; the cap stops it eating the row on a wide screen. */
+/* A select sizes itself to its widest option, not its selected one, so one long album title
+   could set the whole header's width. min-width:0 is what lets a flex item shrink below its
+   content at all; the cap stops it eating the row on a wide screen. */
+#record-pick{display:flex;align-items:center;gap:.5rem;flex:0 1 38rem;min-width:0}
 #album{flex:1 1 12rem;min-width:0;max-width:26rem}
 
-/* Everything else in the header keeps its size. A picker that is shorter than
-   it would like costs nothing; an action that is off the edge cannot be
-   reached, and nothing on screen says it is there. */
-header > button,header .tabs,header strong{flex:none}
+/* A picker shorter than it would like costs nothing. A tab off the edge cannot be reached,
+   and nothing on screen says it is there. */
+header .tabs,header strong{flex:none}
 
 /* It is a sentence of varying length in the middle of a fixed row. */
 #status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -64,6 +63,23 @@ header > button,header .tabs,header strong{flex:none}
   border-bottom:1px solid var(--line);font-size:.8rem;color:var(--dim);flex:none}
 .bar{flex:1;height:4px;background:#0f1114;border-radius:2px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+
+/* Cut: the rail beside one column, in the same proportions as a tape's page. */
+#cutview{flex:1;min-height:0;display:grid;font-size:14px;
+  grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
+#cut-main{min-width:0;min-height:0;display:flex;flex-direction:column;gap:.5rem;
+  padding:.65rem 1rem .75rem}
+#cut-top{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;flex:none}
+#cut-top > div:first-child{display:flex;align-items:baseline;flex-wrap:wrap;gap:.1rem .75rem;min-width:0}
+#cut-what{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em;overflow-wrap:anywhere}
+#sp-meta{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+#sides{padding:2px;gap:2px;border-radius:7px;background:var(--panel);border:1px solid var(--line)}
+#sides:empty{display:none}
+#sides button{border:0;padding:.2rem .8rem;color:var(--fg)}
+#sides button.on{color:#0b0d10}
+#cut-scroll{flex:1;min-height:0;overflow-y:auto}
+#cut-msg{flex:none;min-height:1.4em;font-size:13px}
+#cut-msg #status{display:block;white-space:normal;color:#b9bec5;font-size:13px}
 
 #cv{display:block;width:100%;flex:1;min-height:0;cursor:crosshair;touch-action:none}
 
@@ -127,8 +143,7 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 /* ---- tapes ---- */
 .warn{color:var(--warn);margin:0}
 /* A tape is not a record, so what acts on the record picker has no place here. */
-body[data-mode=tapes] header > button,body[data-mode=tapes] #album-q,
-body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
+body[data-mode=tapes] #record-pick{display:none}
 #tp-head{display:flex;align-items:center;gap:.6rem;flex:none}
 #tp-head label{flex-direction:row;align-items:center;gap:.5rem}
 #tp-head select{max-width:18rem}
@@ -185,12 +200,12 @@ body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 #tp-top .spacer{flex:1}
 #tp-meta{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
 #tp-next-act{padding:.3rem .75rem;font-size:13px}
-#tp-left{--c:var(--accent);display:flex;align-items:center;gap:.6rem;padding:.3rem .75rem;
+#tp-left,#cut-saved{--c:var(--accent);display:flex;align-items:center;gap:.6rem;padding:.3rem .75rem;
   border:1px solid var(--c);color:var(--c);border-radius:999px;font-size:13px;white-space:nowrap}
-#tp-left[data-kind=done]{--c:var(--start)}
-#tp-left[data-kind=todo]{--c:var(--warn)}
+#tp-left[data-kind=done],#cut-saved[data-kind=done]{--c:var(--start)}
+#tp-left[data-kind=todo],#cut-saved[data-kind=todo]{--c:var(--warn)}
 #tp-left[data-kind=fail]{--c:var(--end)}
-#tp-left i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+#tp-left i,#cut-saved i{width:7px;height:7px;border-radius:50%;background:var(--c)}
 button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font-size:12px;
   padding:.2rem .4rem}
 #tp-remove:hover{color:var(--end)}
@@ -460,16 +475,6 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
 #imp-results button:hover{border-color:var(--accent)}
 #imp-results .vinyl{border-left:3px solid var(--start)}
 #imp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
-
-#pipeline{display:flex;align-items:center;gap:.15rem;padding:.3rem .75rem;flex:none;
-  border-bottom:1px solid var(--line);background:#101318;font-size:11px}
-#pipeline .st{display:flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:20px;
-  color:var(--ghost);white-space:nowrap}
-#pipeline .st.done{color:var(--start)}
-#pipeline .st.now{background:var(--accent);color:#0b0d10;font-weight:700}
-#pipeline .sep{color:var(--line)}
-#pipeline .why{color:var(--ghost);margin-left:.5rem;font-style:italic}
-
 
 #md-note{font-size:10.5px;line-height:1.4;margin:0 0 .2rem;color:var(--ghost)}
 #art-state{font:11px/1.4 ui-monospace,monospace;margin-bottom:.3rem}

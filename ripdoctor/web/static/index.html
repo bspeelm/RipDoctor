@@ -18,7 +18,6 @@
 </div>
 
 <div id="app" hidden>
-  <div id="pipeline"></div>
   <header>
     <strong>RipDoctor</strong>
     <span class="tabs" id="modes">
@@ -29,28 +28,20 @@
       <button data-mode="precut">Pre-cut</button>
       <button data-mode="tapes">Tapes</button>
     </span>
-    <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
-           title="narrows the list beside it; every record is in there, archived ones included">
-    <select id="album" title="which record everything on this page is about"></select>
-    <span id="sides" class="tabs"></span>
     <span class="spacer"></span>
-    <span id="status"></span>
     <span id="tp-head" hidden>
       <label>Tape <select id="tp-pick"></select></label>
       <button type="button" id="tp-new" class="ghost">New tape</button>
     </span>
-    <button id="firstpass" class="ghost" title="look up the release, assign tracks to sides, and fit boundaries to the measured gaps">First pass</button>
-    <button id="realign" class="ghost" hidden title="this album is already cut and archived — carry those boundaries onto the re-rip instead of starting over">Align from archive</button>
-    <button id="revert" class="ghost" title="discard unsaved changes and reload the saved plan from disk">Revert</button>
-    <button id="save">Save</button>
-    <button id="split" class="ghost">Cut tracks</button>
-    <button id="import" class="ghost" title="tag the cut tracks and place them in the library">Import</button>
-    <button id="archive" class="ghost" disabled title="archive the raw sides and clean up — enabled once the album is in the library">Archive rip</button>
+    <span id="record-pick">
+      <span class="dim">Record</span>
+      <input id="album-q" class="pick" placeholder="filter…" autocomplete="off"
+             title="narrows the list beside it; every record is in there, archived ones included">
+      <select id="album" title="which record everything on this page is about"></select>
+    </span>
   </header>
 
   <div id="prepare" hidden><div class="bar"><i></i></div><span></span></div>
-
-  <canvas id="cv"></canvas>
 
   <!-- A tape is not a record: its own page, its own picker, and nothing shared with
        the capture view but the stylesheet. ADR-063. -->
@@ -420,13 +411,157 @@
     </div>
   </div>
 
-  <div id="readout">
-    <span id="ro-time">&mdash;</span>
-    <span id="ro-track"></span>
-    <span id="ro-gap"></span>
-    <span class="spacer"></span>
-    <label class="vol" title="playback volume"><input type="range" id="vol" min="0" max="100" value="100"></label>
-    <button id="helpbtn" class="ghost tiny" title="keyboard shortcuts">?</button>
+  <div id="cutview">
+    <aside id="cut-rail" class="rail" aria-label="Pipeline">
+      <button type="button" id="cut-rail-bar" class="rail-bar" aria-expanded="false"><i></i><span></span></button>
+      <h2>Pipeline</h2>
+      <section class="step" id="cut-st-rip" title="Every side of this record, recorded here or brought in from a file.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Rip</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="cut-rip" class="ghost">Rip a side</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-firstpass" title="Looks up the release, assigns its tracks to the sides, and fits boundaries to the measured gaps.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>First pass</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="firstpass" class="ghost" title="look up the release, assign tracks to sides, and fit boundaries to the measured gaps">First pass</button>
+            <button type="button" id="realign" class="ghost" hidden title="this album is already cut and archived — carry those boundaries onto the re-rip instead of starting over">Align from archive</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-check" title="A track placed from the catalogue was not found in the audio, so it is yours to hear.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Check</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="cut-review">Review next</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-save" title="Cut tracks saves for itself, so nothing here has to be pressed first.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Save</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="save">Save</button>
+            <button type="button" id="revert" class="ghost" title="discard unsaved changes and reload the saved plan from disk">Revert</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-cut" title="Writes each track into review/, saving any changes first.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Cut tracks</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="split" class="ghost">Cut tracks</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-import" title="Tags the cut tracks and places them in the library.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Import</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="import" class="ghost" title="tag the cut tracks and place them in the library">Import&hellip;</button>
+          </div>
+        </div>
+      </section>
+      <section class="step" id="cut-st-archive" title="Puts the raw sides away and clears the working copies, once the album is proved to be in the library.">
+        <i class="step-mark"></i>
+        <div class="step-body">
+          <div class="step-head"><b>Archive</b><span class="step-state"></span></div>
+          <p class="step-detail"></p>
+          <details class="step-why" hidden><summary>Why</summary><p></p></details>
+          <div class="step-acts">
+            <button type="button" id="archive" class="ghost" disabled title="archive the raw sides and clean up — enabled once the album is in the library">Archive rip&hellip;</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <main id="cut-main">
+      <div id="cut-top">
+        <div>
+          <h1 id="cut-what"></h1>
+          <p class="mono" id="sp-meta"></p>
+        </div>
+        <span class="spacer"></span>
+        <span id="sides" class="tabs"></span>
+        <div id="cut-saved" hidden><i></i><span></span></div>
+      </div>
+      <canvas id="cv"></canvas>
+      <div id="readout">
+        <span id="ro-time">&mdash;</span>
+        <span id="ro-track"></span>
+        <span id="ro-gap"></span>
+        <span class="spacer"></span>
+        <label class="vol" title="playback volume"><input type="range" id="vol" min="0" max="100" value="100"></label>
+        <button id="helpbtn" class="ghost tiny" title="keyboard shortcuts">?</button>
+      </div>
+
+      <div id="cut-msg"><span id="status"></span></div>
+
+      <div id="cut-scroll">
+          <div id="lower">
+            <table id="tracks"><thead><tr>
+              <th>#</th><th>title</th><th>start</th><th>end</th><th>len</th><th>cat &Delta;</th><th></th>
+            </tr></thead><tbody></tbody></table>
+            <div id="album-panel">
+              <h3>Album</h3>
+              <label>Artist <input id="md-artist" placeholder="required"></label>
+              <label>Album <input id="md-album" placeholder="required"></label>
+              <label>Year <input id="md-date" size="6" placeholder="2015"></label>
+              <p class="dim" id="md-note">What you type here is what gets written &mdash;
+                it overrides the release title, qualifiers and all.</p>
+              <h3>Cover art</h3>
+              <div id="art-state" class="dim">&mdash;</div>
+              <div class="row">
+                <button id="art-upload" class="ghost">Upload image</button>
+                <input type="file" id="art-file" accept="image/*" hidden>
+              </div>
+              <p class="err" id="art-err"></p>
+            </div>
+
+            <div id="side-panel">
+              <h3>Side <span id="sp-letter"></span></h3>
+                  <div class="row">
+                <button id="addtrack" class="ghost">Add track</button>
+                <button id="splittrack" class="ghost" title="split the track under the playhead in two (S)">Split here</button>
+              </div>
+              <h3>Finished tracks</h3>
+              <div id="review"><p class="dim">nothing cut yet</p></div>
+            </div>
+          </div>
+          <div id="logwrap" hidden>
+            <div id="logbar">
+              <b>console</b>
+              <span id="logwhat">raw output from the pipeline tools &mdash; the finished-tracks
+                list is read back from <code>review/</code>, so the two disagreeing is the signal</span>
+              <span class="spacer"></span>
+              <button id="logclear" class="ghost tiny">clear</button>
+              <button id="logtoggle" class="ghost tiny">hide</button>
+            </div>
+            <pre id="log"></pre>
+          </div>
+      </div>
+    </main>
   </div>
 
   <dialog id="helpdlg">
@@ -591,47 +726,5 @@
     </form>
   </dialog>
 
-  <div id="lower">
-    <table id="tracks"><thead><tr>
-      <th>#</th><th>title</th><th>start</th><th>end</th><th>len</th><th>cat &Delta;</th><th></th>
-    </tr></thead><tbody></tbody></table>
-    <div id="album-panel">
-      <h3>Album</h3>
-      <label>Artist <input id="md-artist" placeholder="required"></label>
-      <label>Album <input id="md-album" placeholder="required"></label>
-      <label>Year <input id="md-date" size="6" placeholder="2015"></label>
-      <p class="dim" id="md-note">What you type here is what gets written &mdash;
-        it overrides the release title, qualifiers and all.</p>
-      <h3>Cover art</h3>
-      <div id="art-state" class="dim">&mdash;</div>
-      <div class="row">
-        <button id="art-upload" class="ghost">Upload image</button>
-        <input type="file" id="art-file" accept="image/*" hidden>
-      </div>
-      <p class="err" id="art-err"></p>
-    </div>
-
-    <div id="side-panel">
-      <h3>Side <span id="sp-letter"></span></h3>
-      <p id="sp-meta" class="dim"></p>
-      <div class="row">
-        <button id="addtrack" class="ghost">Add track</button>
-        <button id="splittrack" class="ghost" title="split the track under the playhead in two (S)">Split here</button>
-      </div>
-      <h3>Finished tracks</h3>
-      <div id="review"><p class="dim">nothing cut yet</p></div>
-    </div>
-  </div>
-  <div id="logwrap" hidden>
-    <div id="logbar">
-      <b>console</b>
-      <span id="logwhat">raw output from the pipeline tools &mdash; the finished-tracks
-        list is read back from <code>review/</code>, so the two disagreeing is the signal</span>
-      <span class="spacer"></span>
-      <button id="logclear" class="ghost tiny">clear</button>
-      <button id="logtoggle" class="ghost tiny">hide</button>
-    </div>
-    <pre id="log"></pre>
-  </div>
 </div>
 <script type="module" src="/app.js"></script>

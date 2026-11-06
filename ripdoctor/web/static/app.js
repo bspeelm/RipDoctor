@@ -71,6 +71,7 @@ function markDirty(d = true) {
   S.dirty = d;
   $("#save").textContent = d ? "Save •" : "Save";
   if (d) saveDraft(); else dropDraft();
+  showCutRail();
 }
 
 // ------------------------------------------------------------ envelope I/O
@@ -166,7 +167,6 @@ function clearAlbum(message) {
   S.bySide = {}; S.sideData = {}; S.side = null;
   player?.stop();
   ed?.clear();
-  $("#pipeline").innerHTML = "";
   $("#sides").innerHTML = "";
   $("#tracks tbody").innerHTML = "";
   $("#sp-letter").textContent = "—";
@@ -181,45 +181,169 @@ function clearAlbum(message) {
   for (const id of ["#save", "#split", "#import", "#archive", "#firstpass", "#revert",
                     "#addtrack", "#splittrack"])
     $(id).disabled = true;
+  cutAsked = { review: null, arc: null };
   markDirty(false);
 }
 
-// Where you are in rip -> first pass -> cut -> import -> archive, and what the
-// next step needs. The information already existed (the archive gate computes
-// most of it); it was just never shown, so "why is that button grey" had no
-// answer on screen.
-async function renderPipeline() {
-  const box = $("#pipeline");
-  if (!S.slug) { box.innerHTML = ""; return; }
-  const tracks = Object.values(S.bySide).flat();
-  let review = 0, arc = null;
-  try { review = (await api(`/api/review/${S.slug}`)).tracks.length; } catch {}
-  try { arc = await api(`/api/archive/${S.slug}?album=${encodeURIComponent(S.meta.album || "")}`); } catch {}
+// ----------------------------------------------------------------- the rail
+//
+// Where a record is in rip -> first pass -> check -> save -> cut -> import -> archive, and
+// what the next step needs, so that "why is that button grey" has an answer on screen.
 
-  const imported = !!(arc && arc.library_tracks);
-  const steps = [
-    { k: "rip", label: `rip · ${S.meta.sides.length} side${S.meta.sides.length === 1 ? "" : "s"}`,
-      done: S.meta.sides.length > 0 },
-    { k: "fit", label: `first pass · ${tracks.length} tracks`, done: tracks.length > 0,
-      why: "no tracks yet — run First pass, or add them by hand" },
-    { k: "cut", label: `cut · ${review || (imported ? "moved" : 0)}`, done: review > 0 || imported,
-      why: "nothing in review/ — press Cut tracks" },
-    { k: "imp", label: `import${imported ? " · " + arc.library_tracks : ""}`, done: imported,
-      why: "not in the library yet — press Import" },
-    { k: "arc", label: "archive", done: !!(arc && !arc.sides.length),
-      why: arc && arc.why ? arc.why : "ready to archive" },
-  ];
-  const nextIdx = steps.findIndex((x) => !x.done);
-  box.innerHTML = "";
-  steps.forEach((st, i) => {
-    if (i) box.appendChild(el("span", "sep", "›"));
-    const cls = st.done ? "st done" : (i === nextIdx ? "st now" : "st");
-    const e = el("span", cls, (st.done ? "✓ " : "") + st.label);
-    if (!st.done && st.why) e.title = st.why;
-    box.appendChild(e);
-  });
-  if (nextIdx >= 0 && steps[nextIdx].why)
-    box.appendChild(el("span", "why", steps[nextIdx].why));
+const CUT_STEPS = ["rip", "firstpass", "check", "save", "cut", "import", "archive"];
+
+// What only the server knows. It is asked when a record opens and when a job ends; an edit
+// redraws from what the page already holds, so a nudge costs no request.
+let cutAsked = { review: null, arc: null };
+let cutCutting = false;
+
+const cutBox = (id) => document.getElementById(`cut-st-${id}`);
+const cutStep = (id, ...said) => railStep(cutBox(id), ...said);
+const blue = (id, on) => $(id).classList.toggle("ghost", !on);
+const namedList = (names) => {
+  if (names.length < 2) return names.join("");
+  const shown = names.slice(0, 3);
+  const more = names.length - shown.length;
+  return more ? `${shown.join(", ")} and ${more} more` : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+};
+
+async function refreshCutRail() {
+  const slug = S.slug;
+  const asked = { review: null, arc: null };
+  if (slug) {
+    // A step that could not be asked says Waiting, and its own button still reports why.
+    try { asked.review = (await api(`/api/review/${slug}`)).tracks.length; } catch { asked.review = null; }
+    try { asked.arc = await api(`/api/archive/${slug}?album=${encodeURIComponent(S.meta.album || "")}`); } catch { asked.arc = null; }
+  }
+  if (S.slug !== slug) return;          // another record opened while these were answered
+  cutAsked = asked;
+  showCutRail();
+}
+
+function railRip(f) {
+  const sides = f.sides;
+  const letters = namedList(sides);
+  $("#cut-rip").textContent = sides.length ? "Rip another side" : "Rip a side";
+  blue("#cut-rip", !sides.length);
+  $("#cut-rip").hidden = f.archived;
+  if (f.archived) return cutStep("rip", "done", counted(sides.length, "side", "sides"), "In the archive.");
+  if (f.recording.length) return cutStep("rip", "run", "Recording", `Side ${namedList(f.recording)} is still being recorded.`);
+  if (!sides.length) return cutStep("rip", "todo", "No sides", "Record a side here, or bring one in from Upload.");
+  return cutStep("rip", "done", counted(sides.length, "side", "sides"), `${sides.length === 1 ? "Side" : "Sides"} ${letters}.`);
+}
+
+function railFirstPass(f) {
+  const n = f.tracks.length;
+  $("#firstpass").textContent = n ? "Run again" : "First pass";
+  blue("#firstpass", !!f.sides.length && !n);
+  if (!f.sides.length) return cutStep("firstpass", "wait", "Waiting", "Waiting on a side.");
+  if (!n) return cutStep("firstpass", "ready", "Not run", "Find the release and fit its tracks to the gaps, or add tracks by hand.");
+  return cutStep("firstpass", "done", S.meta.mbid ? "Matched" : "By hand",
+                 `${counted(n, "track", "tracks")} across ${counted(f.sides.length, "side", "sides")}.`);
+}
+
+function railCheck(f) {
+  $("#cut-review").hidden = !f.forced.length;
+  if (!f.tracks.length) return cutStep("check", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.forced.length) {
+    const titles = namedList(f.forced.map((t) => t.title));
+    return cutStep("check", "todo", `${f.forced.length} to check`, `${titles} did not fit the gaps and ${f.forced.length === 1 ? "was" : "were"} placed from the catalogue.`);
+  }
+  return cutStep("check", "done", "Clear", "No boundary was placed from the catalogue.");
+}
+
+function railSave(f) {
+  blue("#save", S.dirty);
+  if (S.dirty) return cutStep("save", "todo", "Unsaved", "The plan on disk is behind what you see.");
+  if (!f.tracks.length) return cutStep("save", "wait", "Waiting", "Nothing to save yet.");
+  return cutStep("save", "done", "Saved", "The plan on disk is what you see.");
+}
+
+// Never disabled by an unsaved edit or an unchecked track: pressing it saves first.
+function railCut(f) {
+  const n = counted(f.tracks.length, "track", "tracks");
+  const files = counted(f.review ?? 0, "file", "files");
+  const later = S.dirty ? " Cutting saves your changes first." : "";
+  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting;
+  blue("#split", !!f.tracks.length && !f.review && !f.imported && !S.dirty && !f.forced.length);
+  if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
+  if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.review) return S.dirty
+    ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.${later}`)
+    : cutStep("cut", "done", "Cut", `${files} in review/.`);
+  if (f.imported) return cutStep("cut", "done", "Cut", "The files have moved to the library.");
+  return cutStep("cut", "ready", "Ready", `${n} will be written to review/.${later}`);
+}
+
+function railImport(f) {
+  // Unknown is not nothing: if the server could not say, the button stays pressable.
+  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported);
+  blue("#import", !!f.review && !f.imported);
+  if (f.imported) return cutStep("import", "done", "In library", `${counted(f.arc.library_tracks, "track", "tracks")} in the library.`);
+  if (f.review) return cutStep("import", "ready", "Ready", "Tag the cut tracks and place them in the library.");
+  return cutStep("import", "wait", "Waiting", "Waiting on the cut.");
+}
+
+function railArchive(f) {
+  blue("#archive", !!f.arc?.ready);
+  if (f.archived) return cutStep("archive", "done", "Archived", "The raw sides are in the archive.");
+  if (f.arc?.ready) return cutStep("archive", "ready", "Ready", "Put the raw sides away and clean up.");
+  const why = f.arc?.why || "Enabled once the album is in the library";
+  return cutStep("archive", "wait", "Waiting", `${why[0].toUpperCase()}${why.slice(1)}.`);
+}
+
+// The names are read from the fields, so the heading says what a save would write.
+function showCutHead(f) {
+  const artist = $("#md-artist").value.trim() || S.meta?.artist;
+  const album = $("#md-album").value.trim() || S.meta?.album;
+  $("#cut-what").textContent = S.slug
+    ? (artist && album ? `${artist} \u2014 ${album}` : artist || album || S.slug)
+    : "No record open";
+  const pill = $("#cut-saved");
+  pill.hidden = !S.dirty && !f.tracks.length && !f.archived;
+  pill.dataset.kind = S.dirty ? "todo" : "done";
+  pill.querySelector("span").textContent = S.dirty ? "Unsaved changes" : f.archived ? "Archived" : "Saved";
+}
+
+function showCutRail() {
+  const tracks = Object.values(S.bySide).flat();
+  const { review, arc } = cutAsked;
+  const f = {
+    sides: S.meta?.sides ?? [],
+    recording: S.meta?.recording ?? [],
+    tracks,
+    forced: tracks.filter((t) => t.forced),
+    review,
+    arc,
+    imported: !!arc?.library_tracks,
+    archived: albumsHeld.find((a) => a.slug === S.slug)?.where === "archive",
+  };
+  railRip(f);
+  railFirstPass(f);
+  railCheck(f);
+  railSave(f);
+  railCut(f);
+  railImport(f);
+  railArchive(f);
+  showCutHead(f);
+  const now = CUT_STEPS.find((id) => cutBox(id).dataset.kind !== "done");
+  railBarSays($("#cut-rail-bar"), now ? cutBox(now) : null);
+}
+
+// The doubtful tracks come round in side order, from whichever is selected.
+async function reviewNext() {
+  const doubts = (S.meta?.sides ?? [])
+    .filter((letter) => !(S.meta.recording || []).includes(letter))
+    .flatMap((letter) => (S.bySide[letter] || []).filter((t) => t.forced).map((t) => ({ letter, t })));
+  if (!doubts.length) return;
+  const at = doubts.findIndex((d) => d.letter === S.side && d.t.number === ed.sel?.track);
+  const { letter, t } = doubts[(at + 1) % doubts.length];
+  try {
+    if (letter !== S.side) await openSide(letter);
+    select(t.number, "start");
+    ed.fitRange(t.start, t.end);
+    document.querySelector("#tracks tr.sel")?.scrollIntoView({ block: "nearest" });
+  } catch (e) { status(`could not open side ${letter}: ${e.message}`, true); }
 }
 
 function enableActions() {
@@ -330,7 +454,7 @@ async function openAlbum(slug) {
   loadReview();
   refreshAlignButton();
   refreshArchiveButton();
-  renderPipeline();
+  refreshCutRail();
   markDirty(false);
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
          !!unprepared);
@@ -356,6 +480,8 @@ function showRecord() {
   // about to record.
   showRecordInRipPanel(S.meta.artist, S.meta.album, S.meta.sides);
   loadPunchTracks();            // Punch follows the selection too
+  cutAsked = { review: null, arc: null };
+  showCutRail();
 }
 
 function renderSideTabs() {
@@ -364,7 +490,7 @@ function renderSideTabs() {
   for (const letter of S.meta.sides) {
     const recording = rec.includes(letter);
     const b = el("button", `${letter === S.side ? "on " : ""}${recording ? "rec" : ""}`,
-                 recording ? `${letter} ●rec` : letter);
+                 recording ? `Side ${letter} ●rec` : `Side ${letter}`);
     b.disabled = recording;
     b.title = recording ? "still being recorded — stop the rip, then hit Revert" : `side ${letter}`;
     b.onclick = () => openSide(letter);
@@ -395,9 +521,14 @@ async function openSide(letter) {
   player.load(`/api/audio/${S.slug}/${letter}`
               + (S.meta.ready[letter]?.v ? `?v=${S.meta.ready[letter].v}` : ""));
   $("#sp-letter").textContent = letter;
-  $("#sp-meta").textContent =
-    `${fmt(d.duration)} · ${d.gaps.band.gaps.length} silent regions · threshold ${d.gaps.band.threshold} dB`;
   renderTracks();
+}
+
+function showSideMeta() {
+  const d = S.sideData[S.side];
+  if (!d) return;
+  $("#sp-meta").textContent = [`side ${S.side}`, fmt(d.duration), counted(tracks().length, "track", "tracks"),
+    `${d.gaps.band.gaps.length} silent regions`, `threshold ${d.gaps.band.threshold} dB`].join(" · ");
 }
 
 // ------------------------------------------------------------ track table
@@ -453,6 +584,7 @@ function renderTracks() {
     del.appendChild(db); tr.appendChild(del);
     tb.appendChild(tr);
   }
+  showSideMeta();
 }
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -691,7 +823,8 @@ async function split() {
   // question with one sensible answer and a dozen chances to press the wrong
   // one - three nudged boundaries and an absent-minded OK cut the old ones.
   if (S.dirty && !(await save())) return;
-  $("#split").disabled = true;
+  cutCutting = true;
+  showCutRail();
   status("cutting…", true);
   try {
     const r = await runJob(S.slug, `/api/split/${S.slug}`, {}, "cutting");
@@ -702,9 +835,9 @@ async function split() {
     // again, and knowing which costs nothing to report.
     if (bad.length) logline(`these did not read back: ${bad.join(", ")}`, true);
     loadReview();
-    renderPipeline();
   } catch (e) { status(`cut failed: ${e.message}`, true); logline(e.message, true); }
-  $("#split").disabled = false;
+  cutCutting = false;
+  await refreshCutRail();
 }
 
 // ----------------------------------------------------------------- archive
@@ -776,7 +909,7 @@ async function archiveRun() {
     lines.push("", ...r.notes.map((n) => "  " + n), "", "removed:", ...r.removed.map((d) => "  " + d));
     $("#arc-plan").textContent = lines.join("\n");
     status("archived and cleaned up");
-    await renderPipeline();
+    await refreshCutRail();
     $("#arcdlg").close();
     resetCaptureAfterArchive(done);
     await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
@@ -956,7 +1089,7 @@ async function runImport() {
     await loadArtState();
     await loadReview();
     await refreshArchiveButton();
-    await renderPipeline();
+    await refreshCutRail();
     offerArt();
     $("#imp-next").hidden = $("#archive").disabled;
     status("imported into the library");
@@ -3129,6 +3262,18 @@ async function removeTape() {
 
 // -------------------------------------------------------------------- modes
 
+// Every page writes to the status line and the console. Cut gives them a place in its own
+// column; a page without one has the status in the header and the console along the foot.
+function placeShared(mode) {
+  if (mode === "cut") {
+    $("#cut-msg").append($("#status"));
+    $("#cut-scroll").append($("#logwrap"));
+  } else {
+    $("#tp-head").before($("#status"));
+    $("#app").append($("#logwrap"));
+  }
+}
+
 function setMode(mode) {
   document.body.dataset.mode = mode;
   remember("rd-mode", mode);
@@ -3140,7 +3285,8 @@ function setMode(mode) {
   const source = mode === "rip" || mode === "punch" || mode === "upload"
     || mode === "precut" || mode === "tapes";
   const metering = mode === "rip" || mode === "punch";
-  $("#cv").hidden = source;
+  placeShared(mode);
+  $("#cutview").hidden = source;
   $("#captureview").hidden = !source || mode === "tapes";
   $("#tapeview").hidden = mode !== "tapes";
   $("#tp-head").hidden = mode !== "tapes";
@@ -3155,8 +3301,6 @@ function setMode(mode) {
   $("#capturepane").hidden = !metering;
   $("#uploadpane").hidden = mode !== "upload";
   $("#source-title").textContent = mode === "upload" ? "Add a file" : "Rip a side";
-  $("#readout").hidden = source;
-  $("#lower").hidden = source;
   if (metering) startRipPoll(); else stopRipPoll();
   if (mode === "rip") loadOrphans();
   if (mode === "punch") loadPunchTracks();
@@ -4133,6 +4277,9 @@ function wire() {
   $("#split").onclick = split;
   $("#album-q").oninput = () => renderAlbums(S.slug);
   $("#firstpass").onclick = openFirstPass;
+  $("#cut-review").onclick = reviewNext;
+  $("#cut-rip").onclick = () => setMode("rip");
+  railOpens($("#cut-rail"), $("#cut-rail-bar"));
   $("#import").onclick = openImport;
   $("#art-upload").onclick = () => $("#art-file").click();
   $("#art-file").onchange = (e) => { if (e.target.files[0]) uploadArt(e.target.files[0]); e.target.value = ""; };

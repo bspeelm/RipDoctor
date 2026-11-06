@@ -163,8 +163,8 @@ def test_the_record_picker_cannot_set_the_header_width() -> None:
     assert rule, "no width rule for the record picker"
     assert "min-width:0" in rule.group(1), "it cannot shrink below its content"
     assert "max-width" in rule.group(1), "it can grow without limit"
-    assert re.search(r"header > button[^{]*\{[^}]*flex:none", css), (
-        "the header actions can be squeezed off the edge"
+    assert re.search(r"header \.tabs[^{]*\{[^}]*flex:none", css), (
+        "the tabs can be squeezed off the edge"
     )
 
 
@@ -1088,3 +1088,84 @@ def test_text_waiting_on_a_job_was_also_called_unchanged_in_red() -> None:
 def test_a_row_s_other_ways_forward_are_quiet_and_still_readable() -> None:
     css = (STATIC / "style.css").read_text()
     assert ".tp-rel-quiet button.tp-quiet{color:var(--dim)}" in css
+
+
+def cut_markup() -> str:
+    page = markup()
+    start = page.index('<div id="cutview"')
+    return page[start : page.index('<dialog id="helpdlg"', start)]
+
+
+def test_the_record_s_rail_runs_in_the_order_the_work_does() -> None:
+    steps = re.findall(r'id="cut-st-(\w+)"', cut_markup())
+    assert steps == ["rip", "firstpass", "check", "save", "cut", "import", "archive"]
+    js = (STATIC / "app.js").read_text()
+    assert f"const CUT_STEPS = {json.dumps(steps)};" in js
+
+
+@pytest.mark.parametrize(
+    ("step", "buttons"),
+    [
+        ("firstpass", ["firstpass", "realign"]),
+        ("check", ["cut-review"]),
+        ("save", ["save", "revert"]),
+        ("cut", ["split"]),
+        ("import", ["import"]),
+        ("archive", ["archive"]),
+    ],
+)
+def test_a_moved_button_keeps_its_id_on_its_step(step: str, buttons: list[str]) -> None:
+    page = cut_markup()
+    start = page.index(f'id="cut-st-{step}"')
+    box = page[start : page.index("</section>", start)]
+    assert re.findall(r'<button type="button" id="([\w-]+)"', box) == buttons
+
+
+def test_the_header_is_the_tabs_and_the_record_picker() -> None:
+    page = markup()
+    head = page[page.index("<header>") : page.index("</header>")]
+    assert re.findall(r'id="(album-q|album)"', head) == ["album-q", "album"]
+    for moved in (
+        "firstpass",
+        "realign",
+        "revert",
+        "save",
+        "split",
+        "import",
+        "archive",
+    ):
+        assert f'id="{moved}"' not in head
+    assert 'id="pipeline"' not in page
+    assert "renderPipeline" not in (STATIC / "app.js").read_text()
+
+
+def test_cut_saves_for_itself_and_no_rail_state_waits_on_a_save() -> None:
+    """Asking first is how three nudged boundaries once cut the old ones."""
+    js = (STATIC / "app.js").read_text()
+    split = re.search(r"async function split\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (S.dirty && !(await save())) return;" in split
+    step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    disabled = re.search(r'\$\("#split"\)\.disabled = (.*);', step).group(1)  # type: ignore[union-attr]
+    assert "dirty" not in disabled and "forced" not in disabled
+
+
+def test_the_rail_says_why_the_archive_gate_is_shut() -> None:
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function railArchive\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "f.arc?.why" in step
+
+
+def test_a_catalogue_placed_track_offers_review_and_does_not_stop_the_cut() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "forced: tracks.filter((t) => t.forced)" in js
+    assert '$("#cut-review").onclick = reviewNext' in js
+
+
+def test_every_page_keeps_the_status_line_and_the_console() -> None:
+    """They live in Cut's column, and the other pages write to them too."""
+    js = (STATIC / "app.js").read_text()
+    place = re.search(r"function placeShared\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#cut-msg").append($("#status"))' in place
+    assert '$("#tp-head").before($("#status"))' in place
+    assert '$("#app").append($("#logwrap"))' in place
+    assert "placeShared(mode);" in js
