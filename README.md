@@ -219,9 +219,10 @@ What it does with the list:
 - **A filed song keeps its release**
   (`test_a_song_in_the_library_keeps_the_release_it_was_filed_as`), and a song whose
   filing failed can still be changed
-  (`test_a_song_whose_filing_failed_can_still_be_changed`). Finding boundaries again is refused
-  while the library holds a song
-  (`test_find_again_on_a_filed_song_used_to_move_it_and_is_refused`), and so is a new list,
+  (`test_a_song_whose_filing_failed_can_still_be_changed`). Finding boundaries again leaves a song
+  the library holds where it is
+  (`test_find_again_used_to_refuse_a_tape_with_one_song_filed_and_one_to_place`), and a new list
+  is refused,
   until that copy is removed with beets
   (`test_a_confirmed_new_list_dropped_the_lock_on_a_filed_song_and_is_refused`,
   `test_a_new_list_after_beets_removes_the_copies_clears_filing_and_files_them_again`).
