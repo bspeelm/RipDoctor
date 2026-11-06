@@ -1720,6 +1720,7 @@ function listAskView() {
 
 function editField(song, input) {
   const name = input.dataset.field, value = input.value;
+  input.dataset.saved = value;
   sendList(() => {
     const songs = listNow();
     songs[song.number - 1][name] = value;
@@ -1764,7 +1765,7 @@ function edgeInput(song, name, label, box) {
   input.dataset.edge = name;
   input.dataset.field = name;
   input.value = song[name];
-  input.onchange = () => edgesFromRow(song, box);
+  input.onchange = () => { input.dataset.saved = input.value; edgesFromRow(song, box); };
   wrap.append(input);
   return wrap;
 }
@@ -2096,6 +2097,7 @@ function filedBlock(song, t) {
 
 function songOpenView(song, row, t) {
   const tr = el("tr", "tp-open");
+  tr.dataset.open = song.number;
   const td = el("td");
   td.colSpan = 7;
   const box = el("div", "tp-open-box");
@@ -2150,6 +2152,7 @@ function songOpenView(song, row, t) {
 
 function draftRowView() {
   const tr = el("tr", "tp-open");
+  tr.dataset.open = "draft";
   const td = el("td");
   td.colSpan = 7;
   const box = el("div", "tp-open-box");
@@ -2188,11 +2191,38 @@ async function addDraft() {
   if (!await sendList(() => [...listNow(), draft], number)) { tpDraft = draft; showTape(tape); }
 }
 
+// A redraw rebuilds every input, so what is being typed goes back afterwards: a job's
+// progress or the save of the field before must not take it. A field is unsaved from
+// the first key to when it is left, which sends it, and a refusal then shows the truth.
+function typedInRows() {
+  const typed = [];
+  for (const input of $("#tp-rows").querySelectorAll("tr[data-open] input[data-field]")) {
+    const focused = document.activeElement === input;
+    if (focused || input.value !== input.dataset.saved) {
+      typed.push({ row: input.closest("tr").dataset.open, field: input.dataset.field, value: input.value, focused,
+                   at: focused && input.type === "text" ? [input.selectionStart, input.selectionEnd] : null });
+    }
+  }
+  return typed;
+}
+
+function putBackTyped(typed) {
+  for (const input of $("#tp-rows").querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
+  for (const was of typed) {
+    const input = $("#tp-rows").querySelector(`tr[data-open="${was.row}"] input[data-field="${was.field}"]`);
+    if (!input) continue;
+    input.value = was.value;
+    if (!was.focused) continue;
+    input.focus();
+    if (was.at) input.setSelectionRange(...was.at);
+  }
+}
+
 function showSongs(t) {
   const has = t.songs.length > 0 || !!tpDraft;
   $("#tp-table-wrap").hidden = !has;
   if (!has) { $("#tp-rows").replaceChildren(); return; }
-  const focused = document.activeElement?.closest?.("#tp-rows") && document.activeElement.dataset.field;
+  const typed = typedInRows();
   const rows = [];
   for (const song of t.songs) {
     const row = t.ear.find((r) => r.number === song.number);
@@ -2202,7 +2232,7 @@ function showSongs(t) {
   if (tpDraft) rows.push(draftRowView());
   $("#tp-rows").replaceChildren(...rows);
   $("#tp-add").hidden = !!tpDraft;
-  if (focused) $("#tp-rows").querySelector(`[data-field="${focused}"]`)?.focus();
+  putBackTyped(typed);
   $("#tp-rows").querySelector(".tp-ask")?.scrollIntoView({ block: "nearest" });
   if (t.playlist.done) archivedControls();
 }

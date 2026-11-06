@@ -700,3 +700,22 @@ def test_a_stale_list_loads_the_tape_as_it_stands_and_says_why() -> None:
     body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "if (e.stale)" in body
     assert "await reloadTape();" in body
+
+
+def test_a_redraw_took_typed_text_and_focus_and_now_puts_both_back() -> None:
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function showSongs\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert shown.index("typedInRows()") < shown.index("replaceChildren(...rows)")
+    assert shown.index("replaceChildren(...rows)") < shown.index("putBackTyped(typed)")
+    typed = re.search(r"function typedInRows\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "input.value !== input.dataset.saved" in typed
+    assert "focused" in typed
+    back = re.search(r"function putBackTyped\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for part in ("input.value = was.value", "input.focus()", "setSelectionRange"):
+        assert part in back
+
+
+def test_a_field_that_was_sent_is_not_kept_as_typed_if_its_save_is_refused() -> None:
+    js = (STATIC / "app.js").read_text()
+    field = re.search(r"function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "input.dataset.saved = value" in field
