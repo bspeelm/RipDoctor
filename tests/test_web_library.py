@@ -738,6 +738,15 @@ def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     assert "deleted outside beets" in body["stale"]["note"]
 
 
+def test_asking_what_the_library_holds_lists_it_once(tmp_path: Path) -> None:
+    """Every Import dialog and every change of release asks this, and two whole
+    listings were twice the wait: 0.3 s on 1,000 rows and 3 s on 20,000, measured."""
+    service, _library = with_library(tmp_path)
+    filed_as(service, tmp_path, "aaa")
+    get(build(service), "/api/library/existing/album?mbid=", service)
+    assert len([c for c in service.runner.calls if "ls" in c]) == 1
+
+
 def test_stale_rows_are_cleared_only_when_every_file_is_absent(
     tmp_path: Path,
 ) -> None:

@@ -265,13 +265,7 @@ def add(app: App, service: Service) -> None:
             plan.album,
             mbid=mbid,
         )
-        stale = importer.stale(
-            service.runner,
-            service.settings.library,
-            plan.artist,
-            plan.album,
-            mbid=mbid,
-        )
+        stale = filed.stale
         return H.ok(
             {
                 "existing": None

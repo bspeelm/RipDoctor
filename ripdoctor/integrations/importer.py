@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -92,6 +92,7 @@ class Filed:
     where: Path | None
     folders: int = 0
     refused: str = ""
+    stale: Stale | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -935,7 +936,9 @@ class Beets:
             return Filed(0, None)
         folders = {Path(r.path).parent for r in rows}
         refused = replace_refusal(rows, artist, album, mbid)
-        return Filed(len(rows), Path(rows[0].path).parent, len(folders), refused)
+        where = Path(rows[0].path).parent
+        stale = _stale_of(rows, artist, album)
+        return Filed(len(rows), where, len(folders), refused, stale)
 
     def _filed_rows(
         self, runner: Runner, library: str, artist: str, album: str, mbid: str
@@ -979,9 +982,7 @@ class Beets:
     ) -> Stale | None:
         """Rows whose files are all gone, or nothing. ADR-050."""
         rows = self._quietly_filed(runner, library, artist, album, mbid)
-        if not rows or any(Path(r.path).exists() for r in rows):
-            return None
-        return Stale(len(rows), Path(rows[0].path).parent, f"{artist} - {album}")
+        return _stale_of(rows, artist, album)
 
     def replace_filed(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -1120,6 +1121,12 @@ class Beets:
             for fields in _fields(result.text)
             if len(fields) == _HELD.count(_SEP) + 1
         )
+
+
+def _stale_of(rows: Sequence[Row], artist: str, album: str) -> Stale | None:
+    if not rows or any(Path(r.path).exists() for r in rows):
+        return None
+    return Stale(len(rows), Path(rows[0].path).parent, f"{artist} - {album}")
 
 
 def _merge_answers(how: str) -> bytes:
