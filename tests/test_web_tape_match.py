@@ -716,6 +716,54 @@ def test_a_search_that_outlived_the_list_it_was_for_saves_nothing(
     assert "changed while that search ran" in said.json()["error"]
 
 
+def test_a_hundred_songs_with_no_match_cost_two_hundred_clicks(service) -> None:  # type: ignore[no-untyped-def]
+    """Open the row, press File from my list, a hundred times over."""
+    app = build(service)
+    rows = [row(f"Nothing {n}", "Nowhere") for n in range(100)]
+    tape = a_tape(app, service, rows)
+    view = run(app, service, tape)
+    assert statuses(view) == [M.NONE] * 100
+    assert view["from_list"] == {"numbers": list(range(1, 101)), "no_album": 0}
+    said = post(
+        app,
+        f"/api/tapes/{tape}/from-list",
+        service,
+        {"numbers": view["from_list"]["numbers"]},
+    )
+    assert said.status == 200
+    assert said.json()["all_settled"] is True
+    assert said.json()["from_list"] == {"numbers": [], "no_album": 0}
+    for song in T.read(service.layout, tape).songs:
+        assert song.settled_by == M.PERSON and song.proposal.choice is None  # type: ignore[union-attr]
+
+
+def test_filing_all_from_the_list_leaves_a_real_choice_and_a_song_with_no_album(
+    service, catalogue
+) -> None:  # type: ignore[no-untyped-def]
+    catalogue.albums["A Record"] = [
+        an_edition("rel-a", tracks=[("A Song", 200)], status="Promotion"),
+    ]
+    app = build(service)
+    rows = [row("A Song"), row("Nothing", "Nowhere"), row("Blank", "")]
+    tape = a_tape(app, service, rows)
+    view = run(app, service, tape)
+    assert statuses(view) == [M.REVIEW, M.NONE, M.NONE]
+    assert view["from_list"] == {"numbers": [2], "no_album": 1}
+    said = post(app, f"/api/tapes/{tape}/from-list", service, {"numbers": [1, 2, 3]})
+    assert [s["settled_by"] for s in said.json()["songs"]] == ["", M.PERSON, ""]
+
+
+def test_filing_all_from_the_list_settles_only_what_the_page_counted(service) -> None:  # type: ignore[no-untyped-def]
+    app = build(service)
+    rows = [row("Nothing", "Nowhere"), row("Nothing Else", "Nowhere")]
+    tape = a_tape(app, service, rows)
+    run(app, service, tape)
+    said = post(app, f"/api/tapes/{tape}/from-list", service, {"numbers": [2]})
+    assert [s["settled_by"] for s in said.json()["songs"]] == ["", M.PERSON]
+    bad = post(app, f"/api/tapes/{tape}/from-list", service, {"numbers": "all"})
+    assert bad.status == 400
+
+
 def test_an_interrupted_run_keeps_what_it_finished_and_resumes_after_it(
     service, catalogue
 ) -> None:  # type: ignore[no-untyped-def]

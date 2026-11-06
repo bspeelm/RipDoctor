@@ -207,6 +207,7 @@ def add(app: App, service: Service) -> None:
             "job": None if job is None else job.as_dict(),
             "chunk": CHUNK,
             "all_settled": TP.all_settled(tape),
+            "from_list": TF.from_list_view(tape),
             "list_seen": TP.list_digest(tape),
             "prepare_needed": wanted_ready(tape),
             "place_refusal": TP.place_refusal(tape),
@@ -575,6 +576,17 @@ def add(app: App, service: Service) -> None:
     def from_list(r: H.Request, tape: TP.Tape) -> H.Response:
         """No release: filed from the list's own values, the ADR-049 route."""
         return kept(TP.settle(tape, choosable(tape, r).number, None))
+
+    @app.route("POST", "/api/tapes/([^/]+)/from-list")
+    @alongside
+    def all_from_list(r: H.Request, tape: TP.Tape) -> H.Response:
+        """Every song with no match at all, in one save. `numbers` is what the page
+        counted for the person, so nothing is settled that they were not told about."""
+        not_archived(tape)
+        asked = r.json().get("numbers")
+        if not isinstance(asked, list):
+            raise H.HttpError(400, "numbers must be a list of songs")
+        return kept(TF.all_from_list(tape, set(asked)))
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/use-copy")
     @alongside

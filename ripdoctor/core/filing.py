@@ -11,6 +11,7 @@ from typing import Any
 from ripdoctor.core.match import (
     ELSEWHERE,
     MATCHED,
+    NONE,
     OWNED,
     PERSON,
     REVIEW,
@@ -40,6 +41,7 @@ from ripdoctor.core.tape import (
     cut_refusal,
     cut_status,
     label,
+    settle,
 )
 from ripdoctor.core.tape import (
     FILED as FILED,
@@ -754,6 +756,39 @@ def choice_refusal(song: Song) -> str:
         f"{label(song)} is already in the library, so its release stays as it is - to "
         "file another edition, remove that copy with beets and load the list again"
     )
+
+
+def no_match_at_all(tape: Tape) -> tuple[Song, ...]:
+    """Songs the catalogue found nothing for and nobody has answered. A song with a
+    choice to make between options is still somebody's to make, and one whose release
+    may not change is left out as a row would refuse it."""
+    return tuple(
+        s
+        for s in tape.songs
+        if s.proposal
+        and s.proposal.status == NONE
+        and not s.settled_by
+        and not s.skip
+        and not choice_refusal(s)
+    )
+
+
+def from_list_view(tape: Tape) -> dict[str, Any]:
+    """Which of those can go from the list, and how many cannot for having no album to
+    file under, which is said at File and is better said here."""
+    found = no_match_at_all(tape)
+    return {
+        "numbers": [s.number for s in found if s.album],
+        "no_album": sum(not s.album for s in found),
+    }
+
+
+def all_from_list(tape: Tape, numbers: Collection[int]) -> Tape:
+    """The ones a page asked about that are still as it saw them."""
+    for number in from_list_view(tape)["numbers"]:
+        if number in numbers:
+            tape = settle(tape, number, None)
+    return tape
 
 
 def status(song: Song) -> str:
