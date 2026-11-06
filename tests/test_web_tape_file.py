@@ -87,6 +87,7 @@ class Beet:
         self.gained: set[str] = set()
         self.gain_fails = False
         self.ls_fails = False
+        self.album_path = "$albumartist/$album/$track $title"
 
     def __getattr__(self, name: str) -> object:
         return getattr(self.inner, name)
@@ -131,6 +132,11 @@ class Beet:
             return answer
         if "version" in args:
             return Result(args, 0, f"plugins: {self.loaded}\n".encode(), b"")
+        if "config" in args and "-d" in args:
+            said = (
+                f"directory: {self.library}\npaths:\n    default: {self.album_path}\n"
+            )
+            return Result(args, 0, said.encode(), b"")
         if "$artpath" in args:
             return Result(args, 0, f"{self.art or 'None'}\n".encode(), b"")
         if "$album_id" in args:

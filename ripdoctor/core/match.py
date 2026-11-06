@@ -171,7 +171,9 @@ class Copy:
 @dataclass(frozen=True, slots=True)
 class Proposal:
     """`choice` is None when the list's own album stands. `held` is what the library
-    has of the albums in question and `copy` its copy of this song, as of the lookup."""
+    has of the albums in question and `copy` its copy of this song, as of the lookup.
+    `apart` is whether its paths give each album row a folder of its own, None if not
+    known."""
 
     status: str
     reason: str = ""
@@ -181,6 +183,7 @@ class Proposal:
     held: tuple[Held, ...] = ()
     copy: Copy | None = None
     library_note: str = ""
+    apart: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -200,6 +203,7 @@ class Proposal:
             ),
             copy=Copy(**data["copy"]) if data.get("copy") else None,
             library_note=data.get("library_note", ""),
+            apart=data.get("apart"),
         )
 
 

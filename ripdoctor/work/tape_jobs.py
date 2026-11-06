@@ -115,6 +115,16 @@ class Asking:
     library: str
     beets: Beets | None
     known: dict[str, tuple[F.Row, ...]] = field(default_factory=dict)
+    apart: list[bool | None] = field(default_factory=list)
+
+    def folders(self, beets: Beets) -> bool | None:
+        """Once per job. Not knowing changes only the words a choice is put in."""
+        if not self.apart:
+            try:
+                self.apart.append(beets.folders_apart(self.runner))
+            except Exception:  # the note says what holds either way
+                self.apart.append(None)
+        return self.apart[0]
 
     def by_artist(self, beets: Beets, tape_id: str, artist: str) -> tuple[F.Row, ...]:
         """Once per artist in a job, however many songs are theirs."""
@@ -159,7 +169,9 @@ def _lookup_one(
             f"the library could not be read, so this was not checked against it: {e}"
         )
         return replace(asking.catalogue(wanted), library_note=unread), ""
-    made = asking.catalogue(wanted, F.held_albums(by_name))
+    made = replace(
+        asking.catalogue(wanted, F.held_albums(by_name)), apart=asking.folders(beets)
+    )
     taken = F.claimed(tape, song)
     try:
         return F.at_lookup(

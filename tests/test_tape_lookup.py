@@ -673,6 +673,73 @@ def test_a_note_says_track_clash_only_when_the_library_has_that_number(
     assert "next to your other track 1" in add["said"]
 
 
+def test_a_note_promised_the_album_s_folder_where_paths_give_it_a_folder_of_its_own(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record", [("A Song", 200)]), "rec")
+    ]
+    owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1", track="1")
+    beet_of(service).album_path = "$albumartist/$album%aunique{}/$track $title"
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "a folder of its own, apart from your A Record" in add["said"]
+    assert "next to" not in add["said"] and "your A Record folder" not in add["said"]
+
+
+def test_a_note_says_only_what_is_true_either_way_when_paths_cannot_be_read(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record", [("A Song", 200)]), "rec")
+    ]
+    owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1", track="1")
+    beet_of(service).album_path = ""
+    original = beet_of(service).run
+
+    def no_config(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if "config" in argv:
+            raise OSError("no such thing")
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    beet_of(service).run = no_config  # type: ignore[method-assign]
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "or in a folder beside it" in add["said"]
+    assert "next to" not in add["said"]
+
+
+def test_a_note_about_another_album_artist_does_not_promise_the_same_folder(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record", [("A Song", 200)]), "rec")
+    ]
+    owned = owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1")
+    next(r for r in beet_of(service).rows if r["path"] == str(owned)).update(
+        albumartist="Other People"
+    )
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "a folder of its own" in add["said"]
+
+
+def test_the_paths_are_read_once_in_a_lookup_however_many_songs_it_asks_about(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("A Song", 200), ("B Song", 200)])
+    ]
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"), row("B Song"))
+    looked_up(app, service, tape)
+    asked = [c for c in beet_of(service).calls if "config" in c and "-d" in c]
+    assert len(asked) == 1
+
+
 def test_the_note_stays_after_the_single_is_chosen_with_the_single_marked(
     service: Service, catalogue: Catalogue
 ) -> None:

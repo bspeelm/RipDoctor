@@ -972,3 +972,21 @@ def test_a_dollar_or_percent_in_a_cover_s_path_was_read_as_a_template(
     runner = FakeRunner()
     _beets().set_art(runner, "7", art)
     assert runner.calls[-1][-1] == f"artpath={sent}"
+
+
+@pytest.mark.parametrize(
+    ("said", "apart"),
+    [
+        ("paths:\n    default: $albumartist/$album%aunique{}/$track\n", True),
+        (
+            "paths:\n    default: $albumartist/$album/$track\n    comp: %aunique\n",
+            False,
+        ),
+        ("directory: /x\n", None),
+    ],
+)
+def test_whether_album_rows_get_folders_of_their_own_is_read_from_the_default_path(
+    said: str, apart: bool | None
+) -> None:
+    runner = FakeRunner().expect("config", stdout=said.encode())
+    assert _beets().folders_apart(runner) is apart

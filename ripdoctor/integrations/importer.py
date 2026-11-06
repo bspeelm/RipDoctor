@@ -346,6 +346,20 @@ class Beets:
                 return os.path.expanduser(value.strip())
         return ""
 
+    def folders_apart(self, runner: Runner) -> bool | None:
+        """Whether beets' album path gives each album row its own folder, which is what
+        `%aunique` does, with the defaults counted. None if it would not say."""
+        result = runner.run(self._argv(["config", "-d"]), timeout=60)
+        if not result.ok:
+            return None
+        inside = False
+        for line in _plain(result.text).splitlines():
+            if line and not line[0].isspace():
+                inside = line.startswith("paths:")
+            elif inside and line.strip().startswith("default:"):
+                return "%aunique" in line
+        return None
+
     def _argv(self, args: list[str], config: str = "") -> list[str]:
         head = ["beet"]
         chosen = config or self.config

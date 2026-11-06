@@ -406,6 +406,25 @@ def _beside_an_album(song: Song, choice: Choice) -> tuple[Held, Choice] | None:
     return None
 
 
+def _where_it_goes(made: Proposal, held: Held, album: Choice) -> str:
+    """Only paths with no `%aunique` and the same album artist make it the same folder,
+    and with no answer to that this says only what is true either way."""
+    place = f"track {album.number}"
+    keeps = f"Your {held.tracks} songs don't change."
+    if made.apart is None:
+        return (
+            f"goes in with your {held.album} or in a folder beside it, depending on "
+            f"your beets paths, as {place}. {keeps}"
+        )
+    if made.apart or fold(held.album_artist) != fold(album.album_artist):
+        return (
+            f"goes in a folder of its own, apart from your {held.album}, as {place}. "
+            f"{keeps}"
+        )
+    beside = f", next to your other {place}" if album.number in held.numbers else ""
+    return f"goes in your {held.album} folder as {place}{beside}. {keeps}"
+
+
 def edition_note(song: Song) -> dict[str, Any] | None:
     """The choice a release beside an album already held puts to a person, in what each
     answer does to their folders."""
@@ -425,15 +444,10 @@ def edition_note(song: Song) -> dict[str, Any] | None:
         None,
     )
     version = f"{album.tracks}-track version" if album.tracks else "other version"
-    place = f"track {album.number}"
-    beside = f", next to your other {place}" if album.number in held.numbers else ""
     choices = [
         {
             "label": f"Add to {held.album}",
-            "said": (
-                f"goes in your {held.album} folder as {place}{beside}. "
-                f"Your {held.tracks} songs don't change."
-            ),
+            "said": _where_it_goes(song.proposal, held, album),
             "release": album.release,
             "recording": album.recording,
             "current": choice.release == album.release,
