@@ -1223,3 +1223,39 @@ def test_a_truncated_side_repaired_on_the_way_is_still_the_same_capture(
     assert not post(build(service), "/api/archive/album", service).json()["error"]
     held = F.read_plan(service.layout.plan_file("album")).sides[0]
     assert held.audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_a_person_can_ask_to_start_over_on_the_same_audio(tmp_path: Path) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service, {"start_over": True})
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert [x["number"] for x in body["result"]["replaced"]] == [1]
+    assert body["result"]["released"] == []
+    again = track_in(service, 1)
+    assert again.settled == "" and (again.start, again.end) == (plain.start, plain.end)
+
+
+def test_without_being_asked_nothing_starts_over(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service, {"start_over": False})
+    assert body["result"]["kept"] == 1 and body["result"]["replaced"] == []
+
+
+def test_starting_over_gets_past_a_mark_the_new_release_has_no_place_for(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = plan.sides[0]
+    last = side.tracks[-1]
+    extra = replace(last, number=9, start=last.end, end=last.end + 0.5, settled="hand")
+    plan = replace(
+        plan, sides=(replace(side, tracks=(*side.tracks, extra)), *plan.sides[1:])
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    body = a_second_pass(service, {"start_over": True})
+    assert not body["error"], body["error"]
+    assert 9 in [x["number"] for x in body["result"]["replaced"]]

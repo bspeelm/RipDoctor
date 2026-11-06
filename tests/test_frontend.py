@@ -1519,3 +1519,11 @@ def test_a_first_pass_saves_first_so_it_cannot_fit_over_an_unsaved_boundary() ->
     js = (STATIC / "app.js").read_text()
     run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert run.index("if (S.dirty && !(await save())) return;") < run.index("runJob(")
+
+
+def test_starting_over_is_offered_unticked_and_names_how_many() -> None:
+    js = (STATIC / "app.js").read_text()
+    asked = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-over").checked = false' in asked
+    assert "also replace the boundaries I set, on ${counted(marks" in asked
+    assert 'start_over: $("#fp-over").checked' in js

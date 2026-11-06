@@ -114,6 +114,7 @@ def add(app: App, service: Service) -> None:
         if not mbid:
             raise H.HttpError(400, "a release is needed; search first")
         force = bool(r.json().get("force", False))
+        start_over = bool(r.json().get("start_over", False))
         letters = layout.sides_on_disk(slug)
         if not letters:
             raise H.HttpError(404, f"no side files for {slug}")
@@ -146,9 +147,18 @@ def add(app: App, service: Service) -> None:
             stamps = C.stamps_of(layout, slug)
             saved = _saved_plan(layout, slug)
             released: tuple[Released, ...] = ()
+            replaced: list[Released] = []
             if saved is not None:
                 held, released = holding_only_current(saved, stamps)
-                spec = F.keeping_settled(spec, held)
+                if start_over:
+                    replaced = [
+                        Released(s.file, t, "you asked")
+                        for s in held.sides
+                        for t in s.tracks
+                        if t.settled
+                    ]
+                else:
+                    spec = F.keeping_settled(spec, held)
             plan, working = fit_plan(
                 spec, lanes, above=service.thresholds.gap_above, force=force
             )
@@ -162,6 +172,7 @@ def add(app: App, service: Service) -> None:
             F.save(layout, slug, spec, plan)
             return {
                 "released": [_released(x) for x in released],
+                "replaced": [_released(x) for x in replaced],
                 "album": plan.album,
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),

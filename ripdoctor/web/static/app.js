@@ -1368,10 +1368,14 @@ function guessFromSlug(slug) {
 let fpReleases = [];
 
 function openFirstPass() {
-  const existing = Object.values(S.bySide).flat().length;
-  if (existing && !confirm(
-      `This fits all ${S.meta.sides.length} sides again — ${existing} tracks. `
-      + `Boundaries you set or checked stay where they are. Continue?`)) return;
+  const held = Object.values(S.bySide).flat();
+  $("#fp-again").hidden = !held.length;
+  $("#fp-again").textContent = `This fits all ${S.meta.sides.length} sides again, ${counted(held.length, "track", "tracks")}. `
+    + "Boundaries you set or checked stay where they are.";
+  const marks = held.filter((t) => t.settled).length;
+  $("#fp-over-row").hidden = !marks;
+  $("#fp-over").checked = false;
+  $("#fp-over-what").textContent = `also replace the boundaries I set, on ${counted(marks, "track", "tracks")}`;
   const g = guessFromSlug(S.slug);
   $("#fp-artist").value = S.meta.artist || g.artist;
   $("#fp-album").value = S.meta.album || g.album;
@@ -1435,6 +1439,12 @@ function notHeld(released = []) {
   return `Fitted again, not kept where you had them:\n${lines.join("\n")}\n\n`;
 }
 
+function startedOver(replaced = []) {
+  if (!replaced.length) return "";
+  const lines = replaced.map((x) => `  ${x.number} \u201c${x.title}\u201d on side ${x.side}`);
+  return `Fitted again, as you asked, over what you had set:\n${lines.join("\n")}\n\n`;
+}
+
 async function fpRun(rel) {
   $("#fp-err").textContent = "";
   // The server holds what is saved, so a boundary moved a moment ago would be fitted over.
@@ -1443,12 +1453,12 @@ async function fpRun(rel) {
   $("#fp-results").innerHTML = "<p class=\"dim\">fitting…</p>";
   try {
     const r = await runJob(S.slug, `/api/firstpass/${S.slug}`,
-                           { mbid: rel.id, force: $("#fp-force").checked },
+                           { mbid: rel.id, force: $("#fp-force").checked, start_over: $("#fp-over").checked },
                            "fitting");
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
     const kept = r.kept ? `${counted(r.kept, "track", "tracks")} you set or checked left where ${r.kept === 1 ? "it was" : "they were"}` : "";
-    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + notHeld(r.released) + (kept ? `${kept}.\n\n` : "") + r.report;
+    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + notHeld(r.released) + startedOver(r.replaced) + (kept ? `${kept}.\n\n` : "") + r.report;
     $("#fp-done").hidden = false;
     $("#fp-cancel").hidden = true;
     S.sideData = {};

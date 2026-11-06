@@ -2682,6 +2682,17 @@ It lets go of marks on a side captured since, on a side no longer there, and on 
 that never said which capture it was on, since those can only be branch-era documents and
 holding one is the hazard. Its report names each track and the reason.
 
+**The way out of a mark.** On a capture that is gone, nothing has to be done: a first
+pass lets it go and says so, and Align carries it when the old capture is in the archive.
+On the same audio a person can move the track, remove it and save, or start over: First
+pass offers an unticked box, `also replace the boundaries I set`, with the number of
+tracks, and only there does a fit go over what they set. It is the one way past a mark,
+since a person who wants their own judgement gone is the only one who gets to say.
+
+**A first pass saves first.** The server holds what the saved plan marks, so a boundary
+moved a moment ago and not saved would be fitted over and lost when the page reloaded. It
+saves for itself, as Cut does.
+
 **Before anything is run,** a replaced side's rows read `From an earlier capture`, in
 amber, and the First pass step says so. This is the page refusing to call an old time
 `Set by you` or `Fitted to gap`. It does not stop Cut: that is a separate question, and

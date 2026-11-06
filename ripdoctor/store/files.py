@@ -355,7 +355,8 @@ def keeping_settled(spec: Spec, plan: Plan) -> Spec:
         )
         raise ValueError(
             f"this release has no place for what you settled: track {names}. "
-            "Choose another release, or remove that track and save first."
+            "Choose another release, remove that track and save first, or start "
+            "over with the box that replaces the boundaries you set."
         )
     return replace(spec, sides=tuple(sides))
 
