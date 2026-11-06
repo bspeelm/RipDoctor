@@ -116,6 +116,15 @@ mixtape in a single file. Its steps are the same as a record's, and only tagging
 and filing work per song. The [Tapes wiki page](https://github.com/bspeelm/RipDoctor/wiki/Tapes)
 walks through it. The name in brackets after each claim is the test that proves it.
 
+Its boundaries are checked on the same waveform editor a record's are
+(`test_a_tape_s_waveform_is_the_rip_s_editor_and_player_and_not_a_copy_of_them`).
+A boundary you drag is yours and nothing moves it afterwards
+(`test_a_move_by_hand_is_the_person_s_and_nothing_afterwards_moves_it`), and one that
+would pass the song beside it is refused and goes back
+(`test_a_move_by_hand_past_a_neighbour_or_the_ends_is_refused`). The cut waits until
+every doubt is moved, accepted or skipped
+(`test_accepting_settles_a_doubt_and_the_cut_waits_until_it_is_settled`).
+
 The list is a CSV with one playlist per file
 (`test_two_playlists_in_one_file_are_told_to_split`), or is built by hand on the
 tape's page, and both produce the same document

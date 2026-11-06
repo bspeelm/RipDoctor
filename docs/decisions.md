@@ -2136,32 +2136,49 @@ detect wrong order on its own: the album flow's fit passed a list out of order
 without refusal, with a cut inside the music. A mismatch is shown for the person
 to resolve and flags every song on the tape. Nothing is ever reordered silently.
 
-### The ear check
+### Checking by ear
 
 **Flagged** means a song's own doubt verdict, or any song on a tape whose mismatch
 stands, since a length that happens to fit proves nothing on a list that disagrees
 with its audio. The document keeps that flag against each song, and only that song's
-own hearing, setting or skip answers it, because setting its neighbours can end the
+own acceptance, setting or skip answers it, because setting its neighbours can end the
 mismatch and says nothing about a song nobody heard. A new list clears it. That can
 ask for every song to be judged, which is heavy on a long list and is accepted: the
 gate is the point of the flow.
 
-**Clips** are built for flagged boundaries unless another is named, and are named by
-the instant, so a boundary that moves can never play an old clip. A clip stops 0.25 s
-short of the end of the audio, so a boundary nearer the end than that and the tick's
-own length gets no tick, and the page says so: the instant is the question, and is
-never moved to fit. The preview is built only when asked, as a job. The album flow's
-timeline is built around a record's sides and plan, so a tape has one row per song
-and does not use its envelope here.
+**The waveform is a rip's editor,** the same `Editor` and `Player` on a canvas of the
+tape's page, with the tape's own envelope and its uncut FLAC served directly. A
+person hears and moves a boundary the way they do on a record, and nothing is built
+first. The envelope kept from processing is what is drawn, so opening a tape measures
+nothing. At the three bytes a 50 ms window takes, nearly seven hours is about 1.5 MB.
+The window drawn comes from the real length, the grid boundaries were placed on.
+Against a 6.7-hour synthetic tape of 100 songs in Chromium on the machine serving it,
+a render took about 1.5 ms of script and never more than 7, playback held 60 frames a
+second, and a seek played on within about 150 ms, or 300 ms with 40 ms of added latency,
+though the file has no seek table.
 
-**A person's judgement.** A boundary a person set is never moved. Setting a song's
-edges lays every song not set by ear around them again, the same way `place` always
-has, so a found neighbour may move. Ear-set songs must stay in list order against
-each other, adjacent or not. Heard keeps the origin and the measured verdict and
-answers the doubt in its own flag. It is about particular edges, so a later fit that
-moves them takes it away, and a new list clears it along with the boundaries. Skip
-survives a new list that keeps the song, is excused from both the ear and the release,
-and is named wherever the tape is reported.
+**What a long timeline asks of it.** At 25 s to a pixel, nearly every pixel is within
+reach of a marker, and a boundary set by a slip of the hand is never moved again. So
+past 2 s to a pixel no marker can be grabbed, and a press has to travel 3 pixels
+before it is a move. Neither applies to a record's editor, which stays as it was.
+
+**A person's judgement.** A boundary a person set is never moved. Moving either edge
+sets the song's two edges as theirs, and lays every song not set by ear around them
+again, the same way `place` always has, so a found neighbour may move, and the page says which.
+Ear-set songs must stay in list order against each other, adjacent or not. Accepting,
+stored as heard, keeps the origin and the measured verdict and answers the doubt in its
+own flag. It is about particular edges, so a later fit that moves them takes it away,
+and a new list clears it along with the boundaries. Skip survives a new list that keeps
+the song, is excused from both the ear and the release, and is named wherever the tape
+is reported.
+
+**What the page refuses.** A move from the page may not pass the edge of the song
+beside it, whoever set that edge. That never strands a boundary: the edge moving away
+from its partner can go first, and a found partner follows. It may not move a song the
+library holds or may hold, whether that is the song dragged or one laid around it. The
+marker goes back and the reason is shown. The route takes a move on a filed song from
+anything that does not ask for this guard, and the rule below on a filed song then
+holds.
 
 ### Matching
 
@@ -2339,7 +2356,7 @@ proved.
 The uncut file goes to `archive/_tape-<id>/`, read back against the source's decoded
 length before it takes its name, and an earlier copy stays in `_superseded`. Clearing
 takes the uncut file and the cuts of songs not skipped, and any other cut moves to
-`superseded`. Clips, the preview and the measurements stay.
+`superseded`. The measurements stay, so its waveform can still be looked at.
 
 **An archived tape stays as it is.** It takes no new audio, list, release, match or
 judgement, and the view offers none. Its playlist keeps being rebuilt.
