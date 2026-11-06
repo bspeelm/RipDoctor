@@ -983,3 +983,34 @@ def test_a_job_s_error_stayed_after_what_it_said_stopped_being_true() -> None:
     assert "t.all_cut" in stands and "t.all_filed" in stands
     shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tpErrIsJobs && !jobErrorStands(t)" in shown
+
+
+def test_a_title_was_cut_off_beside_its_artist_while_the_album_column_had_room() -> (
+    None
+):
+    css = (STATIC / "style.css").read_text()
+    who = re.search(r"\.tp-who\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "flex-direction:column" in who
+    span = re.search(r"#tp-table \.c-span\{width:(\d+)rem\}", css)
+    assert span and int(span.group(1)) >= 9, "h:mm:ss both ways needs this much"
+
+
+def test_an_opened_row_was_clipped_under_the_table_s_head_and_past_its_foot() -> None:
+    js = (STATIC / "app.js").read_text()
+    picked = re.search(r"function tapeSelect\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "rowIntoView(num);" in picked and "scrollIntoView" not in picked
+    view = re.search(r"function rowIntoView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#tp-table thead").offsetHeight' in view
+    assert ".tp-open" in view
+
+
+def test_a_long_title_in_the_readout_cost_the_table_a_line() -> None:
+    css = (STATIC / "style.css").read_text()
+    assert "#tp-readout > #tp-ro-song{flex:0 1 auto;min-width:0" in css
+
+
+def test_what_a_person_saw_of_their_empty_error_line_took_table_height() -> None:
+    css = (STATIC / "style.css").read_text()
+    msg = re.search(r"#tp-msg\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "min-height" not in msg
+    assert "#tp-msg p:empty{display:none}" in css

@@ -2545,9 +2545,24 @@ function tapeSelect(num, edge, fit, picked = false) {
   tpOpen = num;
   waveSay("");
   if (opening) showSongs(tape);
-  // The open part first: the row itself is what must end up in view if both cannot.
-  document.querySelector(`#tp-rows tr[data-song="${num}"] + .tp-open`)?.scrollIntoView({ block: "nearest" });
-  document.querySelector(`#tp-rows tr[data-song="${num}"]`)?.scrollIntoView({ block: "nearest" });
+  rowIntoView(num);
+}
+
+// The table's own head stays over its top, which a browser's scrolling into view does not
+// allow for. All of the row and what opened under it if that fits, and its top if not. On
+// a phone the table does not scroll by itself, and the page's way is the right one.
+function rowIntoView(num) {
+  const row = document.querySelector(`#tp-rows tr[data-song="${num}"]`);
+  if (!row) return;
+  const wrap = $("#tp-table-wrap");
+  if (getComputedStyle(wrap).overflowY === "visible") { row.scrollIntoView({ block: "nearest" }); return; }
+  const under = row.nextElementSibling?.matches(".tp-open") ? row.nextElementSibling : row;
+  const head = $("#tp-table thead").offsetHeight;
+  const box = wrap.getBoundingClientRect();
+  const top = row.getBoundingClientRect().top - box.top - head;
+  const bottom = under.getBoundingClientRect().bottom - box.bottom;
+  if (top < 0) wrap.scrollTop += top;
+  else if (bottom > 0) wrap.scrollTop += Math.min(top, bottom + 1);
 }
 
 // Whole stays whole, so stepping along a long tape does not lose the view of it.
