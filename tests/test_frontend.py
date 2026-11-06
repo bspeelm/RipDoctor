@@ -205,7 +205,7 @@ def test_the_warnings_still_say_what_they_exist_to_say() -> None:
     assert "Stop &amp; encode" in page
 
 
-def test_the_meter_values_are_not_a_drawing_s(tmp_path: Path) -> None:
+def test_the_meter_values_are_not_a_drawing_s() -> None:
     """Read from the source so that no-node runs pin them too; test_page_logic runs
     the module itself."""
     ui = (STATIC / "ripui.js").read_text()
