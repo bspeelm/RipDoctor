@@ -1501,8 +1501,8 @@ function showAllAsk(ready, choosing, noAlbum) {
   if (!tpAllAsk) { box.replaceChildren(); return; }
   const said = [
     `${counted(ready.length, "song has", "songs have")} no match at all, so each is tagged from your list, with no release, cover or date.`,
-    choosing > 0 ? `${counted(choosing, "song", "songs")} with something to choose stay as they are.` : "",
-    noAlbum ? `${counted(noAlbum, "song", "songs")} with no album on your list stay too.` : "",
+    choosing > 0 ? (choosing === 1 ? "1 song with something to choose stays as it is." : `${choosing} songs with something to choose stay as they are.`) : "",
+    noAlbum ? `${counted(noAlbum, "song", "songs")} with no album on your list ${noAlbum === 1 ? "stays" : "stay"} too.` : "",
   ].filter(Boolean).join(" ");
   box.replaceChildren(askView(said, "File them", () => {
     tpAllAsk = false;
@@ -4190,6 +4190,7 @@ function wire() {
   $("#tp-rail-bar").onclick = () => {
     const open = $("#tp-rail").classList.toggle("open");
     $("#tp-rail-bar").setAttribute("aria-expanded", open);
+    if (open) $("#tp-rail").scrollIntoView({ block: "start" });
   };
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;

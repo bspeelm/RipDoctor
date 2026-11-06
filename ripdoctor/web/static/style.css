@@ -547,6 +547,7 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   #tp-rail:not(.open){position:sticky;top:0;z-index:4;background:var(--bg)}
   #tp-main-body{padding:.75rem 1rem 1rem;overflow:visible}
   #tp-readout{flex-wrap:wrap;white-space:normal}
+  #tp-readout > *,#tp-readout > #tp-ro-song{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
   #tp-tools .vol{flex:0 0 5rem}
   .tp-group button{min-height:40px;min-width:40px;justify-content:center;padding:.2rem .5rem}
   .tp-group kbd{display:none}
