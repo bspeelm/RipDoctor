@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from ripdoctor.audio.runner import Runner
 from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
-from ripdoctor.integrations.musicbrainz import Fetcher, HttpFetcher
+from ripdoctor.integrations.musicbrainz import Fetcher, HttpFetcher, Pace
 from ripdoctor.store.files import Layout
 from ripdoctor.web.auth import Credentials, Sessions, Throttle
 from ripdoctor.work.capture import Recorder
@@ -33,6 +33,7 @@ class Service:
     # The catalogue goes through a seam for the same reason the tools do:
     # everything above it is then testable with no network at all.
     fetcher: Fetcher = field(default_factory=HttpFetcher)
+    pace: Pace = field(default_factory=Pace)
     throttle: Throttle = field(default_factory=Throttle)
     now: Callable[[], float] = time.time
     # Where this project keeps what it generates. The beets override lives

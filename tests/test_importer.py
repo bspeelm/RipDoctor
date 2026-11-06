@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.core import filing as F
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack
 from ripdoctor.integrations import importer as I
 
@@ -269,6 +270,15 @@ def test_the_prompt_is_turned_back_on(tmp_path: Path) -> None:
     written = (tmp_path / I.OVERRIDE_FILE).read_text()
     assert "quiet: no" in written and "timid: no" in written
     assert beets.config.endswith(I.OVERRIDE_FILE)
+
+
+def test_the_duplicate_question_is_always_asked_whatever_beets_is_configured_with(
+    tmp_path: Path,
+) -> None:
+    """`duplicate_action: remove` in a person's config answers it without reading
+    stdin, and deletes the album that was filed."""
+    I.Beets.with_override(tmp_path)
+    assert "duplicate_action: ask" in (tmp_path / I.OVERRIDE_FILE).read_text()
 
 
 def test_the_cut_tracks_are_moved_rather_than_copied(tmp_path: Path) -> None:
@@ -744,3 +754,254 @@ def test_a_track_left_behind_is_a_failure_rather_than_a_silence(
         I.Beets().take(
             fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",)
         )
+
+
+# ---------------------------------------------------------------- a tape's album
+
+
+def _beets() -> I.Beets:
+    return I.Beets(config="/state/override.yaml")
+
+
+def test_a_tape_s_pinned_run_sends_this_argv_and_these_answers() -> None:
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album", "rel-1", how=I.JOIN)
+    assert runner.calls == [
+        (
+            "beet",
+            "--config",
+            "/state/override.yaml",
+            "import",
+            "--search-id",
+            "rel-1",
+            "/work/album",
+        )
+    ]
+    assert runner.fed == [b"A\nM\nA\n"]
+
+
+def test_a_from_list_run_keeps_both_and_never_merges_what_is_filed() -> None:
+    """Sent the pinned answers, its first question took `A` as no answer and `M` as the
+    merge, which rematched an album already filed."""
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album")
+    assert runner.calls[0][3:] == ("import", "-A", "/work/album")
+    assert runner.fed == [b"K\n"]
+
+
+def test_the_answers_for_a_tape_can_never_say_replace() -> None:
+    assert b"R" not in I.FROM_LIST_ANSWERS
+    assert not [a for a in I.PINNED_ANSWERS.values() if b"R" in a]
+
+
+@pytest.mark.parametrize(
+    ("how", "fed"),
+    [
+        (I.NEW_ALBUM, b"A\n"),
+        (I.JOIN, b"A\nM\nA\n"),
+        (I.BESIDE, b"A\nK\n"),
+    ],
+)
+def test_a_pinned_run_answers_by_what_the_library_holds(how: str, fed: bytes) -> None:
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album", "rel-1", how=how)
+    assert runner.fed == [fed]
+
+
+def test_a_pinned_run_told_nothing_merges_nothing() -> None:
+    runner = FakeRunner()
+    _beets().file_tape_run(runner, "/work/album", "rel-1")
+    assert runner.fed == [b"A\nK\n"]
+
+
+def test_the_album_rows_are_read_by_album_alone_with_their_release() -> None:
+    runner = FakeRunner()
+    runner.expect(
+        "ls",
+        stdout="\x1f".join(
+            ("A Song", "A Band", "A Record", "3:20", "/lib/a.flac", "rec", "1", "rel-9")
+        ).encode(),
+    )
+    rows = I.Beets().album_rows(runner, "/lib", "A Record")
+    assert [r.release for r in rows] == ["rel-9"]
+    assert runner.calls[0][-1] == F.term("album", "A Record")
+    assert not [a for a in runner.calls[0] if a.startswith("albumartist")]
+
+
+def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) -> None:
+    assert I.answers("merge", matching=True) == b"A\nM\n"
+    assert I.answers("replace", matching=True) == b"A\nR\n"
+    assert I.answers("replace", matching=False) == b"R\n"
+    runner = FakeRunner()
+    _beets().apply(runner, a_plan(), str(tmp_path), str(tmp_path), mbid="rel-1")
+    assert runner.calls[0] == (
+        "beet",
+        "--config",
+        "/state/override.yaml",
+        "import",
+        "--search-id",
+        "rel-1",
+        str(tmp_path),
+    )
+    assert runner.fed[0] == b"A\nR\n"
+
+
+def test_a_relative_path_crash_is_reported_with_its_fix_not_as_a_traceback() -> None:
+    took = I.TapeRun(
+        1,
+        "Traceback (most recent call last):\n"
+        '  File "beets/library.py", line 1, in move\n'
+        "FileNotFoundError: [Errno 2] No such file: 'Music/a.flac'\n",
+    )
+    said = took.why()
+    assert "relative path" in said
+    assert "Back up the library database" in said
+    assert "Traceback" not in said
+
+
+def test_a_starved_prompt_says_a_question_went_unanswered() -> None:
+    said = I.TapeRun(1, "error: stdin stream ended while input required\n").why()
+    assert said.startswith("beets asked a question this did not answer")
+
+
+def test_a_run_s_reason_is_its_last_line_with_something_on_it() -> None:
+    assert I.TapeRun(0, "Tagging:\n  Skipping.\n\n").why() == "Skipping."
+    assert I.TapeRun(3, "").why() == "beets exited 3, saying nothing"
+
+
+def test_library_rows_read_every_field_and_ask_whether_the_file_is_there(
+    tmp_path: Path,
+) -> None:
+    here = tmp_path / "here.flac"
+    here.write_bytes(b"x")
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", str(here), "rec-1", "04"))
+    gone = "\x1f".join(
+        ("Two", "A Band", "A Record", "", str(tmp_path / "gone.flac"), "", "")
+    )
+    runner = FakeRunner().expect("ls", stdout=f"{line}\n{gone}\n".encode())
+    rows = _beets().library_rows(runner, str(tmp_path), ["artist:A Band"])
+    assert rows[0] == F.Row(
+        "One",
+        "A Band",
+        "A Record",
+        200.0,
+        str(here),
+        True,
+        recording="rec-1",
+        track=4,
+    )
+    assert (rows[1].length, rows[1].present) == (None, False)
+    assert runner.calls[0][-1] == "artist:A Band"
+    assert runner.calls[0][3:5] == ("ls", "-f")
+
+
+@pytest.mark.parametrize("mark", ["\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\x1c"])
+def test_a_title_holding_a_line_separator_is_one_row_and_not_a_fragment(
+    tmp_path: Path, mark: str
+) -> None:
+    title = f"One{mark}Two"
+    line = "\x1f".join((title, "A Band", "A Record", "3:20", "a.flac", "", ""))
+    runner = FakeRunner().expect("ls", stdout=line.encode())
+    rows = _beets().library_rows(runner, str(tmp_path), ["artist:A Band"])
+    assert [r.title for r in rows] == [title]
+    runner = FakeRunner().expect("ls", stdout=f"{line}\x1frel".encode())
+    rows = _beets().held_rows(runner, str(tmp_path), ("artist:A Band",))
+    assert [(r.title, r.release) for r in rows] == [(title, "rel")]
+
+
+def test_a_path_ending_in_a_comma_is_never_sent_since_beets_would_read_everything() -> (
+    None
+):
+    runner = FakeRunner()
+    beets = _beets()
+    for ask in (
+        lambda: beets.forget_row(runner, "/lib", "/lib/odd,"),
+        lambda: beets.art_of(runner, "/lib", "/lib/odd,"),
+        lambda: beets.embed_art(runner, "/lib/odd,", "/lib/a.jpg"),
+        lambda: beets.replaygain(runner, "/lib/odd,"),
+    ):
+        with pytest.raises(I.ImportFailed, match="ends in ,"):
+            ask()
+    assert runner.calls == []
+
+
+def test_a_path_holding_a_comma_or_anything_else_is_sent_whole() -> None:
+    runner = FakeRunner()
+    path = "/lib/a, b $c 'd\" é.flac"
+    _beets().forget_row(runner, "/lib", path)
+    assert runner.calls[0][-1] == f"path:{path}"
+
+
+def test_a_relative_row_is_rooted_in_the_library(tmp_path: Path) -> None:
+    (tmp_path / "a.flac").write_bytes(b"x")
+    line = "\x1f".join(("One", "A Band", "A Record", "3:20", "a.flac", "", ""))
+    runner = FakeRunner().expect("ls", stdout=line.encode())
+    rows = _beets().library_rows(runner, str(tmp_path), [])
+    assert (rows[0].path, rows[0].present) == (str(tmp_path / "a.flac"), True)
+
+
+def test_a_library_that_could_not_be_asked_is_never_read_as_a_miss() -> None:
+    runner = FakeRunner().expect("ls", returncode=1, stderr=b"database is locked\n")
+    with pytest.raises(I.ImportFailed, match="database is locked"):
+        _beets().library_rows(runner, "/lib", ["mb_trackid:rec-1"])
+
+
+def test_owned_asks_by_recording_and_by_artist_or_only_by_artist_with_no_id() -> None:
+    runner = FakeRunner()
+    _beets().owned(runner, "/lib", "rec-1", "A Band")
+    assert [c[-1] for c in runner.calls] == [
+        "mb_trackid:rec-1",
+        F.term("artist", "A Band"),
+    ]
+    runner = FakeRunner()
+    _beets().owned(runner, "/lib", "", "A Band")
+    assert [c[-1] for c in runner.calls] == [F.term("artist", "A Band")]
+
+
+@pytest.mark.parametrize(
+    ("art", "sent"),
+    [
+        ("/lib/Ca$$h/$title/cov$album.jpg", "/lib/Ca$$$$h/$$title/cov$$album.jpg"),
+        ("/lib/50% Off/%upper{x}.jpg", "/lib/50$% Off/$%upper{x}.jpg"),
+        ("/lib/plain/cover.jpg", "/lib/plain/cover.jpg"),
+    ],
+)
+def test_a_dollar_or_percent_in_a_cover_s_path_was_read_as_a_template(
+    art: str, sent: str
+) -> None:
+    runner = FakeRunner()
+    _beets().set_art(runner, "7", art)
+    assert runner.calls[-1][-1] == f"artpath={sent}"
+
+
+@pytest.mark.parametrize(
+    ("said", "apart"),
+    [
+        ("paths:\n    default: $albumartist/$album%aunique{}/$track\n", True),
+        (
+            "paths:\n    default: $albumartist/$album/$track\n    comp: %aunique\n",
+            False,
+        ),
+        ("directory: /x\n", None),
+        ("paths:\n    default: $albumartist/$year - $album/$track\n", None),
+        ("paths:\n    default: $albumartist/$album/Disc $disc/$track\n", None),
+        ("paths:\n    default: %the{$albumartist}/$album/$track\n", None),
+        ("paths:\n    default: $album/$track\n", None),
+        (
+            "paths:\n    default: '$albumartist/$album/$track'\n"
+            "    albumtype:soundtrack: Soundtracks/$album/$track\n",
+            None,
+        ),
+        (
+            "paths:\n    default: '$albumartist/$album/$track $title'\n"
+            "    singleton: Non-Album/$artist/$title\n"
+            "    comp: Compilations/$album%aunique{}/$track $title\n",
+            False,
+        ),
+    ],
+)
+def test_whether_album_rows_get_folders_of_their_own_is_read_from_the_default_path(
+    said: str, apart: bool | None
+) -> None:
+    runner = FakeRunner().expect("config", stdout=said.encode())
+    assert _beets().folders_apart(runner) is apart

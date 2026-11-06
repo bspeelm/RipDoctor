@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,9 +30,38 @@ from typing import Any
 # table does not grow for the life of the process.
 KEEP = 30 * 60.0
 
+# Long enough for the longest import to finish and another to follow it. A wait this
+# long is a beets that has stopped, which is worth saying rather than waiting on.
+IMPORT_WAIT = 2 * 3600.0
+_IMPORTS = threading.Lock()
+
 
 class Busy(Exception):
     """Something is already running for this record."""
+
+
+@contextmanager
+def one_import(job: Job | None = None) -> Iterator[None]:
+    """One import into the library at a time, across tapes and records alike. What an
+    import is answered with rests on what the library held when it was read, so nothing
+    else may file between the two. This waits rather than refuses: the job is already
+    off the request thread, and its turn will come. What it was doing is said again once
+    it has that turn, since a wait that is over is no longer true."""
+    if not _IMPORTS.acquire(blocking=False):
+        was = (job.current, job.detail) if job else None
+        if job is not None:
+            job.step(job.current, "waiting for another import to finish")
+        if not _IMPORTS.acquire(timeout=IMPORT_WAIT):
+            raise ValueError(
+                f"another import has held the library for {IMPORT_WAIT / 60:.0f} "
+                "minutes, so nothing was imported - try again once it has finished"
+            )
+        if job is not None and was is not None:
+            job.step(*was)
+    try:
+        yield
+    finally:
+        _IMPORTS.release()
 
 
 @dataclass
@@ -50,6 +80,7 @@ class Job:
     ended: float | None = None
     done: bool = False
     skipped: list[str] = field(default_factory=list)
+    phase: str = ""  # which part of a job of several, where it has parts
 
     def step(self, current: str = "", detail: str = "") -> None:
         self.current = current
@@ -67,6 +98,7 @@ class Job:
             "current": self.current,
             "detail": self.detail,
             "skipped": list(self.skipped),
+            "phase": self.phase,
             "started": round(self.started, 3),
             "ended": None if self.ended is None else round(self.ended, 3),
         }
@@ -80,8 +112,8 @@ def _thread(work: Callable[[], None]) -> None:
 class Jobs:
     """The running and recently finished jobs, one per record.
 
-    A job that is not done is the claim on that record; there is no second
-    table of locks to fall out of step with this one.
+    A job that is not done holds its record. So does a `claim`, for the length of
+    one request, kept apart because nothing polls a request for its progress.
     """
 
     keep: float = KEEP
@@ -89,10 +121,38 @@ class Jobs:
     spawn: Callable[[Callable[[], None]], None] = _thread
     running: dict[str, Job] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    claims: dict[str, str] = field(default_factory=dict)
+
+    def _refuse_if_held(self, slug: str, beside: Collection[str] = ()) -> None:
+        current = self.running.get(slug)
+        if current and not current.done and current.op not in beside:
+            raise Busy(f"{current.op} is already running for {slug}")
+        if slug in self.claims:
+            raise Busy(f"{self.claims[slug]} is under way for {slug}")
+
+    @contextmanager
+    def claim(self, slug: str, op: str, beside: Collection[str] = ()) -> Iterator[None]:
+        """Hold the record while a request changes it, with no worker involved. `beside`
+        names jobs whose own saves keep their turn, which may run alongside it."""
+        with self.lock:
+            self._refuse_if_held(slug, beside)
+            self.claims[slug] = op
+        try:
+            yield
+        finally:
+            with self.lock:
+                del self.claims[slug]
 
     def status(self, slug: str) -> Job | None:
         with self.lock:
             return self.running.get(slug)
+
+    def forget(self, slug: str) -> None:
+        """A finished job whose outcome a person has since acted on."""
+        with self.lock:
+            job = self.running.get(slug)
+            if job and job.done:
+                del self.running[slug]
 
     def start(self, slug: str, op: str, work: Callable[[Job], Any]) -> Job:
         """Claim the record and run `work` on a worker thread.
@@ -102,15 +162,15 @@ class Jobs:
         """
         self.prune()
         with self.lock:
-            current = self.running.get(slug)
-            if current and not current.done:
-                raise Busy(f"{current.op} is already running for {slug}")
+            self._refuse_if_held(slug)
             job = Job(slug=slug, op=op, started=self.now())
             self.running[slug] = job
 
         def run() -> None:
             try:
                 job.result = work(job)
+            except ValueError as e:  # how a job refuses, written for the person
+                job.error = str(e)
             except Exception as e:  # carried into the job, not swallowed
                 job.error = f"{type(e).__name__}: {e}"
             finally:

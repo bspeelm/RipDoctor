@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from ripdoctor.audio.runner import Runner, ToolMissing
+from ripdoctor.core.filing import BESIDE, JOIN, NEW_ALBUM, Row, row_length, term
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
@@ -67,6 +69,41 @@ class Stale:
             "It will treat this import as a duplicate and stop part-way. Clear the "
             "stale rows first; that removes database rows only, never files."
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TapeRun:
+    """What one album run of a tape's songs said. Never proof of anything: only
+    the library's rows and the files left behind say what happened."""
+
+    returncode: int
+    output: str
+    root: str = ""
+
+    def why(self) -> str:
+        """The one thing to tell a person, in place of a traceback in a log."""
+        lines = [line.strip() for line in self.output.splitlines() if line.strip()]
+        said = lines[-1] if lines else f"beets exited {self.returncode}, saying nothing"
+        missing = _MISSING.search(self.output)
+        if missing and _relative_row(self.root, missing[2]):
+            return (
+                "beets crashed with FileNotFoundError, which merging into an album "
+                "does when a library row holds a relative path. Nothing was lost. "
+                "Back up the library database, rewrite those rows' paths as absolute "
+                f"ones, then file again. beets said: {said}"
+            )
+        if missing:
+            return (
+                f"beets crashed looking for {missing[2]}, which is not there - put "
+                "it back, or clear the row that names it with beet remove, which "
+                "leaves files alone, then file again"
+            )
+        no_release = _NO_RELEASE.search(self.output)
+        if no_release:
+            return f"{no_release[0]} - check the release chosen, then file again"
+        if _STARVED in self.output:
+            return f"beets asked a question this did not answer: {said}"
+        return said
 
 
 class Importer(Protocol):
@@ -168,6 +205,12 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # string: beets passes "\t" through as a literal backslash-t, every line then
 # fails to split, and the album reads as having no tracks at all.
 _SEP = "\x1f"
+_PATH_FIELD = re.compile(r"\$\{?(\w+)")
+_ROW = _SEP.join(
+    ("$title", "$artist", "$album", "$length", "$path", "$mb_trackid", "$track")
+)
+_HELD = _SEP.join((_ROW, "$mb_albumid"))
+_COPY = _SEP.join((_HELD, "$albumartist"))
 
 # What is typed at beets' matcher to accept the candidate it printed, and then
 # at the question it asks when the album is already in the library. One answer
@@ -180,6 +223,20 @@ DUPLICATES = {"replace": "R", "keep": "K", "skip": "S", "merge": "M"}
 # failure it causes looks like "the tracks are still in review", which is true
 # and is not the cause.
 _STARVED = "stdin stream ended"
+_MISSING = re.compile(r"FileNotFoundError:[^\n]*?: b?(['\"])([^\n]+)\1\s*$", re.M)
+_NO_RELEASE = re.compile(r"^No matching release found.*$", re.M)
+
+# What a tape's runs answer. Replace is not among these and never may be: it deletes
+# the filed audio. ADR-060.
+#
+# With no release there is no candidate to accept, so the first question is the
+# duplicate one, and merging would rematch what is already filed. Keeping both is what
+# the song's outcome says happened.
+FROM_LIST_ANSWERS = b"K\n"
+# Apply the release; merge; apply again, because merging matches afresh. A duplicate
+# question nobody expected meets end of input, which stops the run safely. Merging into
+# another edition rewrites every owned track, so that goes beside it. ADR-063.
+PINNED_ANSWERS = {NEW_ALBUM: b"A\n", JOIN: b"A\nM\nA\n", BESIDE: b"A\nK\n"}
 
 
 def answers(duplicates: str, *, matching: bool) -> bytes:
@@ -197,11 +254,12 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 
 # Layered on top of whatever beets is configured with. A single `-c` adds to the
 # user's own configuration rather than replacing it - two do not layer, the last
-# simply wins - so this changes as little as it can. Two settings: the prompt,
-# without which a preview has already moved the files, and the move, without
-# which every track is written twice and a finished import cannot be told from
-# a refused one. ADR-042.
-OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n"
+# simply wins - so this changes as little as it can. Three settings: the prompt,
+# without which a preview has already moved the files; the move, without which
+# every track is written twice and a finished import cannot be told from a refused
+# one; and the duplicate question, which a configured `remove` answers by deleting
+# the filed audio, before any answer sent here is read. ADR-042, ADR-063.
+OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n  duplicate_action: ask\n"
 
 # Only for the weak matches beets does ask about: it lists the candidates and
 # this declines them, which is the right outcome, because a look that had to
@@ -289,6 +347,27 @@ class Beets:
             if key.strip() == "directory":
                 return os.path.expanduser(value.strip())
         return ""
+
+    def folders_apart(self, runner: Runner) -> bool | None:
+        """Whether beets' album path gives each album row its own folder, which is what
+        `%aunique` does, with the defaults counted. None if it would not say, or if what
+        it says cannot be foretold from an album's names. `comp` is only for a release
+        by Various Artists, which the note's wording allows for, and `singleton` is for
+        no album; any other path is chosen by a query this does not run."""
+        result = runner.run(self._argv(["config", "-d"]), timeout=60)
+        if not result.ok:
+            return None
+        inside, found = False, ""
+        for line in _plain(result.text).splitlines():
+            if line and not line[0].isspace():
+                inside = line.startswith("paths:")
+            elif inside and line.strip():
+                key, _, value = line.strip().partition(":")
+                if key == "default":
+                    found = value
+                elif key not in ("comp", "singleton"):
+                    return None
+        return _apart_by(found)
 
     def _argv(self, args: list[str], config: str = "") -> list[str]:
         head = ["beet"]
@@ -455,6 +534,143 @@ class Beets:
         notes.extend(too_many(count, len(tracks)))
         return Outcome(count, where, output=output[-8000:], notes=tuple(notes))
 
+    def file_tape_run(
+        self,
+        runner: Runner,
+        directory: str,
+        release: str = "",
+        root: str = "",
+        *,
+        how: str = BESIDE,
+    ) -> TapeRun:
+        """One directory, one album of a tape: pinned, or with no release its tags
+        are taken as they stand. Reports and judges nothing, because a tape's album
+        is usually partial and every count `apply` trusts would misread it. A pinned
+        run is told `how` it meets the library, and left untold it merges nothing."""
+        result = runner.run(
+            self._argv(self._import(directory, release)),
+            stdin=PINNED_ANSWERS[how] if release else FROM_LIST_ANSWERS,
+            timeout=3600,
+        )
+        return TapeRun(result.returncode, _plain(result.text + result.err), root)
+
+    def library_rows(
+        self, runner: Runner, root: str, query: list[str]
+    ) -> tuple[Row, ...]:
+        """The rows a query finds. A question beets could not answer is raised, not
+        read as a miss, or a song it cannot see is filed a second time."""
+        result = runner.run(self._argv(["ls", "-f", _ROW, *query]), timeout=300)
+        if not result.ok:
+            raise ImportFailed(
+                f"beets could not look in the library: {TapeRun(1, result.err).why()}"
+            )
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _ROW.count(_SEP) + 1
+        )
+
+    def owned(
+        self, runner: Runner, root: str, recording: str, artist: str
+    ) -> tuple[tuple[Row, ...], tuple[Row, ...]]:
+        """The rows holding this recording, and everything by this artist: not every
+        row has an id, and a title is compared once folded, which beets cannot do."""
+        by_id = (
+            self.library_rows(runner, root, [f"mb_trackid:{recording}"])
+            if recording
+            else ()
+        )
+        return by_id, self.library_rows(runner, root, [term("artist", artist)])
+
+    def artist_copies(self, runner: Runner, root: str, artist: str) -> tuple[Row, ...]:
+        """Everything by this artist, with the album it is on, for a lookup to judge."""
+        return self._copies(runner, root, [term("artist", artist)])
+
+    def recording_copies(
+        self, runner: Runner, root: str, recording: str
+    ) -> tuple[Row, ...]:
+        return self._copies(runner, root, [f"mb_trackid:{recording}"])
+
+    def _copies(self, runner: Runner, root: str, query: list[str]) -> tuple[Row, ...]:
+        result = runner.run(self._argv(["ls", "-f", _COPY, *query]), timeout=300)
+        if not result.ok:
+            raise ImportFailed(TapeRun(result.returncode, result.err).why())
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _COPY.count(_SEP) + 1
+        )
+
+    def holds_path(self, runner: Runner, root: str, path: str) -> bool:
+        """Whether a row names this file. A question it could not answer is raised."""
+        return bool(self.library_rows(runner, root, [_one_file(path)]))
+
+    def forget_row(self, runner: Runner, root: str, path: str) -> None:
+        """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
+        query = [_one_file(path)]
+        result = runner.run(self._argv(["remove", "-f", *query]), timeout=600)
+        if not result.ok or self.library_rows(runner, root, query):
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not clear its row for {path}: {why}")
+
+    def _complaint(self, runner: Runner, args: list[str], timeout: float) -> str:
+        """What beets said, when it did not exit clean."""
+        result = runner.run(self._argv(args), timeout=timeout)
+        return "" if result.ok else TapeRun(result.returncode, result.err).why()
+
+    def art_of(self, runner: Runner, root: str, path: str) -> str:
+        """The art beets holds for the album of this file, or nothing."""
+        result = runner.run(
+            self._argv(["ls", "-f", "$artpath", _one_file(path)]), timeout=300
+        )
+        if not result.ok:
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not say what art this has: {why}")
+        said = _plain(result.text).strip()
+        return "" if said in ("", "None") else str(_rooted(root, said))
+
+    def album_files(
+        self, runner: Runner, root: str, path: str
+    ) -> tuple[str, tuple[str, ...]]:
+        """The album row this file is on, and every file on it."""
+        result = runner.run(
+            self._argv(["ls", "-f", "$album_id", _one_file(path)]), timeout=300
+        )
+        album = _plain(result.text).strip()
+        if not result.ok or not album.isdigit():
+            raise ImportFailed(f"beets has no album for {path}")
+        rows = runner.run(
+            self._argv(["ls", "-f", "$path", f"album_id:{album}"]), timeout=300
+        )
+        if not rows.ok:
+            why = TapeRun(rows.returncode, rows.err).why()
+            raise ImportFailed(f"beets could not list that album: {why}")
+        files = [line for line in _plain(rows.text).split("\n") if line.strip()]
+        return album, tuple(str(_rooted(root, line)) for line in files)
+
+    def set_art(self, runner: Runner, album: str, art: str) -> str:
+        """The album row's own art, so a song joining it later is given the same.
+        Nothing is moved or rewritten by this, which is what `-M -W` say. `modify` reads
+        a value as a template, so what a path means as one is escaped."""
+        value = art.replace("$", "$$").replace("%", "$%")
+        return self._complaint(
+            runner,
+            ["modify", "-a", "-y", "-M", "-W", f"id:{album}", f"artpath={value}"],
+            120,
+        )
+
+    def embed_art(self, runner: Runner, path: str, art: str) -> str:
+        """Into this one file: `-f` takes items, where the form without it rewrites
+        every track of a whole album."""
+        return self._complaint(
+            runner, ["embedart", "-y", "-f", art, _one_file(path)], 600
+        )
+
+    def replaygain(self, runner: Runner, path: str) -> str:
+        """This one file's gain. `-f` because a lookup-off import leaves a gain in the
+        row and not in the file, and without it beets sees that row and skips."""
+        return self._complaint(runner, ["replaygain", "-f", _one_file(path)], 3600)
+
     def locate(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> tuple[Path | None, int]:
@@ -470,8 +686,8 @@ class Beets:
             return None, 0
         return paths[0].parent, len(paths)
 
-    def _paths(self, runner: Runner, query: list[str], root: str = "") -> list[Path]:
-        """Every file beets registered, absolute, in its own order. ADR-059."""
+    def _said_paths(self, runner: Runner, query: list[str]) -> list[str]:
+        """Every file beets registered, as it says them, in its own order."""
         try:
             result = runner.run(
                 self._argv(["ls", "-f", _SEP.join(("$album", "$path")), *query]),
@@ -480,10 +696,14 @@ class Beets:
         except ToolMissing:
             return []
         return [
-            _rooted(root, line.split(_SEP)[-1])
+            line.split(_SEP)[-1]
             for line in _plain(result.text).splitlines()
             if _SEP in line
         ]
+
+    def _paths(self, runner: Runner, query: list[str], root: str = "") -> list[Path]:
+        """Every file beets registered, absolute. ADR-059."""
+        return [_rooted(root, said) for said in self._said_paths(runner, query)]
 
     def stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
@@ -538,6 +758,11 @@ class Beets:
         paths = self._paths(runner, [], library)
         return sum(1 for p in paths if not p.exists()), len(paths)
 
+    def relative_rows(self, runner: Runner, library: str = "") -> tuple[int, int]:
+        """How many rows hold a relative path, of how many registered."""
+        said = self._said_paths(runner, [])
+        return sum(1 for path in said if _relative_row(library, path)), len(said)
+
     def clear_stale(
         self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
     ) -> Stale:
@@ -559,11 +784,120 @@ class Beets:
             raise ImportFailed(f"{len(left)} row(s) are still registered")
         return found
 
+    def album_rows(self, runner: Runner, root: str, album: str) -> tuple[Row, ...]:
+        """The rows on an album of this name, with the release each is of."""
+        return self._held(runner, root, [term("album", album)], 300.0)
+
+    def held_rows(
+        self,
+        runner: Runner,
+        root: str,
+        terms: tuple[str, ...],
+        timeout: float = 300.0,
+    ) -> tuple[Row, ...]:
+        """One query for many songs: a lone comma is beets' OR. No terms asks nothing,
+        where beets would read it as the whole library. A failure to answer raises."""
+        if not terms:
+            return ()
+        query = [part for term in terms for part in (",", term)][1:]
+        return self._held(runner, root, query, timeout)
+
+    def rows_at(
+        self, runner: Runner, root: str, paths: Collection[str], timeout: float
+    ) -> set[str]:
+        """Which of these files beets has a row for, in one query. A path ending in a
+        comma cannot be asked about alone or in a list, so it is taken to be there."""
+        unaskable = {p for p in paths if p.endswith(",")}
+        terms = tuple(f"path:{p}" for p in sorted(set(paths) - unaskable))
+        return unaskable | {
+            r.path for r in self.held_rows(runner, root, terms, timeout)
+        }
+
+    def _held(
+        self, runner: Runner, root: str, query: list[str], timeout: float
+    ) -> tuple[Row, ...]:
+        result = runner.run(self._argv(["ls", "-f", _HELD, *query]), timeout=timeout)
+        if not result.ok:
+            raise ImportFailed(TapeRun(result.returncode, result.err).why())
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _HELD.count(_SEP) + 1
+        )
+
+
+def _apart_by(album_path: str) -> bool | None:
+    """Its folders, without the file's own name. Only the album artist and album make a
+    folder two rows are known to share: a year or a disc is different between editions,
+    and a function could say anything."""
+    folders = album_path.strip().strip("'\"").rpartition("/")[0]
+    if "%aunique" in folders:
+        return True
+    fields = set(_PATH_FIELD.findall(folders))
+    return None if "%" in folders or fields != {"album", "albumartist"} else False
+
+
+def _one_file(path: str) -> str:
+    """Beets takes this as that exact path, whatever the path holds, except for a
+    trailing comma: that is an OR with everything, and a `remove` would forget the
+    whole library. There is no escape for it, so it is never sent."""
+    if path.endswith(","):
+        raise ImportFailed(f"beets cannot be asked about {path} alone: it ends in ,")
+    return f"path:{path}"
+
+
+def _fields(said: str) -> list[list[str]]:
+    """By `\\n` alone: beets ends a row with that, and `splitlines` would also break
+    one at any of the line separators a title may hold."""
+    return [line.split(_SEP) for line in _plain(said).split("\n")]
+
+
+def _row(
+    root: str,
+    title: str,
+    artist: str,
+    album: str,
+    length: str,
+    said: str,
+    recording: str,
+    track: str,
+    release: str = "",
+    album_artist: str = "",
+) -> Row:
+    where = _rooted(root, said)
+    return Row(
+        title,
+        artist,
+        album,
+        row_length(length),
+        str(where),
+        where.is_file(),
+        recording=recording,
+        track=int(track) if track.isdigit() else 0,
+        release=release,
+        album_artist=album_artist,
+    )
+
 
 def _rooted(root: str, said: str) -> Path:
     """What beets said, as something that can be stat'd. ADR-059."""
     where = Path(said)
     return where if where.is_absolute() or not root else Path(root) / where
+
+
+def _relative_row(root: str, said: str) -> bool:
+    """beets may resolve a relative row against where it runs, so the path it names
+    can be absolute and missing: the row was relative if that tail is under the root."""
+    where = Path(said)
+    if not where.is_absolute():
+        return True
+    here = Path.cwd()
+    return (
+        bool(root)
+        and where.is_relative_to(here)
+        and not where.exists()
+        and (Path(root) / where.relative_to(here)).is_file()
+    )
 
 
 def _query(album: str, mbid: str) -> list[str]:

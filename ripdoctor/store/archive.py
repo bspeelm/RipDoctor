@@ -25,7 +25,9 @@ from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
+from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
+from ripdoctor.store.safety import under
 
 # What is cleared once the record is safe: the cut tracks, the tick clips and
 # the measurements. All of them are derived, and all of them are large.
@@ -137,8 +139,14 @@ def repair_argv(source: str, dest: str) -> list[str]:
 # putting this one back. What happens to it afterwards is ADR-055.
 SUPERSEDED = "_superseded"
 
+# A leading underscore is what no record's slug can have, and nothing in here is
+# named as a side, so a tape never appears among the archive's records.
+TAPE_DIR = "_tape-{tape}"
+# A byte-for-byte copy decodes to the same length. This allows only for rounding.
+SAME_LENGTH = 0.1
 
-def _step_aside(target: Path) -> Path | None:
+
+def step_aside(target: Path) -> Path | None:
     """Move an archived side aside, returning where, so it can be put back."""
     if not target.exists():
         return None
@@ -148,6 +156,13 @@ def _step_aside(target: Path) -> Path | None:
     moved = kept / f"{stamp}--{target.name}"
     target.replace(moved)
     return moved
+
+
+def read_back(runner: Runner, target: Path, timeout: float | None = None) -> float:
+    """Seconds of audio at `target`, or nothing if it does not play and verify."""
+    limits = {} if timeout is None else {"timeout": timeout}
+    seconds = true_duration(runner, str(target), **limits)
+    return seconds if seconds > 0 and verify(runner, str(target), **limits) else 0.0
 
 
 def put_away(
@@ -182,7 +197,7 @@ def put_away(
     stepped: list[Path] = []
     for side in sorted(source.glob("side-*.flac")):
         target = dest / side.name
-        superseded = _step_aside(target)
+        superseded = step_aside(target)
         if superseded:
             stepped.append(superseded)
         if verify(runner, str(side)):
@@ -195,8 +210,8 @@ def put_away(
             runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
             notes.append(f"{side.name} was truncated and has been re-encoded")
 
-        seconds = true_duration(runner, str(target))
-        if seconds <= 0 or not verify(runner, str(target)):
+        seconds = read_back(runner, target)
+        if not seconds:
             target.unlink(missing_ok=True)
             if superseded:
                 superseded.replace(target)
@@ -232,4 +247,34 @@ def put_away(
         "archived": archived,
         "notes": notes,
         "removed": removed,
+    }
+
+
+def keep_tape(runner: Runner, layout: Layout, tape: str) -> dict[str, Any]:
+    """Copy a tape's uncut file in and read it back against the source's own length.
+
+    Clears nothing. An earlier copy is stepped aside only once this one has read
+    back, and stays aside: a tape has no other record of what it superseded.
+    """
+    source = T.audio_file(layout, tape)
+    dest = under(layout.archive, TAPE_DIR.format(tape=tape))
+    dest.mkdir(parents=True, exist_ok=True)
+    final, part = dest / T.AUDIO, dest / f"part-{T.AUDIO}"
+    seconds = true_duration(runner, str(source), timeout=T.LONG_RUN)
+    try:
+        shutil.copy2(source, part)
+        back = read_back(runner, part, T.LONG_RUN)
+        if seconds <= 0 or not back or abs(back - seconds) > SAME_LENGTH:
+            raise NotReady(
+                f"the copy of {tape} did not read back as {seconds:.2f} s "
+                f"(read {back:.2f} s) - nothing was cleared"
+            )
+        step_aside(final)
+        part.replace(final)
+    finally:
+        part.unlink(missing_ok=True)
+    return {
+        "file": str(final),
+        "bytes": final.stat().st_size,
+        "seconds": round(back, 2),
     }

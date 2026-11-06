@@ -1,7 +1,7 @@
 # Method
 
-What RipDoctor knows about finding track boundaries on vinyl, and how it was
-learned. Each item below cost a wrong cut.
+What RipDoctor knows about finding track boundaries on vinyl, and on tapes, and
+how it was learned. Each item below cost a wrong cut.
 
 The numbers are measurements from one signal chain. Treat them as the shape of
 the problem, not as constants: anchor to a known gap and a known music passage
@@ -244,9 +244,36 @@ line, including two wrong ones. Fit on two probes, then predict a third the fit
 has never seen and measure where the music actually is. An internally consistent
 but wrong fit fails that and is refused.
 
+## A tape is measured differently
+
+A tape is one uncut digital recording of songs from different albums. None of
+the vinyl thresholds below apply to it, and the reasons are in ADR-063.
+
+**Gaps are candidates, found at a fixed −60 dBFS on the full lane.** The band lane
+thresholds up from its floor, and digital silence pins that floor at the bottom
+of the scale, so the margin lands somewhere meaningless: on one tape it found
+fewer gaps than the list needed. A fixed level found every gap, and the result
+held from −30 to −80 dBFS across two tapes.
+
+**The list decides which gaps are boundaries.** List lengths, in list order, group
+the stretches of music into songs. A length is never scaled to fit, and a list that
+disagrees with its audio is reported and never reordered.
+
+**Edges come from the gap's quiet interior.** −60 dBFS finds a gap and is the wrong
+place to cut: it left one song's edge 4.1 s before its true end, another's 8.55 s,
+and a last song 3.5 s short, each inside a fade. So each side of the gap is walked
+in to within 3 dB of that gap's own minimum. Its own, because some gaps are low
+noise near −70 dB rather than digital zero. Measured this way, every song on both
+tapes with no silence inside it landed within 1.1 s of its list length, which is
+what the 3 s tolerance rests on.
+
+**A silence inside a song is always flagged**, whatever the song's length. It can be
+a passage in the song, damage, or a song missing from the list, and only a listener
+can tell which, so the length agreeing settles nothing.
+
 ## The thresholds, and where each came from
 
-Every number the detectors use, with its provenance. All were measured on one
+Every number the vinyl detectors use, with its provenance. All were measured on one
 signal chain; `ripdoctor measure` reports what yours does beside them.
 
 | name | default | what it is |

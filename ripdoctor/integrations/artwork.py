@@ -21,12 +21,18 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ripdoctor.audio.runner import Runner
 from ripdoctor.integrations.musicbrainz import Fetcher, LookupFailed
-from ripdoctor.integrations.tagger import embed_art, has_art, set_modes
+from ripdoctor.integrations.tagger import (
+    embed_art,
+    has_art,
+    set_file_modes,
+    set_modes,
+)
 
 ARCHIVE = "https://coverartarchive.org"
 
@@ -231,8 +237,11 @@ def install(
     edge: int = SCALE_TO,
     file_mode: int = 0o664,
     dir_mode: int = 0o775,
+    only: Sequence[str] | None = None,
+    cover_name: str = COVER,
 ) -> Installed:
-    """Verify, scale, write the cover, and embed it into every track.
+    """Verify, scale, write the cover, and embed it into every track, or into `only`
+    where a folder also holds another album's, which keeps its own art.
 
     Verification happens before anything is written or removed. The recorded
     failure was stripping an album's art and then finding the replacement was
@@ -252,7 +261,7 @@ def install(
     directory.mkdir(parents=True, exist_ok=True)
     raw = directory / ".cover-download"
     raw.write_bytes(data)
-    cover = directory / COVER
+    cover = directory / cover_name
     try:
         runner.run(scale_argv(str(raw), str(cover), edge), timeout=120).require()
     finally:
@@ -262,7 +271,11 @@ def install(
     if final is None:
         raise RuntimeError("the scaled cover is not a valid image")
 
-    tracks = sorted(p for p in directory.iterdir() if p.suffix.lower() == ".flac")
+    tracks = sorted(
+        (p for p in directory.iterdir() if p.suffix.lower() == ".flac")
+        if only is None
+        else map(Path, only)
+    )
     done, failed = 0, []
     for track in tracks:
         try:
@@ -272,7 +285,13 @@ def install(
             failed.append(f"{track.name}: {e}")
     # Embedding rewrites every track, and the cover is written here too, so
     # both land at the writer's umask and undo what the import set. ADR-056.
-    set_modes(directory, file_mode, dir_mode)
+    if only is None:
+        set_modes(directory, file_mode, dir_mode)
+    else:
+        try:
+            set_file_modes([*tracks, cover], file_mode)
+        except OSError as e:  # the art is in by now, which a refusal would deny
+            failed.append(f"its modes could not be set: {e}")
     return Installed(cover, final, done, tuple(failed), len(tracks))
 
 

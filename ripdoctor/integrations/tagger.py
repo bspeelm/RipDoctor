@@ -9,6 +9,8 @@ report what is there so the archive gate has something to check.
 from __future__ import annotations
 
 import shutil
+import stat
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +26,7 @@ TAG_ALBUMARTIST = "ALBUMARTIST"
 TAG_TRACK = "TRACKNUMBER"
 TAG_TOTAL = "TRACKTOTAL"
 TAG_DATE = "DATE"
+TAG_GAIN = "REPLAYGAIN_TRACK_GAIN"
 
 # Cover art block: type 3 is the front cover, and the description is empty on
 # purpose - some players show it as a caption.
@@ -83,6 +86,26 @@ def set_modes(where: Path, file_mode: int, dir_mode: int) -> int:
             p.chmod(file_mode)
             changed += 1
     return changed
+
+
+def set_file_modes(files: Iterable[Path], file_mode: int) -> int:
+    """These files and nothing beside them, where a folder also holds what is not this
+    caller's to change. Returns how many were set."""
+    changed = 0
+    for p in files:
+        if p.is_file():
+            p.chmod(file_mode)
+            changed += 1
+    return changed
+
+
+def widen_dir(where: Path, dir_mode: int) -> None:
+    """Add what a directory lacks of `dir_mode`, and take nothing away: a folder that
+    existed before a song joined it keeps what its owner gave it, setgid included. One
+    made under a service's umask would otherwise stay unreadable to anything else."""
+    now = stat.S_IMODE(where.stat().st_mode)
+    if now | dir_mode != now:
+        where.chmod(now | dir_mode)
 
 
 def write_tags(runner: Runner, path: str, tags: dict[str, str]) -> None:
@@ -148,6 +171,11 @@ def has_art(runner: Runner, path: str) -> bool:
     result = runner.run(
         ["metaflac", "--list", "--block-type=PICTURE", path], timeout=60
     )
+    return bool(result.text.strip())
+
+
+def has_gain(runner: Runner, path: str) -> bool:
+    result = runner.run(["metaflac", f"--show-tag={TAG_GAIN}", path], timeout=60)
     return bool(result.text.strip())
 
 

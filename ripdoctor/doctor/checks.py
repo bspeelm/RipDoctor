@@ -156,6 +156,7 @@ def importing(settings: Settings, runner: Runner) -> Iterator[Result]:
         yield from _agree(settings, runner)
         yield from _plugins(settings, runner)
         yield from _stale(settings, runner)
+        yield from _relative(settings, runner)
 
 
 def _stale(settings: Settings, runner: Runner) -> Iterator[Result]:
@@ -174,6 +175,31 @@ def _stale(settings: Settings, runner: Runner) -> Iterator[Result]:
         "treats a re-import of those records as a duplicate and stops part-way",
         fix="clear the rows for the record you are importing, from the import "
         "dialog. It removes database rows only, never files",
+    )
+
+
+def _relative(settings: Settings, runner: Runner) -> Iterator[Result]:
+    """Rows that crash beets when a song is merged into their album, as a tape's are.
+    Not being able to ask is what the checks around this one report. ADR-063."""
+    try:
+        relative, total = Beets().relative_rows(runner, settings.library)
+    except (ToolMissing, ToolFailed, OSError):
+        return
+    if not relative:
+        return
+    root = (settings.library or "/path/to/music").rstrip("/").replace("'", "''")
+    # Printed for a person to run on their backed-up database, never executed here.
+    update = (
+        f"UPDATE items SET path = CAST('{root}/' || CAST(path AS TEXT) AS BLOB) "  # noqa: S608
+        "WHERE CAST(path AS TEXT) NOT LIKE '/%'"
+    )
+    yield Result(
+        "beets paths",
+        Level.WARN,
+        f"{relative} of {total} library rows hold a relative path - beets crashes "
+        "merging a song into an album with one, and filing a tape does that",
+        fix="back up beets' library database (`beet config` names it), then run:\n"
+        + _indent(f'sqlite3 library.db "{update}"'),
     )
 
 

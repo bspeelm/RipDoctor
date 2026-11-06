@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 
@@ -152,17 +153,29 @@ def add(app: App, service: Service) -> None:
 
 
 def _install(service: Service, album: Path, data: bytes) -> H.Response:
+    return H.ok(installed(service, album, data).as_dict())
+
+
+def installed(
+    service: Service,
+    album: Path,
+    data: bytes,
+    *,
+    only: Sequence[str] | None = None,
+    cover_name: str = ART.COVER,
+) -> ART.Installed:
     if len(data) > MAX_IMAGE:
         raise H.HttpError(413, "that image is too large")
     try:
-        done = ART.install(
+        return ART.install(
             service.runner,
             album,
             data,
             file_mode=service.settings.file_mode,
             dir_mode=service.settings.dir_mode,
+            only=only,
+            cover_name=cover_name,
         )
     except ValueError as e:
         # Refused before anything was touched, which is the whole point.
         raise H.HttpError(400, str(e)) from e
-    return H.ok(done.as_dict())

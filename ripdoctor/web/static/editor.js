@@ -9,6 +9,11 @@
 const DB_FLOOR = -95;          // bottom of both lanes
 const HIT_PX = 7;              // how close a click must be to grab a marker
 const OVERVIEW_H = 42;
+// A long timeline only. Far enough out, a slip of the hand is seconds of audio.
+const DRAG_FROM = 3;           // pixels a pointer must travel before a press is a move
+const COARSE = 2;              // seconds per pixel beyond which no marker can be grabbed
+const TOUCH_REACH = 20;        // how near a finger has to land to grab a marker
+const TIE_PX = 1;              // pixels within which two markers count as one spot
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const fmt = (t) => {
@@ -16,8 +21,18 @@ export const fmt = (t) => {
   return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 };
 
+/** `fmt`, with hours once there are any, for a timeline that long. */
+export const fmtLong = (t) => {
+  if (t < 3600) return fmt(t);
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
+};
+
 export class Editor {
-  constructor(canvas, onChange, onSelect, onSeek) {
+  // `opts.onDrop(track, edge, landed)`: a moved marker was let go, or the drag was lost.
+  // `opts.long`: a timeline far longer than a side, whose markers are easy to grab by
+  // accident and hard to place. Without it this is a side's editor, exactly.
+  constructor(canvas, onChange, onSelect, onSeek, opts = {}) {
     this.cv = canvas;
     this.ctx = canvas.getContext("2d");
     this.onChange = onChange;         // (track, edge, seconds) -> void
@@ -29,6 +44,10 @@ export class Editor {
     this.playhead = 0;
     this.sel = null;                  // {track, edge}
     this.drag = null;
+    this.onDrop = opts.onDrop;
+    this.long = !!opts.long;
+    this.onView = opts.onView;        // () -> void, the view moved or changed scale
+    this.frozen = false;              // drawn and played, but no marker can be moved
     this._bind();
   }
 
@@ -69,6 +88,11 @@ export class Editor {
     };
   }
 
+  /** Too many seconds to a pixel to place a boundary by hand. */
+  get tooCoarse() {
+    return this.long && (this.t1 - this.t0) / this.cv.clientWidth > COARSE;
+  }
+
   xOf(t) { return (t - this.t0) / (this.t1 - this.t0) * this.cv.clientWidth; }
   tOf(x) { return this.t0 + x / this.cv.clientWidth * (this.t1 - this.t0); }
   dbY(db, lane) {
@@ -95,11 +119,13 @@ export class Editor {
     if (!this.side) return;
 
     this._gaps(c, L);
+    this._flagged(c, L);
     this._wave(c, L.wave);
     this._band(c, L.band);
     this._grid(c, L);
     this._ghosts(c, L);
     this._markers(c, L);
+    this._timeLabels(c, L);
     this._playhead(c, L);
     this._overview(c, L.over);
   }
@@ -116,6 +142,23 @@ export class Editor {
       const x0 = this.xOf(gp.lo), x1 = this.xOf(gp.hi);
       if (x1 < 0 || x0 > L.w) continue;
       c.fillRect(x0, 0, Math.max(1, x1 - x0), L.over.top);
+    }
+  }
+
+  // A stretch that asks for attention, in the lanes and on the overview, so it can
+  // be found on a timeline too long to read at a glance.
+  _flagged(c, L) {
+    c.fillStyle = "rgba(232,196,104,0.14)";
+    for (const t of this.tracks) {
+      if (!t.flag) continue;
+      const x0 = this.xOf(t.start), x1 = this.xOf(t.end);
+      if (x1 < 0 || x0 > L.w) continue;
+      c.fillRect(x0, 0, Math.max(2, x1 - x0), L.over.top);
+    }
+    const chosen = this.long && this.sel && this.tracks.find((t) => t.number === this.sel.track);
+    if (chosen) {
+      c.fillStyle = "rgba(90,169,230,0.10)";
+      c.fillRect(this.xOf(chosen.start), 0, this.xOf(chosen.end) - this.xOf(chosen.start), L.over.top);
     }
   }
 
@@ -166,18 +209,39 @@ export class Editor {
 
   _grid(c, L) {
     const span = this.t1 - this.t0;
-    const step = span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
+    const step = this.long && span > 3600 ? (span > 14400 ? 3600 : span > 7200 ? 1800 : 600)
+      : span > 900 ? 120 : span > 300 ? 60 : span > 90 ? 20 : span > 30 ? 5 : span > 8 ? 1 : 0.5;
     c.strokeStyle = "#20242b"; c.fillStyle = "#5a626c";
     c.font = "10px ui-monospace,monospace"; c.lineWidth = 1;
+    let clear = -Infinity;
+    this.labels = [];
     for (let t = Math.ceil(this.t0 / step) * step; t < this.t1; t += step) {
       const x = Math.round(this.xOf(t)) + 0.5;
       c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-      c.fillText(fmt(t), x + 3, L.over.top - 4);
+      if (this.long && x < clear) continue;
+      const label = this.long ? fmtLong(t) : fmt(t);
+      if (this.long) this.labels.push({ label, x });
+      else c.fillText(label, x + 3, L.over.top - 4);
+      clear = x + c.measureText(label).width + 8;
+    }
+  }
+
+  // After the markers on a long timeline, on a plate, so that a line through a time does
+  // not make it unreadable.
+  _timeLabels(c, L) {
+    if (!this.long) return;
+    c.font = "10px ui-monospace,monospace";
+    for (const { label, x } of this.labels) {
+      c.fillStyle = "#0f1114";
+      c.fillRect(x + 1, L.over.top - 14, c.measureText(label).width + 4, 13);
+      c.fillStyle = "#5a626c";
+      c.fillText(label, x + 3, L.over.top - 4);
     }
   }
 
   // Faint marks where the catalogue duration says a boundary should land.
   _ghosts(c, L) {
+    if (this.tooCoarse) return;
     c.strokeStyle = "rgba(139,145,153,0.5)"; c.setLineDash([2, 3]); c.lineWidth = 1;
     c.fillStyle = "rgba(139,145,153,0.8)"; c.font = "10px ui-monospace,monospace";
     for (const t of this.tracks) {
@@ -192,23 +256,89 @@ export class Editor {
   }
 
   _markers(c, L) {
+    if (this.long) { this._namedMarkers(c, L); return; }
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const x = this.xOf(t[edge]);
         if (x < -30 || x > L.w + 30) continue;
-        const on = this.sel && this.sel.track === t.number && this.sel.edge === edge;
-        c.strokeStyle = edge === "start" ? "#5fd38d" : "#e6705a";
-        c.lineWidth = on ? 2.5 : 1.4;
-        c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
-        c.fillStyle = c.strokeStyle;
-        const label = `${t.number}${edge === "start" ? "▶" : "■"}`;
-        c.font = on ? "bold 11px ui-monospace,monospace" : "11px ui-monospace,monospace";
-        const tw = c.measureText(label).width;
-        const lx = edge === "start" ? x + 3 : x - tw - 3;
-        c.fillRect(lx - 2, L.wave.top + 2, tw + 4, 14);
-        c.fillStyle = "#0b0d10";
-        c.fillText(label, lx, L.wave.top + 13);
+        const on = this._selected(t, edge);
+        this._line(c, L, x, edge, on);
+        this._tag(c, L, t, edge, x, on);
       }
+    }
+  }
+
+  // Lines first, so none is drawn over a tag. Too far out to place a boundary, a
+  // song's end sits on the next one's start, and what is wanted is the waveform: each
+  // song gets one faint line, and a tag that would land on another is left out.
+  _namedMarkers(c, L) {
+    const coarse = this.tooCoarse;
+    const shown = [];
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        const on = this._selected(t, edge);
+        if (coarse && edge === "end" && !on) continue;
+        const x = this.xOf(t[edge]);
+        if (x < -30 || x > L.w + 30) continue;
+        c.globalAlpha = coarse && !on ? 0.3 : 1;
+        this._line(c, L, x, edge, on);
+        c.globalAlpha = 1;
+        shown.push({ t, edge, x, on });
+      }
+    }
+    let clear = -Infinity;
+    for (const { t, edge, x, on } of shown) {
+      c.font = "11px ui-monospace,monospace";
+      const tw = c.measureText(`${t.number}▶${t.mark ?? ""}`).width;
+      if (!on && (edge === "start" ? x + 1 : x - tw - 5) < clear) continue;
+      clear = this._tag(c, L, t, edge, x, on);
+      if (edge === "start") this._title(c, L, t, x);
+    }
+    if (coarse) {
+      const say = "zoom in to move a boundary";
+      c.font = "11px ui-sans-serif,system-ui";
+      const w = c.measureText(say).width;
+      c.fillStyle = "#0f1114"; c.fillRect(L.w - w - 10, L.band.top + 2, w + 10, 16);
+      c.fillStyle = "#8b9199"; c.fillText(say, L.w - w - 5, L.band.top + 14);
+    }
+  }
+
+  _selected(t, edge) { return !!this.sel && this.sel.track === t.number && this.sel.edge === edge; }
+
+  _line(c, L, x, edge, on) {
+    c.strokeStyle = edge === "start" ? "#5fd38d" : "#e6705a";
+    c.lineWidth = on ? 2.5 : 1.4;
+    c.beginPath(); c.moveTo(x, 0); c.lineTo(x, L.over.top); c.stroke();
+  }
+
+  /** Returns where the tag ends. */
+  _tag(c, L, t, edge, x, on) {
+    c.fillStyle = edge === "start" ? "#5fd38d" : "#e6705a";
+    const label = `${t.number}${edge === "start" ? "▶" : "■"}${t.mark ?? ""}`;
+    c.font = on ? "bold 11px ui-monospace,monospace" : "11px ui-monospace,monospace";
+    const tw = c.measureText(label).width;
+    const lx = edge === "start" ? x + 3 : x - tw - 3;
+    c.fillRect(lx - 2, L.wave.top + 2, tw + 4, 14);
+    c.fillStyle = "#0b0d10";
+    c.fillText(label, lx, L.wave.top + 13);
+    return lx + tw + 2;
+  }
+
+  // Under its tag, and only as much as fits in the stretch it names.
+  _title(c, L, t, x) {
+    const room = this.xOf(t.end) - x - 8;
+    if (room < 40 || !t.title) return;
+    c.font = "11px ui-sans-serif,system-ui";
+    let text = t.title;
+    while (text.length > 1 && c.measureText(text).width > room) text = text.slice(0, -1);
+    if (text !== t.title) text = `${text.slice(0, -1)}…`;
+    c.fillStyle = "#e6e8ea";
+    c.fillText(text, x + 3, L.wave.top + 30);
+    if (t.flag) {
+      c.fillStyle = "#e8c468";
+      c.beginPath();
+      c.arc(x + 3 + Math.min(c.measureText(text).width + 8, room), L.wave.top + 26, 3, 0, 2 * Math.PI);
+      c.fill();
     }
   }
 
@@ -232,6 +362,8 @@ export class Editor {
     }
     c.stroke();
     const d = this.side.duration;
+    c.fillStyle = "#e8c468";
+    for (const t of this.tracks) if (t.flag) c.fillRect(t.start / d * w, lane.top, 2, lane.h);
     const x0 = this.t0 / d * w, x1 = this.t1 / d * w;
     c.strokeStyle = "#5aa9e6"; c.lineWidth = 1;
     c.strokeRect(x0 + 0.5, lane.top + 0.5, Math.max(2, x1 - x0), lane.h - 1);
@@ -241,17 +373,48 @@ export class Editor {
 
   // ---------------------------------------------------------- interaction
 
-  hit(x, y) {
+  hit(x, y, reach = HIT_PX) {
     const L = this.layout();
-    if (y >= L.over.top) return null;
+    if (y >= L.over.top || this.frozen || this.tooCoarse) return null;
     let best = null;
     for (const t of this.tracks) {
       for (const edge of ["start", "end"]) {
         const d = Math.abs(this.xOf(t[edge]) - x);
-        if (d <= HIT_PX && (!best || d < best.d)) best = { track: t.number, edge, d };
+        if (d <= reach && (!best || d < best.d)) best = { track: t.number, edge, d };
       }
     }
-    return best;
+    return best && this.long ? this._tieBroken(x, reach, best) : best;
+  }
+
+  // Two markers on one spot have to be separable by the mouse. The selected song's comes
+  // first, then whichever one's song lies on the side the pointer is: the song starting
+  // here is to the right of it, and the one ending is to the left.
+  _tieBroken(x, reach, best) {
+    const near = [];
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        const at = this.xOf(t[edge]), d = Math.abs(at - x);
+        if (d <= reach && d - best.d <= TIE_PX) near.push({ track: t.number, edge, d, at });
+      }
+    }
+    if (near.length < 2) return best;
+    const mine = near.filter((n) => n.track === this.sel?.track);
+    const pool = mine.length ? mine : near;
+    const { track, edge, d } = pool.find((n) => n.edge === (x > n.at ? "start" : "end")) ?? pool[0];
+    return { track, edge, d };
+  }
+
+  // A marker's tag is a number and a mark, so what it stands for is in the tooltip.
+  _tagAt(x, y) {
+    if (!this.side || y >= this.layout().over.top) return "";
+    for (const t of this.tracks) {
+      for (const edge of ["start", "end"]) {
+        if (Math.abs(this.xOf(t[edge]) - x) <= HIT_PX) {
+          return `${t.number} ${t.title}: ${edge} at ${fmtLong(t[edge])}`;
+        }
+      }
+    }
+    return "";
   }
 
   zoomTo(t0, t1) {
@@ -260,6 +423,7 @@ export class Editor {
     t0 = clamp(t0, 0, d - span);
     this.t0 = t0; this.t1 = t0 + span;
     this.render();
+    this.onView?.();
   }
 
   /** Whole side. */
@@ -303,11 +467,15 @@ export class Editor {
         this.drag = { mode: "overview" };
         return;
       }
-      const h = this.hit(x, y);
+      const h = this.long && e.pointerType === "touch" ? this.hit(x, y, TOUCH_REACH) : this.hit(x, y);
       if (h) {
         this.sel = { track: h.track, edge: h.edge };
         this.onSelect?.(h.track, h.edge);
-        this.drag = { mode: "marker", ...h, moved: false };
+        // On a long timeline the marker keeps its distance from the pointer, so a
+        // press off-centre that wobbles moves it by the wobble and no more.
+        const at = this.long ? this.tracks.find((t) => t.number === h.track)[h.edge] : null;
+        const off = this.long ? x - this.xOf(at) : 0;
+        this.drag = { mode: "marker", ...h, x, off, moved: false };
       } else {
         this.drag = { mode: "pan", x, t0: this.t0, moved: false };
       }
@@ -319,13 +487,15 @@ export class Editor {
       const x = e.clientX - r.left, y = e.clientY - r.top;
       if (!this.drag) {
         cv.style.cursor = this.hit(x, y) ? "ew-resize" : "crosshair";
+        if (this.long) cv.title = this._tagAt(x, y);
         return;
       }
       if (this.drag.mode === "overview") {
         this.centerOn(x / this.cv.clientWidth * this.side.duration);
       } else if (this.drag.mode === "marker") {
+        if (this.long && !this.drag.moved && Math.abs(x - this.drag.x) < DRAG_FROM) return;
         this.drag.moved = true;
-        this.onChange(this.drag.track, this.drag.edge, this.tOf(x));
+        this.onChange(this.drag.track, this.drag.edge, this.tOf(x - this.drag.off));
       } else {
         this.drag.moved = Math.abs(x - this.drag.x) > 3;
         const span = this.t1 - this.t0;
@@ -346,10 +516,16 @@ export class Editor {
         this.onSeek?.(this.playhead);
         this.render();
       }
+      const was = this.drag;
       this.drag = null;
+      if (was?.mode === "marker" && was.moved) this.onDrop?.(was.track, was.edge, true);
     };
     cv.addEventListener("pointerup", up);
-    cv.addEventListener("pointercancel", () => { this.drag = null; });
+    cv.addEventListener("pointercancel", () => {
+      const was = this.drag;
+      this.drag = null;
+      if (was?.mode === "marker" && was.moved) this.onDrop?.(was.track, was.edge, false);
+    });
     window.addEventListener("resize", () => this.render());
   }
 }

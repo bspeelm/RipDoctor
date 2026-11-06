@@ -345,6 +345,41 @@ def test_a_config_missing_only_some_plugins_names_those(tmp_path: Path) -> None:
     assert "fetchart" not in r.fix, "it already has that one"
 
 
+def test_library_rows_with_relative_paths_are_counted_with_the_fix() -> None:
+    """A library from an older beets holds them, and a tape's merge then crashes."""
+    said = b"A Record\x1fA Band/01.flac\nA Record\x1f/music/A Band/02.flac\n"
+    runner = everything().expect("ls", stdout=said)
+    s = replace(Settings(), importer="beets", library="/music")
+    r = find(list(D.importing(s, runner)), "beets paths")
+    assert r.level is D.Level.WARN and not r.blocking
+    assert "1 of 2 library rows hold a relative path" in r.summary
+    assert "back up" in r.fix and "'/music/' || CAST(path AS TEXT)" in r.fix
+
+
+def test_absolute_rows_say_nothing_about_relative_paths() -> None:
+    runner = everything().expect("ls", stdout=b"A Record\x1f/music/A Band/01.flac\n")
+    s = replace(Settings(), importer="beets", library="/music")
+    assert not [r for r in D.importing(s, runner) if r.check == "beets paths"]
+
+
+def test_a_library_that_cannot_be_asked_says_nothing_about_relative_paths() -> None:
+    s = replace(Settings(), importer="beets", library="/music")
+    runner = everything().expect("ls", returncode=1, stderr=b"database is locked")
+    assert not [r for r in D.importing(s, runner) if r.check == "beets paths"]
+
+
+def test_a_row_under_the_directory_the_doctor_runs_in_is_not_called_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "A").mkdir()
+    (tmp_path / "A" / "01.flac").write_bytes(b"fLaC")
+    monkeypatch.chdir(tmp_path)
+    said = f"A Record\x1f{tmp_path}/A/01.flac\n".encode()
+    runner = everything().expect("ls", stdout=said)
+    s = replace(Settings(), importer="beets", library=str(tmp_path))
+    assert not [r for r in D.importing(s, runner) if r.check == "beets paths"]
+
+
 def test_an_importer_nobody_has_heard_of_is_named() -> None:
     s = replace(Settings(), importer="picard")
     r = find(list(D.importing(s, everything())), "importer")

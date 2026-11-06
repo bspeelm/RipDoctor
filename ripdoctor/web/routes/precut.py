@@ -12,8 +12,9 @@ from ripdoctor.store import unpack as U
 from ripdoctor.store.safety import under
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
+from ripdoctor.web.routes.tapes import after_import
 from ripdoctor.web.service import Service
-from ripdoctor.work.jobs import Busy, Job
+from ripdoctor.work.jobs import Busy, Job, one_import
 
 CHUNK = 8 * 1024 * 1024
 MAX_UPLOAD = 2 * 1024 * 1024 * 1024
@@ -168,23 +169,24 @@ def add(app: App, service: Service) -> None:
             audio = tuple(n for n in tracks if Path(n).suffix.lower() in U.AUDIO)
             job.total = len(audio)
             job.step(name, f"importing with {importer.name}")
-            done = importer.take(
-                service.runner,
-                str(into),
-                root,
-                mbid=mbid,
-                tracks=audio,
-                duplicates=str(body.get("duplicates", "replace")),
-                file_mode=service.settings.file_mode,
-                dir_mode=service.settings.dir_mode,
-            )
+            with one_import(job):
+                done = importer.take(
+                    service.runner,
+                    str(into),
+                    root,
+                    mbid=mbid,
+                    tracks=audio,
+                    duplicates=str(body.get("duplicates", "replace")),
+                    file_mode=service.settings.file_mode,
+                    dir_mode=service.settings.dir_mode,
+                )
             job.finished = done.tracks
             # Only now: nothing is cleared until the record is proved to be
             # somewhere else. ADR-062.
             if done.tracks:
                 shutil.rmtree(into, ignore_errors=True)
                 IN.clear(layout, HELD)
-            return dict(done.as_dict())
+            return {**done.as_dict(), "notes": [*done.notes, *after_import(service)]}
 
         try:
             return H.ok(service.jobs.start(HELD, "precut-import", work).as_dict(), 202)

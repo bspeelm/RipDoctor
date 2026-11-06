@@ -17,8 +17,9 @@ from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
 from ripdoctor.web.routes.records import slug_of
+from ripdoctor.web.routes.tapes import after_import
 from ripdoctor.web.service import Service
-from ripdoctor.work.jobs import Busy, Job
+from ripdoctor.work.jobs import Busy, Job, one_import
 
 VINYL = ("vinyl", '12" vinyl', '10" vinyl', '7" vinyl')
 
@@ -286,19 +287,21 @@ def add(app: App, service: Service) -> None:
             review = str(review_dir)
             job.total = sum(len(s.tracks) for s in plan.sides)
             job.step(plan.album, f"importing with {importer.name}")
-            done = importer.apply(
-                service.runner,
-                plan,
-                review,
-                root,
-                mbid=mbid,
-                duplicates=duplicates,
-                replacing=replacing,
-                file_mode=service.settings.file_mode,
-                dir_mode=service.settings.dir_mode,
-            )
+            with one_import(job):
+                done = importer.apply(
+                    service.runner,
+                    plan,
+                    review,
+                    root,
+                    mbid=mbid,
+                    duplicates=duplicates,
+                    replacing=replacing,
+                    file_mode=service.settings.file_mode,
+                    dir_mode=service.settings.dir_mode,
+                )
             job.finished = done.tracks
-            return {**done.as_dict(), "importer": importer.name}
+            notes = [*done.notes, *after_import(service)]
+            return {**done.as_dict(), "importer": importer.name, "notes": notes}
 
         try:
             return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)

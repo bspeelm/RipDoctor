@@ -1,4 +1,4 @@
-import { Editor, fmt } from "/editor.js";
+import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
 import { drawMeter, slugify } from "/ripui.js";
 
@@ -21,6 +21,9 @@ async function api(path, opts = {}) {
     // matters, because it means the work asked for is happening.
     const e = new Error(body?.error || `${r.status} ${r.statusText}`);
     e.status = r.status;
+    e.needsConfirm = !!body?.needs_confirm;
+    e.stale = !!body?.stale;
+    e.busy = !!body?.busy;
     throw e;
   }
   return body;
@@ -36,7 +39,7 @@ const S = {
   dirty: false,
 };
 
-let ed, player, ripTimer;
+let ed, player, ripTimer, tpEd, tpPlayer;
 // True while a stop is being waited out. The readout has one owner then: the
 // meter poll and the wait were both writing it on different intervals, so it
 // alternated between what each of them thought was happening.
@@ -72,10 +75,8 @@ function markDirty(d = true) {
 
 // ------------------------------------------------------------ envelope I/O
 
-async function fetchEnvelope(slug, side, v, expectWindows) {
-  // ?v= is the capture's fingerprint: same audio -> cache hit, re-rip -> miss
-  const r = await fetch(`/api/env/${slug}/${side}${v ? `?v=${v}` : ""}`,
-                        { credentials: "same-origin" });
+async function fetchEnvelope(url, expectWindows) {
+  const r = await fetch(url, { credentials: "same-origin" });
   if (!r.ok) throw new Error("envelope not ready");
   const buf = await r.arrayBuffer();
   const dv = new DataView(buf);
@@ -382,7 +383,9 @@ async function openSide(letter) {
   if (!S.sideData[letter]) {
     const v = S.meta.ready[letter]?.v || "";
     const [env, gaps] = await Promise.all([
-      fetchEnvelope(S.slug, letter, v, S.meta.ready[letter]?.windows),
+      // ?v= is the capture's fingerprint: same audio -> cache hit, re-rip -> miss
+      fetchEnvelope(`/api/env/${S.slug}/${letter}${v ? `?v=${v}` : ""}`,
+                    S.meta.ready[letter]?.windows),
       api(`/api/gaps/${S.slug}/${letter}`),
     ]);
     S.sideData[letter] = { ...env, gaps, duration: S.meta.ready[letter].duration };
@@ -563,15 +566,17 @@ function updateReadout() {
     (t.forced ? "  — forced, placed from the catalogue; check it by ear"
      : d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
 
-  // the nudge2 question: is this cut still inside a real silence?
-  const gs = S.sideData[S.side].gaps.band.gaps;
+  sayGap($("#ro-gap"), v, S.sideData[S.side].gaps.band.gaps);
+}
+
+// the nudge2 question: is this cut still inside a real silence?
+function sayGap(ro, v, gs) {
   let inside = null, nearest = null, nd = 1e9;
   for (const g of gs) {
     if (g.lo <= v && v <= g.hi) { inside = g; break; }
     const dd = Math.min(Math.abs(v - g.lo), Math.abs(v - g.hi));
     if (dd < nd) { nd = dd; nearest = g; }
   }
-  const ro = $("#ro-gap");
   if (inside) {
     ro.className = "good";
     ro.textContent = `in gap ${inside.lo.toFixed(2)}–${inside.hi.toFixed(2)} (margin ${Math.min(v - inside.lo, inside.hi - v).toFixed(2)}s)`;
@@ -1174,22 +1179,1960 @@ async function cancelPrecut() {
   } catch (e) { $("#pc-err").textContent = e.message; }
 }
 
+// -------------------------------------------------------------------- tapes
+
+// Only this tab's place, so a browser that refuses storage just starts at Cut.
+function remember(key, value) {
+  try { sessionStorage.setItem(key, value); } catch { /* the place is a convenience */ }
+}
+function recalled(key) {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+
+// A tape is not a record: it has its own store and never reaches the record picker,
+// so it has its own beside the tabs. ADR-063.
+let tape = null, tapePicked = null, tapeWatching = false;
+let tpOpen = null;                    // the song whose row is open
+let tpDraft = null;                   // a song being added, not yet on the list
+let tpNaming = false;                 // the New tape form is showing
+let tpJobStep = null;                 // the rail's step a running job belongs to
+let tpLanded = null;                  // the tape a song has been selected on
+let tpListAsk = null;                 // a list waiting to be said twice
+const tpRows = new Map();             // what a row remembers across a redraw of the table
+let tpKeys = [];                      // each row's key, by place, which a move carries along
+let tpKeyed = null;                   // the list those keys are for
+let tpNewKey = 0;
+const tpUnsent = new Map();           // "key/field" -> text sent and not yet known to be saved
+let tpHeldBack = false;               // the last save neither landed nor was refused
+let tpRedrawing = false;              // inputs leaving the page now are not a person leaving them
+let tpWatchOp = "";                   // the job being watched
+let tpSaving = false;                 // a list is on its way, so what the page holds is about to change
+let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
+let tpAllAsk = false;                 // Albums is asking about filing all from the list
+let tpErrIsJobs = false;              // what the error line says came from a job
+let tpRailOn = null;                  // the step the rail last scrolled to
+let tpGone = false;                   // the server is not answering
+let tpMisses = 0;                     // heartbeats in a row with no answer
+
+const mss = (seconds) => {
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+const clock = (seconds) => {
+  const whole = Math.round(seconds);
+  if (whole < 3600) return mss(whole);
+  const minutes = Math.floor(whole / 60) % 60;
+  return `${Math.floor(whole / 3600)}:${String(minutes).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
+};
+const signed = (n) => `${n > 0 ? "+" : ""}${n.toFixed(1)} s`;
+
+async function loadTapes(keep) {
+  try {
+    const found = await api("/api/tapes");
+    const pick = $("#tp-pick");
+    pick.replaceChildren(...found.tapes.map((t) => {
+      const o = el("option", null, `${t.name} (${t.songs})${t.mismatch ? " - mismatch" : ""}${t.done ? " - archived" : ""}`);
+      o.value = t.id;
+      return o;
+    }));
+    // Only an action clears this: it runs after a job, whose error is still being read.
+    if (found.unreadable.length && !$("#tp-err").textContent)
+      $("#tp-err").textContent = `could not read: ${found.unreadable.join(", ")}`;
+    const wanted = keep || tape?.id || recalled("rd-tape");
+    if (found.tapes.some((t) => t.id === wanted)) pick.value = wanted;
+    if (pick.value) await openTape(pick.value);
+    else showTape(null);
+  } catch (e) { tpFail(e); }
+}
+
+async function openTape(id) {
+  try {
+    await flushNudge();
+    if (tape?.id !== id) { tpOpen = null; tpDraft = null; tpLanded = null; tpListAsk = null; tpRows.clear(); tpKeyed = null; tpUnsent.clear(); }
+    showTape(await api(`/api/tapes/${id}`));
+    if (tape.job && !tape.job.done) watchTape();
+    else if (!$("#tp-err").textContent) {
+      $("#tp-err").textContent = jobErrorStands(tape) ? tape.job?.error || tape.prepare_failed : "";
+      tpErrIsJobs = true;
+    }
+  } catch (e) { tpFail(e); }
+}
+
+async function createTape() {
+  $("#tp-err").textContent = "";
+  try {
+    const made = await postJSON("/api/tapes", { name: $("#tp-name").value });
+    $("#tp-name").value = "";
+    tpNaming = false;
+    await loadTapes(made.id);
+  } catch (e) { tpFail(e); }
+}
+
+function showNaming(on) {
+  tpNaming = on;
+  showTape(tape);
+  if (on) $("#tp-name").focus();
+}
+
+// A row's place changes when a song moves, so what was pressed or typed on a row is held
+// by its key until its turn comes. These are the page's: the server knows only places.
+function keyRows(t) {
+  if (tpSaving || (tpKeyed === t.list_seen && tpKeys.length === t.songs.length)) return;
+  tpKeys = t.songs.map(() => ++tpNewKey);
+  tpKeyed = t.list_seen;
+}
+const keyOf = (number) => tpKeys[number - 1];
+const numberOf = (key) => tpKeys.indexOf(key) + 1;
+
+// A job's error stays until a person acts or it stops being true: Cut's once every song is
+// cut, File's once every song is filed, and any once the job has been forgotten for an edit.
+function jobErrorStands(t) {
+  if (!t.job?.error) return !!t.prepare_failed;
+  return !((t.job.op === "cut" && t.all_cut) || (t.job.op === "file" && t.all_filed));
+}
+
+function showTape(t) {
+  tape = t;
+  if (t) remember("rd-tape", t.id);
+  if (t) keyRows(t);
+  if (t && tpErrIsJobs && !jobErrorStands(t)) $("#tp-err").textContent = "";
+  const naming = !t || tpNaming;
+  $("#tp-new-form").hidden = !naming;
+  $("#tp-new-cancel").hidden = !t;
+  $("#tp-main-body").hidden = naming;
+  $("#tp-rail").hidden = naming;
+  $("#tapeview").classList.toggle("no-rail", naming);
+  if (!t) {
+    tpPlayer.stop();
+    tpDrawn = tpAudio = null;
+    tpEd.clear();
+    return;
+  }
+  if (tpOpen != null && !songOf(tpOpen)) tpOpen = null;
+  // An archived tape shown before this one left them all off.
+  for (const c of $("#tapepane").querySelectorAll("input, button")) c.disabled = false;
+  $("#tp-what").textContent = t.name;
+  const said = [t.source, t.duration ? clock(t.duration) : "",
+    `${t.songs.length} song${t.songs.length === 1 ? "" : "s"}`].filter(Boolean);
+  $("#tp-meta").textContent = said.join(" · ");
+  showStart(t);
+  showEar(t);
+  showRail(t);
+  showSongs(t);
+  // Opening the tape again during a job would otherwise offer what it would refuse.
+  if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  if (cutWouldWait(t)) $("#tp-cut").disabled = false;
+  if (t.playlist.done) archivedControls();
+  showNext();
+  autoPrepare(t);
+  landOn(t);
+}
+
+// A tape opens on what needs its person, or else on its first song. The found edges
+// are not touched, and nothing is chosen for a nudge.
+function landOn(t) {
+  if (tpLanded === t.id || tapeWatching || t.prepare_needed) return;
+  if (!t.songs.some((s) => s.start != null)) return;
+  const doubt = t.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b)[0];
+  const open = t.songs.find((s) => !s.skip && !s.settled_by)?.number;
+  tapeSelect(doubt ?? open ?? t.songs[0].number, "start", false);
+}
+
+// With its audio and list both in, a tape needs no button to go on. A run that failed
+// has said why, so nothing starts it again until a person does: the server keeps that
+// and says what is owed, which a job in progress or a song already answered is not.
+let tpPrepareSoon = null, tpPrepareStarting = false;
+let tpActing = 0;                     // what a person pressed that has not been answered
+let tpCutWaits = false;               // Cut was pressed during an automatic lookup
+const tpStopped = new Set();          // tapes whose last job ended in error, until a person acts
+
+function autoPrepare(t) {
+  if (!t.prepare_needed || tapeWatching || (t.job && !t.job.done) || tpStopped.has(t.id)) return;
+  // The next field of a row would be refused while the job holds the tape, and what a
+  // person just pressed would be too, so this waits for both.
+  if (tpActing || document.activeElement?.closest?.("#tp-rows")) {
+    clearTimeout(tpPrepareSoon);
+    tpPrepareSoon = setTimeout(() => { if (tape?.id === t.id) autoPrepare(tape); }, 1500);
+    return;
+  }
+  // A save draws the page twice, and the job's first answer takes longer than that.
+  if (tpPrepareStarting) return;
+  tpPrepareStarting = true;
+  postTapeJob(`/api/tapes/${t.id}/prepare`, {}).finally(() => { tpPrepareStarting = false; });
+}
+
+// A cut needs nothing a lookup finds, and its songs' boundaries are settled, so what is
+// only an automatic lookup holding the tape for a moment has Cut waiting rather than off.
+const cutWouldWait = (t) => !!t && tapeWatching && t.job?.op === "prepare" && !t.job.done
+  && !t.cut_refusal && t.audio && !t.all_cut;
+
+// Run as soon as the job holding the tape ends, unless that left it refused.
+function cutAfterLookup(id) {
+  if (!tpCutWaits || tape?.id !== id) return;
+  tpCutWaits = false;
+  if (tape.cut_refusal) { $("#tp-err").textContent = tape.cut_refusal; return; }
+  cutTape();
+}
+
+// An archived tape stays as it is, so nothing here may offer to change it. Its
+// waveform can still be looked around, and its playlist can still be asked about.
+function archivedControls() {
+  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-list-add", "#tp-process", "#tp-match", "#tp-rematch", "#tp-all-list"])
+    $(id).disabled = true;
+  for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
+  for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = !tpEd.side;
+  // The album it was filed under is not the tape, and can still take a cover.
+  for (const c of $("#tapepane").querySelectorAll("[data-cover]")) c.disabled = false;
+}
+
+// What a new tape still needs, said where the waveform will be.
+function showStart(t) {
+  const hasAudio = t.audio || !!t.upload;
+  const placed = t.songs.some((s) => s.start != null);
+  $("#tp-need-file").hidden = hasAudio;
+  $("#tp-need-list").hidden = t.songs.length > 0 || !!tpDraft;
+  $("#tp-need-find").hidden = tapeWatching || t.prepare_needed
+    || !(t.audio || (t.upload && t.upload.have === t.upload.total)) || !t.songs.length;
+  $("#tp-start").hidden = placed || t.playlist.done
+    || [$("#tp-need-file"), $("#tp-need-list"), $("#tp-need-find")].every((b) => b.hidden);
+}
+
+// ---- the rail
+
+const TP_STEPS = ["recording", "list", "boundaries", "albums", "cut", "file", "playlist", "archive"];
+const JOB_STEP = { audio: "recording", boundaries: "boundaries", albums: "albums", tape: "boundaries", match: "albums", cut: "cut", file: "file", playlist: "playlist", archive: "archive" };
+
+const songsNamed = (numbers) => {
+  const first = numbers.slice(0, 6).join(", ");
+  const more = numbers.length > 6 ? ` and ${numbers.length - 6} more` : "";
+  return `${numbers.length === 1 ? "Song" : "Songs"} ${first}${more}`;
+};
+
+const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+const stepBox = (id) => document.getElementById(`tp-st-${id}`);
+
+// `why` is what will not fit in a line, kept one press away.
+function tpStep(id, kind, state, detail, why = "") {
+  const box = stepBox(id);
+  box.dataset.kind = kind;
+  box.querySelector(".tp-state").textContent = state;
+  box.querySelector(".tp-detail").textContent = detail;
+  const more = box.querySelector(".tp-why");
+  more.hidden = !why;
+  more.querySelector("p").textContent = why;
+}
+
+// Only what this step can do, and the blue one is the next thing to press.
+function tpAction(id, show, primary = false, disabled = false) {
+  const b = $(id);
+  b.hidden = !show;
+  b.disabled = disabled;
+  b.classList.toggle("ghost", !primary);
+}
+
+function stepRecording(t) {
+  const partial = !!t.upload && t.upload.have < t.upload.total;
+  const failed = !!tapePicked && !tapeWatching && partial;
+  const here = t.audio || (t.upload && !partial);
+  tpAction("#tp-file-pick", !here && !t.playlist.done, !partial, false);
+  $("#tp-file-pick").textContent = partial ? "Choose the same file…" : "Choose a file…";
+  tpAction("#tp-go", failed, true);
+  tpAction("#tp-cancel", !!t.upload);
+  if (t.playlist.done) return tpStep("recording", "done", "Archived", t.source);
+  if (t.audio) return tpStep("recording", "done", "Uploaded", [t.source, t.duration ? clock(t.duration) : ""].filter(Boolean).join(" · "));
+  if (t.upload && !partial) return tpStep("recording", "done", "Here", `${t.upload.name}, ${mb(t.upload.total)}, not read yet.`);
+  if (partial) return tpStep("recording", "todo", "Part-way", `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)}. Choose the same file to carry on.`);
+  return tpStep("recording", "todo", "No file", "The one uncut recording of the whole tape.");
+}
+
+function stepList(t) {
+  const has = t.songs.length > 0;
+  tpAction("#tp-csv-pick", true, !has);
+  tpAction("#tp-list-add", !has && !tpDraft);
+  if (has) return tpStep("list", "done", counted(t.songs.length, "song", "songs"), "Edit any song by opening its row.");
+  return tpStep("list", "todo", "Empty", "Load a CSV, or add the songs by hand.");
+}
+
+function stepBoundaries(t) {
+  const placed = t.songs.some((s) => s.start != null);
+  const doubts = t.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
+  const canFind = t.songs.length > 0 && (t.audio || (t.upload && t.upload.have === t.upload.total));
+  tpAction("#tp-process", canFind || placed, !placed, !canFind || !!t.place_refusal);
+  $("#tp-process").textContent = placed ? "Find again" : "Find boundaries";
+  tpAction("#tp-review-next", doubts.length > 0, true);
+  if (!canFind && !placed) return tpStep("boundaries", "wait", "Waiting", "Needs the recording and the song list.");
+  if (!placed) return tpStep("boundaries", "ready", "Not run", "Find where each song begins and ends.");
+  if (doubts.length) {
+    const lead = t.mismatch ? "The list and the audio disagree. " : "";
+    return tpStep("boundaries", "todo", `${doubts.length} to check`,
+      `${lead}${songsNamed(doubts)} ${doubts.length === 1 ? "needs" : "need"} listening to.`, t.mismatch);
+  }
+  if (t.place_refusal) return tpStep("boundaries", "done", "All checked", "Every song is in the library, so there is nothing to find again.");
+  return tpStep("boundaries", "done", "All checked", "Every boundary is set, accepted or skipped.");
+}
+
+function stepAlbums(t) {
+  const live = t.songs.filter((s) => !s.skip);
+  const unasked = live.filter((s) => !s.proposal && !s.settled_by).length;
+  const open = live.filter((s) => !s.settled_by).map((s) => s.number);
+  const failed = live.filter((s) => !s.settled_by && s.proposal?.status === "failed").length;
+  tpAction("#tp-match", t.songs.length > 0 && unasked > 0, true);
+  tpAction("#tp-rematch", t.songs.length > 0 && !unasked && open.length > 0);
+  const ready = t.from_list.numbers;
+  const onlyThose = ready.length > 0 && ready.length === open.length;
+  tpAction("#tp-next-album", open.length > 0 && !unasked, !onlyThose);
+  tpAction("#tp-all-list", ready.length > 0 && !tapeWatching, onlyThose);
+  $("#tp-all-list").textContent = `File ${counted(ready.length, "song", "songs")} from my list`;
+  showAllAsk(ready, open.length - ready.length - t.from_list.no_album, t.from_list.no_album);
+  if (!t.songs.length) return tpStep("albums", "wait", "Waiting", "Needs the song list.");
+  if (unasked === live.length && live.length) return tpStep("albums", "ready", "Not run", "Find the album each song belongs to.");
+  if (unasked) return tpStep("albums", "ready", `${unasked} not looked up`, `${songsNamed(open)} still ${open.length === 1 ? "needs" : "need"} an album.`);
+  if (failed) return tpStep("albums", "fail", `${failed} failed`, `${counted(failed, "lookup", "lookups")} could not finish. Look again to retry.`);
+  if (open.length) return tpStep("albums", "todo", `${open.length} to choose`, `${songsNamed(open)} ${open.length === 1 ? "needs" : "need"} an album chosen.`);
+  return tpStep("albums", "done", "All chosen", "Every song knows its album.");
+}
+
+// One question, saying what counts: no match at all, and an album to file it under.
+function showAllAsk(ready, choosing, noAlbum) {
+  const box = $("#tp-all-ask");
+  tpAllAsk = tpAllAsk && ready.length > 0 && !tapeWatching;
+  box.hidden = !tpAllAsk;
+  if (!tpAllAsk) { box.replaceChildren(); return; }
+  const said = [
+    `${counted(ready.length, "song has", "songs have")} no match at all, so each is tagged from your list, with no release, cover or date.`,
+    choosing > 0 ? (choosing === 1 ? "1 song with something to choose stays as it is." : `${choosing} songs with something to choose stay as they are.`) : "",
+    noAlbum ? `${counted(noAlbum, "song", "songs")} with no album on your list ${noAlbum === 1 ? "stays" : "stay"} too.` : "",
+  ].filter(Boolean).join(" ");
+  box.replaceChildren(askView(said, "File them", () => {
+    tpAllAsk = false;
+    settleSong(() => postJSON(`/api/tapes/${tape.id}/from-list`, { numbers: ready }));
+  }, () => { tpAllAsk = false; showRail(tape); }));
+}
+
+// The cut's own refusal names every song; a rail line counts what it is waiting on.
+function cutWaits(t) {
+  const live = t.songs.filter((s) => !s.skip);
+  const unplaced = live.filter((s) => s.start == null || s.end == null).length;
+  const noRoom = live.filter((s) => s.start != null && s.end != null && s.end <= s.start).length;
+  const doubts = t.ear.filter((r) => r.doubtful).length;
+  return [
+    unplaced ? "the boundaries" : "",
+    noRoom ? counted(noRoom, "song with no room between its boundaries", "songs with no room between their boundaries") : "",
+    doubts ? counted(doubts, "boundary to check", "boundaries to check") : "",
+  ].filter(Boolean);
+}
+
+function stepCut(t) {
+  const failed = t.ear.filter((r) => r.cut === "failed").map((r) => r.number);
+  const stale = t.ear.filter((r) => r.cut === "out of date").length;
+  const live = t.ear.filter((r) => r.cut !== "skipped" && r.cut !== "not needed").length;
+  const skipped = t.songs.filter((s) => s.skip).map((s) => s.number);
+  const left = skipped.length ? ` ${songsNamed(skipped)} left out, by your choice.` : "";
+  const refused = !!t.cut_refusal || !t.audio;
+  tpAction("#tp-cut", !t.playlist.done && !t.all_cut, !refused, refused);
+  $("#tp-cut").textContent = failed.length || stale ? "Cut again" : "Cut";
+  if (tpCutWaits) return tpStep("cut", "ready", "Next", "Cuts as soon as the lookup finishes.");
+  if (t.playlist.done) return tpStep("cut", "done", "Cleared", "The cuts were cleared once the songs were proved filed.");
+  if (!t.songs.length) return tpStep("cut", "wait", "Waiting", "Needs the song list.");
+  if (t.all_cut && !t.cut_refusal) return tpStep("cut", "done", "Cut", `${counted(live, "file", "files")} written.${left}`);
+  if (t.cut_refusal) {
+    const waits = cutWaits(t);
+    return tpStep("cut", "wait", "Waiting", waits.length ? `Waiting on ${waits.join(" and ")}.` : t.cut_refusal);
+  }
+  if (!t.audio) return tpStep("cut", "wait", "Waiting", "Needs the recording.");
+  if (failed.length) return tpStep("cut", "fail", `${failed.length} failed`, `${songsNamed(failed)} could not be cut. Open the row to see why.`);
+  if (stale) return tpStep("cut", "ready", `${stale} out of date`, `${counted(stale, "boundary has", "boundaries have")} moved since the cut.`);
+  return tpStep("cut", "ready", "Ready", `${counted(live, "song", "songs")} will be cut.${left}`);
+}
+
+const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
+
+function stepFile(t) {
+  const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
+  const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).map((o) => o.number).sort((a, b) => a - b) : [];
+  // Stopped on its way to beets: the row says not confirmed, and only File again answers.
+  const unsure = t.songs.filter((s) => s.import_begun && s.filing === "pending").map((s) => s.number);
+  const refused = !!t.file_refusal;
+  tpAction("#tp-file-songs", !t.playlist.done && !t.all_filed, !refused, refused);
+  $("#tp-file-songs").textContent = failed.length || unsure.length ? "File again" : "File";
+  const coverless = t.filing.filter((o) => o.no_cover).map((o) => o.number).sort((a, b) => a - b);
+  if (t.all_filed) {
+    return tpStep("file", "done", "Filed", `Every song is in the library.${coverless.length
+      ? ` ${songsNamed(coverless)} found no cover.` : ""}`);
+  }
+  if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
+  if (unsure.length) return tpStep("file", "todo", `${unsure.length} not confirmed`, `${songsNamed(unsure)} may have reached the library. File again looks before it imports anything.`);
+  const albums = t.songs.filter((s) => !s.skip && !s.settled_by).length;
+  if (albums) return tpStep("file", "wait", "Waiting", `Waiting on ${t.all_cut ? "" : "the cut and "}${counted(albums, "album to choose", "albums to choose")}.`);
+  if (refused) return tpStep("file", "wait", "Waiting", "Waiting on the cut.");
+  return tpStep("file", "ready", "Ready", "Each album gets its own run through beets.");
+}
+
+const PLAYLIST_WORDS = {
+  written: "file rewritten", unchanged: "file unchanged, so left untouched",
+  unknown: "the library could not be asked", nothing: "nothing written",
+  failed: "the file could not be written",
+};
+
+function stepPlaylist(t) {
+  const p = t.playlist;
+  const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
+  tpAction("#tp-playlist", true, started && !p.outcome, !started);
+  $("#tp-playlist").textContent = p.outcome ? "Write again" : "Write playlist";
+  const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
+  const told = t.job?.result?.notes ?? [];
+  const why = [
+    p.outcome ? `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.` : "",
+    p.path, p.note, ...told,
+    ...p.left_out.map((g) => `Song ${g.number} (${named(g.number)}): ${g.why}`),
+  ].filter(Boolean).join("\n");
+  if (!p.outcome) return tpStep("playlist", started ? "ready" : "wait", started ? "Ready" : "Waiting", started ? "No playlist written yet." : "Waiting on File.", why);
+  if (p.outcome !== "written" && p.outcome !== "unchanged")
+    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`, why);
+  // The file is all this knows about: whether the server shows it is the server's to say.
+  const server = "The music server imports it within about a minute, and an admin there may need to make imported playlists public.";
+  const name = p.path.split("/").pop();
+  if (p.left_out.length)
+    return tpStep("playlist", "todo", "File written", `${p.songs} of ${t.songs.length} songs, ${p.left_out.length} left out.`, [server, why].join("\n"));
+  return tpStep("playlist", "done", "File written", name, [server, why].join("\n"));
+}
+
+function stepArchive(t) {
+  const p = t.playlist;
+  const unfiled = t.filing.every((o) => o.state === "pending" || o.state === "skipped");
+  tpAction("#tp-archive", !p.done, !p.archive_refusal, !!p.archive_refusal);
+  if (p.done) return tpStep("archive", "done", "Archived", "Copied and read back. The song list stays.", p.archived.file);
+  if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
+  if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
+  return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
+}
+
+// What is next is the first step not done, and the thing to press is its blue button.
+function stepNow() {
+  const id = TP_STEPS.find((s) => stepBox(s).dataset.kind !== "done");
+  if (!id) return null;
+  const button = [...stepBox(id).querySelectorAll(".tp-acts button")]
+    .find((b) => !b.hidden && !b.disabled && !b.classList.contains("ghost"));
+  return { id, button };
+}
+
+// The rail can be longer than the window, and the header is always on screen, so the next
+// action is in both. A step that has just become current is scrolled to, once, so a person
+// who scrolled the rail themselves is left where they are.
+function showNext() {
+  const now = stepNow();
+  const act = $("#tp-next-act");
+  const running = tapeWatching && !cutWouldWait(tape);
+  act.hidden = !now?.button || running;
+  act.textContent = now?.button?.textContent ?? "";
+  act.onclick = () => now?.button?.click();
+  const box = now && stepBox(now.id);
+  const word = box ? `${box.querySelector("b").textContent}: ${box.querySelector(".tp-state").textContent}` : "Done";
+  $("#tp-rail-bar").querySelector("span").textContent = word;
+  $("#tp-rail-bar").dataset.kind = box?.dataset.kind ?? "done";
+  if (!now || tpRailOn === now.id) return;
+  tpRailOn = now.id;
+  box.scrollIntoView({ block: "nearest" });
+}
+
+function showRail(t) {
+  stepRecording(t);
+  stepList(t);
+  stepBoundaries(t);
+  stepAlbums(t);
+  stepCut(t);
+  stepFile(t);
+  stepPlaylist(t);
+  stepArchive(t);
+  if (tpJobStep) stepBusy(tpJobStep);
+  showLeft();
+}
+
+function showLeft() {
+  const kinds = TP_STEPS.map((id) => stepBox(id).dataset.kind);
+  const left = kinds.filter((k) => k !== "done").length;
+  const pill = $("#tp-left");
+  pill.querySelector("span").textContent = left ? counted(left, "step left", "steps left") : "Done";
+  pill.dataset.kind = !left ? "done" : kinds.includes("fail") ? "fail" : kinds.includes("todo") ? "todo" : "ready";
+}
+
+function stepBusy(id) {
+  const box = stepBox(id);
+  box.dataset.kind = "run";
+  box.querySelector(".tp-state").textContent = "Working";
+  box.append($("#tp-progress"));
+  $("#tp-progress").hidden = false;
+}
+
+function stepIdle() {
+  $("#tp-progress").hidden = true;
+  $("#tp-state").textContent = "";
+  setBar(0, "#tp-bar");
+}
+
+// ---- the table
+
+const CHOICE_HELD = {
+  filed: "in the library, so this stays as it was filed",
+  already: "in the library, so this stays as it was filed",
+  unknown: "not confirmed, so this waits until File again gets an answer",
+};
+
+function boundaryWord(song, row) {
+  if (song.skip) return ["Skipped", "bad"];
+  if (song.start == null) return ["Not placed", "mute"];
+  if (song.set_by === "ear") return ["Set by you", "good"];
+  if (song.heard) return ["Accepted", "good"];
+  if (row?.doubtful) return ["Check", "warn"];
+  return ["Agrees", "good"];
+}
+
+function releaseWord(song, rel) {
+  if (song.skip) return ["—", "mute"];
+  if (song.import_begun || song.filing === "unknown") return ["Not confirmed", "warn"];
+  if (song.filing === "filed") return ["Filed", "good", song.no_cover ? "warn" : null];
+  if (song.filing === "already") return ["In your library", "good"];
+  if (song.filing === "failed") return ["Filing failed", "bad"];
+  if (song.proposal?.status === "owned") return ["In your library", "good"];
+  // The dot asks for a look at a choice made for them, which a person's own has had.
+  const noted = rel?.edition_note ? "warn" : null;
+  if (song.settled_by === "catalogue") return ["Matched", "good", noted];
+  if (song.settled_by) return [song.proposal?.choice ? "Your choice" : "From your list", "good"];
+  if (rel?.maybe_copy) return ["Your copy?", "warn"];
+  const p = song.proposal;
+  if (!p) return ["Not looked up", "mute"];
+  if (p.status === "failed") return ["Lookup failed", "bad"];
+  if (p.candidates.length > 1) return [`${p.candidates.length} to choose`, "warn"];
+  return [p.candidates.length ? "To confirm" : "No match", "warn"];
+}
+
+const releaseOf = (t, n) => t.releases?.find((r) => r.number === n) ?? null;
+const rowState = (n) => {
+  if (!tpRows.has(n)) tpRows.set(n, {});
+  return tpRows.get(n);
+};
+
+function statusCell(word) {
+  const td = el("td", "tp-col-status");
+  const box = el("span", `tp-status is-${word[1]}`);
+  box.append(el("i", word[2] ? `is-${word[2]}` : null), el("span", null, word[0]));
+  td.append(box);
+  return td;
+}
+
+function songRowView(song, row) {
+  const tr = el("tr", [tpOpen === song.number ? "sel" : "", song.skip ? "skipped" : ""].join(" ").trim());
+  tr.dataset.song = song.number;
+  tr.onclick = () => {
+    tapeSelect(song.number, "start", true);
+    // Stacked on a phone, the waveform is not beside the row that was pressed.
+    if (matchMedia("(max-width:48rem)").matches && !$("#tp-wave-wrap").hidden)
+      $("#tp-wave-wrap").scrollIntoView({ block: "start" });
+  };
+  const choice = song.proposal?.choice;
+  const rel = releaseOf(tape, song.number);
+  const album = rel?.copy?.album || (song.settled_by && choice?.release_title) || song.album || "no album";
+  const who = el("td", "tp-col-song");
+  const line = el("div", "tp-who");
+  line.append(el("span", "tp-title", song.title), el("span", "tp-artist", song.artist));
+  who.append(line);
+  who.title = `${song.title}, ${song.artist}`;
+  const albumCell = el("td", "tp-col-album", album);
+  albumCell.title = album;
+  const span = el("td", "tp-col-span mono",
+    song.start != null && song.end != null ? `${clock(song.start)}–${clock(song.end)}` : "");
+  const length = el("td", "tp-col-len mono");
+  length.append(el("span", null, mss(song.length)));
+  if (song.delta != null)
+    length.append(el("span", Math.abs(song.delta) > 3 ? "tp-off warned" : "tp-off", signed(song.delta)));
+  tr.append(el("td", "num tp-col-num", song.number), who, albumCell, span, length,
+            statusCell(boundaryWord(song, row)), statusCell(releaseWord(song, rel)));
+  return tr;
+}
+
+function fieldInput(label, name, value, wide) {
+  const box = el("label", wide ? "wide" : null, label);
+  const input = el("input");
+  input.dataset.field = name;
+  input.value = value;
+  input.autocomplete = "off";
+  box.append(input);
+  return [box, input];
+}
+
+// Edits are the whole list by hand, to the route that takes it, so what the route
+// says about a list holds for each edit and the page never holds unsaved text.
+const listNow = () => tape.songs.map((s, i) => ({ key: tpKeys[i], title: s.title, artist: s.artist, album: s.album, length: s.length }));
+
+// What the route says decides whether anything is lost. A job button waits for this: a
+// click that blurs an edited field sends the edit first, and the job has to see it.
+let tpListSaved = Promise.resolve();
+
+// One at a time, each built from the tape the last one left, since the route refuses a
+// list made from one it no longer holds. `seen` is for a list asked about earlier. The
+// open row stays the open row wherever this leaves it, unless `openAfter` names another.
+function sendList(build, openAfter, sure = false, seen = null) {
+  tpActing += 1;
+  const turn = tpListSaved.then(() => saveList(build(), openAfter, sure, seen ?? tape.list_seen));
+  tpListSaved = turn.catch(() => false).finally(() => { tpActing -= 1; });
+  return turn;
+}
+
+// Everything a row sends takes its turn with the rest, or a press would meet the save a
+// click just caused, or be built from a song's place before a move.
+function rowTurn(work) {
+  tpActing += 1;
+  const turn = tpListSaved.then(work);
+  tpListSaved = turn.catch(() => false).finally(() => { tpActing -= 1; });
+  return turn;
+}
+
+async function saveList(rows, openAfter, sure, seen) {
+  $("#tp-err").textContent = "";
+  waveSay("");
+  await flushNudge();
+  const url = `/api/tapes/${tape.id}/songs`;
+  const songs = rows.map(({ key, ...song }) => song);
+  tpHeldBack = false;
+  tpSaving = true;
+  try {
+    const after = await postJSON(url, sure ? { songs, seen, confirm: true } : { songs, seen });
+    const open = openAfter ?? keyOf(tpOpen);
+    tpSaving = false;
+    tpSaves += 1;
+    tpKeys = rows.map((r) => r.key);
+    tpKeyed = after.list_seen;
+    tpOpen = numberOf(open) || null;
+    tpRows.clear();
+    tpStopped.delete(tape.id);
+    showTape(after);
+    await loadTapes(tape.id);
+    return true;
+  } catch (e) {
+    tpSaving = false;
+    if (e.stale) {
+      tpListAsk = null;
+      await reloadTape();
+    }
+    tpHeldBack = e.busy || !e.status;
+    if (e.needsConfirm) tpListAsk = { said: e.message, songs: rows, openAfter, seen, row: tpOpen };
+    else tpFail(e);
+    showSongs(tape);
+    return false;
+  }
+}
+
+async function reloadTape() {
+  try { showTape(await api(`/api/tapes/${tape.id}`)); } catch { /* the reason being said still stands, and the page keeps what it last knew */ }
+}
+
+// Asked in the row that pressed it: the answer belongs beside the button.
+function askView(said, yes, onYes, onNo) {
+  const box = el("div", "tp-ask");
+  box.append(el("span", null, said),
+             smallButton(yes, "yes, knowing that", onYes, "tiny"),
+             smallButton("Cancel", "leave things as they are", onNo));
+  return box;
+}
+
+function listAskView() {
+  const { said, songs, openAfter, seen } = tpListAsk;
+  const plain = said.charAt(0).toUpperCase() + said.slice(1);
+  return askView(`${plain}.`, "Go ahead", async () => {
+    tpListAsk = null;
+    const draft = tpDraft;
+    tpDraft = null;
+    if (!await sendList(() => songs, openAfter, true, seen)) { tpDraft = draft; showTape(tape); }
+  }, () => { tpListAsk = null; showSongs(tape); });
+}
+
+// Once, when the person has left the field with something different in it. What a refusal
+// turned down goes back to the truth; what could not be asked yet stays on the row and is
+// sent again when it can be.
+async function editField(key, input) {
+  const name = input.dataset.field, value = input.value;
+  const held = `${key}/${name}`;
+  input.dataset.saved = value;
+  tpUnsent.set(held, value);
+  const saved = await sendList(() => {
+    const songs = listNow();
+    const row = songs.find((s) => s.key === key);
+    if (row) row[name] = value;
+    return songs;
+  });
+  if (!saved && tpHeldBack) {
+    // The row says it is waiting, and that is true of a job a person is watching run.
+    $("#tp-err").textContent = "";
+    showSongs(tape);
+    return;
+  }
+  tpUnsent.delete(held);
+  if (!saved) showSongs(tape);
+}
+
+function leftField(key, input) {
+  if (!tpRedrawing && input.value !== input.dataset.saved) editField(key, input);
+}
+
+function sendUnsent() {
+  for (const [held, value] of [...tpUnsent]) {
+    const [key, field] = held.split("/");
+    editField(Number(key), { dataset: { field }, value });
+  }
+}
+
+// By the key: pressed twice, or behind a save, it goes on moving the song it was pressed
+// for, where a place would swap whichever song had just arrived there.
+function moveSong(key, by) {
+  sendList(() => {
+    const songs = listNow();
+    const from = songs.findIndex((s) => s.key === key);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= songs.length) return songs;
+    songs.splice(to, 0, songs.splice(from, 1)[0]);
+    return songs;
+  });
+}
+
+function removeSong(key) {
+  sendList(() => listNow().filter((s) => s.key !== key));
+}
+
+function edgesFromRow(key, box) {
+  const edge = (name) => box.querySelector(`input[data-edge=${name}]`).value.trim();
+  if (!edge("start") || !edge("end")) {
+    waveSay("");
+    $("#tp-err").textContent = `song ${numberOf(key)}: both edges need a number of seconds - a blank one is not 0`;
+    showSongs(tape);
+    return;
+  }
+  const [start, end] = [Number(edge("start")), Number(edge("end"))];
+  rowTurn(() => saveTapeEdges(numberOf(key), start, end));
+}
+
+function edgeInput(song, name, label, box) {
+  const wrap = el("label", null, label);
+  const input = el("input");
+  const key = keyOf(song.number);
+  input.type = "number"; input.step = "0.01"; input.min = "0";
+  input.dataset.edge = name;
+  input.dataset.field = name;
+  input.value = song[name];
+  const leave = () => {
+    if (tpRedrawing || input.value === input.dataset.saved) return;
+    input.dataset.saved = input.value;
+    edgesFromRow(key, box);
+  };
+  input.onblur = leave;
+  input.onkeydown = (e) => { if (e.key === "Enter") leave(); };
+  wrap.append(input);
+  return wrap;
+}
+
+const MISMATCH_SAYS = "the list and the audio disagreed across this tape, and this song has not been judged";
+
+function smallButton(text, title, act, cls = "ghost tiny") {
+  const b = el("button", cls, text);
+  b.type = "button"; b.title = title;
+  b.onclick = (e) => { e.stopPropagation(); act(); };
+  return b;
+}
+
+// Answers replace the page's rows, and a pending nudge belongs to the row it left. A
+// refusal that only wants saying twice is handed back, to be asked where it was pressed.
+async function settleSong(send, onAsk) {
+  return rowTurn(async () => {
+    $("#tp-err").textContent = "";
+    await flushNudge();
+    try {
+      const after = await send({});
+      tpSaves += 1;
+      showTape(after);
+    } catch (e) {
+      if (e.needsConfirm && onAsk) onAsk(e);
+      else tpFail(e);
+    }
+  });
+}
+
+const SHOWN_OPTIONS = 4;
+
+function farWords(song, o) {
+  const off = o.delta ?? (o.length == null ? null : o.length - song.length);
+  if (off == null) return "";
+  return `${Math.abs(off).toFixed(0)} s ${off > 0 ? "longer" : "shorter"} than your list. Use it anyway?`;
+}
+
+function chooseRelease(song, release, o, more = {}) {
+  const state = rowState(song.number);
+  const key = keyOf(song.number);
+  state.ask = null;
+  state.open = false;
+  return settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`, { release, ...more, ...extra }), (e) => {
+    state.ask = { release, said: (o && farWords(song, o)) || `${e.message}.`, more };
+    state.open = true;
+    showSongs(tape);
+  });
+}
+
+function offWords(song, o) {
+  const off = o.delta ?? (o.length == null ? null : o.length - song.length);
+  if (off == null) return ["no length", ""];
+  if (Math.abs(off) < 0.05) return ["same length", ""];
+  return [signed(off), Math.abs(off) > 3 ? "warned" : ""];
+}
+
+// One line, in columns, so that a list of editions reads down rather than across.
+function optionLine(song, o, kind) {
+  const state = rowState(song.number);
+  const box = el("div", `tp-opt ${kind}`.trim());
+  const go = el("button", "tp-opt-go");
+  go.type = "button";
+  go.disabled = kind === "on";
+  go.title = kind === "on" ? "chosen" : "file this song under this album";
+  // One release can be offered with two recordings, and this line is one of them.
+  const mine = o.recording ? { recording: o.recording } : {};
+  go.onclick = (e) => { e.stopPropagation(); chooseRelease(song, o.release, o, mine); };
+  const name = el("span", "tp-opt-album");
+  name.append(el("span", null, o.release_title));
+  const named = [song.title.toLowerCase(), o.release_title.toLowerCase()];
+  if (o.track_title && !named.includes(o.track_title.toLowerCase()))
+    name.append(el("span", "tp-opt-track", o.track_title));
+  const [off, offClass] = offWords(song, o);
+  go.append(el("i"), name,
+    el("span", "tp-opt-year", o.year ?? o.date?.slice(0, 4) ?? ""),
+    el("span", "tp-opt-kind", o.kind ?? ""),
+    el("span", "tp-opt-place", o.number ? `${o.number}${o.tracks ? ` of ${o.tracks}` : ""}` : ""),
+    el("span", `tp-opt-off ${offClass}`.trim(), off),
+    el("span", "tp-opt-lib", o.in_library ? "In your library" : ""));
+  box.append(go);
+  if (state.ask?.release === o.release && (state.ask.more?.recording ?? "") === (o.recording ?? "")) {
+    const key = keyOf(song.number);
+    box.append(askView(state.ask.said, "Use it", () => {
+      const { more } = state.ask;
+      state.ask = null;
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
+        { release: o.release, ...more, ...extra, confirm: true }));
+    }, () => { state.ask = null; showSongs(tape); }));
+  }
+  return box;
+}
+
+async function runSearch(song, title, artist) {
+  const state = rowState(song.number);
+  state.title = title; state.artist = artist;
+  state.said = "Searching…";
+  state.open = true;
+  $("#tp-err").textContent = "";
+  showSongs(tape);
+  try {
+    const got = await postJSON(`/api/tapes/${tape.id}/songs/${song.number}/search`, { title, artist });
+    state.said = got.options.length ? "" : got.reason || "Nothing found.";
+    state.all = false;
+    showTape(await api(`/api/tapes/${tape.id}`));
+  } catch (e) {
+    state.said = "";
+    tpFail(e);
+    showSongs(tape);
+  }
+}
+
+function searchForm(song) {
+  const state = rowState(song.number);
+  const form = el("form", "tp-search");
+  const box = (name, value, label) => {
+    const input = el("input");
+    input.dataset.field = `search-${name}`;
+    input.value = value;
+    input.autocomplete = "off";
+    input.setAttribute("aria-label", label);
+    return input;
+  };
+  const title = box("title", state.title ?? song.title, "title to search for");
+  const artist = box("artist", state.artist ?? song.artist, "artist to search for");
+  const go = el("button", "ghost tiny", "Search");
+  go.disabled = state.said === "Searching…";
+  form.append(title, artist, go);
+  form.onsubmit = (e) => { e.preventDefault(); runSearch(song, title.value, artist.value); };
+  form.onclick = (e) => e.stopPropagation();
+  if (state.said) form.append(el("span", "dim tp-search-said", state.said));
+  return form;
+}
+
+function byIdForm(song) {
+  const by = el("div", "tp-by-id");
+  const id = el("input");
+  id.placeholder = "release id or link";
+  id.setAttribute("aria-label", "release id or link");
+  const track = el("input");
+  track.dataset.field = "track";
+  track.placeholder = "track";
+  track.setAttribute("aria-label", "track number, if the title is not found");
+  by.append(id, track, smallButton("Use", "look this release up and file the song under it",
+    () => chooseRelease(song, id.value, null, { track: track.value })));
+  const state = rowState(song.number);
+  if (state.ask && !state.ask.said.endsWith("anyway?")) {
+    const key = keyOf(song.number);
+    by.append(askView(state.ask.said, "Use it", () => {
+      const { release, more } = state.ask;
+      state.ask = null;
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
+        { release, ...more, ...extra, confirm: true }));
+    }, () => { state.ask = null; showSongs(tape); }));
+  }
+  return by;
+}
+
+function releaseOptions(song, rel) {
+  const change = el("div", "tp-release");
+  const state = rowState(song.number);
+  const key = keyOf(song.number);
+  const current = song.proposal?.choice;
+  const others = rel?.options ?? [];
+  const isCurrent = (c) => current && c.release === current.release && c.recording === current.recording;
+  // A release given by hand is on no list of candidates, and is still the current one.
+  const offered = current?.release && !others.some(isCurrent) ? [current, ...others] : others;
+  const chosen = song.settled_by ? offered.filter(isCurrent) : [];
+  const ordered = [...chosen, ...offered.filter((c) => !chosen.includes(c))];
+  const shown = state.all ? ordered : ordered.slice(0, SHOWN_OPTIONS);
+  if (shown.length) {
+    const pick = el("div", "tp-opts");
+    shown.forEach((c, i) => pick.append(optionLine(song, c, chosen.includes(c) ? "on" : i === 0 ? "best" : "")));
+    if (ordered.length > shown.length) {
+      pick.append(smallButton(`${ordered.length - shown.length} more`, "show every option",
+        () => { state.all = true; showSongs(tape); }, "tp-quiet"));
+    }
+    change.append(pick);
+  }
+  // What the library holds, or may hold, was filed as this choice, and the route
+  // refuses another.
+  const held = CHOICE_HELD[song.import_begun ? "unknown" : song.filing];
+  if (held) {
+    for (const c of change.querySelectorAll("input, select, button")) c.disabled = true;
+    change.append(el("div", "dim", held));
+    return change;
+  }
+  change.append(searchForm(song));
+  const quiet = el("div", "tp-rel-quiet");
+  if (song.settled_by || !others.length || song.proposal) {
+    const wayForward = song.proposal?.status === "none" && !song.settled_by;
+    quiet.append(smallButton("File from my list", "tag this song from the list, with no release",
+      () => settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/from-list`, {})),
+      wayForward ? "tiny" : "tp-quiet"));
+  }
+  quiet.append(smallButton("Use a release id", "name a release the search did not find",
+    () => { state.byId = !state.byId; showSongs(tape); }, "tp-quiet"));
+  change.append(quiet);
+  if (state.byId) change.append(byIdForm(song));
+  return change;
+}
+
+function noteBox(said, ...after) {
+  const box = el("div", "tp-note");
+  const body = el("div");
+  body.append(el("span", null, said), ...after);
+  box.append(el("i"), body);
+  return box;
+}
+
+// A choice put in what each answer does to a person's folders. The current one is marked.
+function editionNoteView(song, note) {
+  const state = rowState(song.number);
+  const options = releaseOf(tape, song.number)?.options ?? [];
+  const box = noteBox(note.text);
+  const choices = el("div", "tp-choices");
+  for (const c of note.choices) {
+    const b = el("button", c.current ? "tp-choice on" : "tp-choice");
+    b.type = "button";
+    b.disabled = c.current;
+    b.append(el("b", null, c.label), el("span", null, c.said));
+    b.onclick = (e) => {
+      e.stopPropagation();
+      chooseRelease(song, c.release, options.find((o) => o.release === c.release && o.recording === c.recording),
+        c.recording ? { recording: c.recording } : {});
+    };
+    choices.append(b);
+  }
+  box.append(choices);
+  const asked = note.choices.find((c) => c.release === state.ask?.release);
+  if (asked) {
+    const key = keyOf(song.number);
+    box.append(askView(state.ask.said, "Use it", () => {
+      state.ask = null;
+      settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/release`,
+        { release: asked.release, recording: asked.recording, ...extra, confirm: true }));
+    }, () => { state.ask = null; showSongs(tape); }));
+  }
+  return box;
+}
+
+function maybeCopyView(song, path) {
+  return noteBox(`This might be your copy at ${path}.`,
+    useCopyButton({ number: song.number, unconfirmed: path }),
+    el("span", "dim", "or choose a release."));
+}
+
+function releaseBlock(song, t) {
+  const rel = releaseOf(t, song.number);
+  const box = el("div", "tp-rel");
+  const state = rowState(song.number);
+  const copy = rel?.copy;
+  const finished = song.filing === "filed" || song.filing === "already";
+  if (finished) return null;
+  if (copy) {
+    const line = el("p", "tp-owned", `In your library: ${copy.album_artist} / ${copy.album}`);
+    box.append(line, el("p", "dim tp-path", copy.path));
+  }
+  if (rel?.maybe_copy) box.append(maybeCopyView(song, rel.maybe_copy));
+  if (rel?.edition_note) box.append(editionNoteView(song, rel.edition_note));
+  const nothing = song.proposal?.status === "none" && rel?.options.length;
+  const words = rel?.note || (song.settled_by || nothing || rel?.maybe_copy ? "" : song.proposal?.reason) || "";
+  if (words) {
+    const line = el("p", "dim tp-rel-why", words);
+    line.title = words;
+    box.append(line);
+  }
+  if (rel?.library_note && !rel.library_note.includes(rel.maybe_copy || "\0")) box.append(el("p", "dim", rel.library_note));
+  if (!song.proposal && !song.settled_by) box.append(el("p", "dim", "Not looked up yet."));
+  const options = releaseOptions(song, rel);
+  if (!song.settled_by) {
+    box.append(options);
+    return box;
+  }
+  // Settled, only the choice stays out; changing it is one press away.
+  const first = options.querySelector(".tp-opt.on");
+  // A note's choices already say which release this is.
+  if (first && !rel?.edition_note) box.append(first);
+  else if (!copy && !rel?.edition_note) box.append(el("p", "dim", "From your list, with no release."));
+  const more = el("details", "tp-more");
+  more.open = !!state.open;
+  more.ontoggle = () => { state.open = more.open; };
+  more.append(el("summary", null, copy ? "Choose a release instead" : "Change the album"), options);
+  box.append(more);
+  return box;
+}
+
+// The playlist is written from what filing recorded, so once anything is filed it is
+// told straight away.
+function useCopyButton(o) {
+  const key = keyOf(o.number);
+  return smallButton("Use it", "this is the song, and it needs no filing", async () => {
+    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/use-copy`, { path: o.unconfirmed }));
+    const started = tape.filing.some((f) => f.state !== "pending" && f.state !== "skipped");
+    if (!$("#tp-err").textContent && started) writePlaylist();
+  }, "tiny");
+}
+
+let tpCoverFor = null;                // the song an image being chosen is for
+
+function noCoverView(song) {
+  const upload = smallButton("Upload an image", "embedded in the album's songs, and set as its art", () => {
+    tpCoverFor = song.number;
+    $("#tp-cover-file").click();
+  });
+  upload.dataset.cover = "";
+  return noteBox("No cover found.", upload);
+}
+
+async function uploadCover(number, file) {
+  $("#tp-err").textContent = "";
+  waveSay(`Sending ${file.name}…`);
+  try {
+    const after = await pushChunk(`/api/tapes/${tape.id}/songs/${number}/cover`, file);
+    showTape(after);
+    const c = after.cover;
+    waveSay(c.already ? "That album has a cover now, so this image was not used."
+      : [`Cover set: ${c.size}, in ${c.embedded} of ${c.tracks} of the album's songs.`,
+         c.failed?.length ? `Not embedded: ${c.failed.join("; ")}.` : "",
+         c.note ? `beets did not record it as the album's art: ${c.note}.` : ""].filter(Boolean).join(" "));
+  } catch (e) {
+    waveSay("");
+    tpFail(e);
+  }
+}
+
+const FILED_WORDS = {
+  filed: "Filed at", already: "In your library at", failed: "Filing failed", unknown: "Not confirmed",
+};
+
+function filedBlock(song, t) {
+  const o = t.filing.find((f) => f.number === song.number);
+  if (!o || o.state === "pending" || o.state === "skipped") return null;
+  const looks = FILING_NEEDS_A_LOOK.includes(o.state);
+  const box = el("div", "tp-filed");
+  const where = o.unconfirmed ? "" : o.path;
+  box.append(el("p", looks ? "tp-warn" : "tp-owned", `${FILED_WORDS[o.state] ?? o.state}${where ? ` ${where}` : ""}`));
+  if (o.note) box.append(el("p", looks ? "tp-warn" : "dim", o.note));
+  if (o.no_cover) box.append(noCoverView(song));
+  return box;
+}
+
+function songOpenView(song, row, t) {
+  const tr = el("tr", "tp-open");
+  tr.dataset.open = song.number;
+  const td = el("td");
+  td.colSpan = 7;
+  const box = el("div", "tp-open-box");
+  const fields = el("div", "tp-fields");
+  const key = keyOf(song.number);
+  tr.dataset.key = key;
+  const edit = (label, name, value, wide) => {
+    const [wrap, input] = fieldInput(label, name, value, wide);
+    input.onblur = () => leftField(key, input);
+    input.onkeydown = (e) => { if (e.key === "Enter") leftField(key, input); };
+    fields.append(wrap);
+  };
+  edit("Title", "title", song.title, true);
+  edit("Artist", "artist", song.artist, true);
+  edit("Album", "album", song.album, true);
+  edit("List length", "length", mss(song.length));
+  if (song.start != null && song.end != null) {
+    fields.append(edgeInput(song, "start", "Start (s)", box), edgeInput(song, "end", "End (s)", box));
+  }
+  const moves = el("div", "tp-moves");
+  moves.append(smallButton("↑", "move up", () => moveSong(key, -1)),
+               smallButton("↓", "move down", () => moveSong(key, 1)),
+               smallButton("Remove", "take off the list", () => removeSong(key), "ghost tiny tp-danger"),
+               smallButton("Close", "close this row", () => { tpOpen = null; showSongs(tape); }));
+  fields.append(moves);
+  box.append(fields);
+  if ([...tpUnsent.keys()].some((held) => held.startsWith(`${key}/`))) box.append(el("p", "dim", unsentWords()));
+  if (tpListAsk?.row === song.number) box.append(listAskView());
+
+  const said = song.reason || (row?.doubtful ? MISMATCH_SAYS : "");
+  if (said) box.append(el("p", row?.doubtful ? "tp-warn" : "dim", said));
+  const inside = t.inside.filter((i) => i.song === song.number);
+  if (inside.length) {
+    const hears = el("div", "tp-hears");
+    for (const g of inside) {
+      const seek = smallButton(`Hear the silence at ${fmtLong(g.lo)} to ${fmtLong(g.hi)}`,
+        "play from just before this silence", () => tapeHearSilence(g.lo, g.hi));
+      seek.disabled = !t.audio;
+      hears.append(seek);
+    }
+    box.append(hears);
+  }
+  // Archiving clears the cuts of songs already proved to be in the library.
+  const cutSaid = !row || song.skip ? "" : t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
+  if (cutSaid && !["not cut", "cut", "not needed"].includes(cutSaid)) {
+    box.append(el("p", cutSaid === "failed" || cutSaid === "out of date" ? "tp-warn" : "dim",
+      `Cut: ${cutSaid}${cutSaid === "failed" && song.cut?.why ? `: ${song.cut.why}` : ""}`));
+  }
+  const filed = filedBlock(song, t);
+  if (filed) box.append(filed);
+  const release = song.skip ? null : releaseBlock(song, t);
+  if (release) box.append(release);
+  td.append(box);
+  tr.append(td);
+  return tr;
+}
+
+function draftRowView() {
+  const tr = el("tr", "tp-open");
+  tr.dataset.open = "draft";
+  const td = el("td");
+  td.colSpan = 7;
+  const box = el("div", "tp-open-box");
+  const fields = el("div", "tp-fields");
+  const add = (label, name, wide, hint) => {
+    const [wrap, input] = fieldInput(label, name, tpDraft[name], wide);
+    if (hint) input.placeholder = hint;
+    input.oninput = () => { tpDraft[name] = input.value; };
+    fields.append(wrap);
+  };
+  add("Title", "title", true);
+  add("Artist", "artist", true);
+  add("Album", "album", true);
+  add("List length", "length", false, "m:ss");
+  const moves = el("div", "tp-moves");
+  moves.append(smallButton("Add", "put this song at the end of the list", addDraft, "tiny"),
+               smallButton("Cancel", "forget this song", () => { tpDraft = null; showTape(tape); }));
+  fields.append(moves);
+  box.append(fields);
+  if (tpListAsk?.row === "draft") box.append(listAskView());
+  td.append(box);
+  tr.append(td);
+  return tr;
+}
+
+function startDraft() {
+  tpDraft = tpDraft ?? { title: "", artist: "", album: "", length: "" };
+  showTape(tape);
+  $("#tp-rows").querySelector('[data-field="title"]')?.focus();
+}
+
+async function addDraft() {
+  const key = ++tpNewKey;
+  const draft = tpDraft;
+  tpDraft = null;
+  if (!await sendList(() => [...listNow(), { ...draft, key }], key)) {
+    tpDraft = draft;
+    if (tpListAsk) tpListAsk.row = "draft";
+    showTape(tape);
+  }
+}
+
+// A redraw rebuilds every input, so what is being typed goes back afterwards: a job's
+// progress or the save of the field before must not take it. A field is unsaved from
+// the first key to when it is left, which sends it, and a refusal then shows the truth.
+// Taking a focused input off the page makes a browser say it was left, which it was not,
+// so `tpRedrawing` says otherwise for that moment.
+function typedInRows() {
+  const typed = [];
+  for (const input of $("#tp-rows").querySelectorAll("tr[data-open] input[data-field]")) {
+    const focused = document.activeElement === input;
+    if (focused || input.value !== input.dataset.saved) {
+      const row = input.closest("tr");
+      typed.push({ row: row.dataset.key ?? row.dataset.open, field: input.dataset.field, value: input.value, focused,
+                   at: focused && input.type === "text" ? [input.selectionStart, input.selectionEnd] : null });
+    }
+  }
+  return typed;
+}
+
+function putBackTyped(typed) {
+  for (const input of $("#tp-rows").querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
+  for (const [held, value] of tpUnsent) {
+    const [key, field] = held.split("/");
+    const input = $("#tp-rows").querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
+    if (input) input.value = value;
+  }
+  for (const was of typed) {
+    const row = was.row === "draft" ? `[data-open="draft"]` : `[data-key="${was.row}"]`;
+    const input = $("#tp-rows").querySelector(`tr${row} input[data-field="${was.field}"]`);
+    if (!input) continue;
+    input.value = was.value;
+    if (!was.focused) continue;
+    input.focus();
+    if (was.at) input.setSelectionRange(...was.at);
+  }
+}
+
+function showSongs(t) {
+  const has = t.songs.length > 0 || !!tpDraft;
+  $("#tp-table-wrap").hidden = !has;
+  if (!has) { $("#tp-rows").replaceChildren(); return; }
+  const typed = typedInRows();
+  const rows = [];
+  for (const song of t.songs) {
+    const row = t.ear.find((r) => r.number === song.number);
+    rows.push(songRowView(song, row));
+    if (tpOpen === song.number) rows.push(songOpenView(song, row, t));
+  }
+  if (tpDraft) rows.push(draftRowView());
+  tpRedrawing = true;
+  $("#tp-rows").replaceChildren(...rows);
+  tpRedrawing = false;
+  $("#tp-add").hidden = !!tpDraft;
+  putBackTyped(typed);
+  $("#tp-rows").querySelector(".tp-ask")?.scrollIntoView({ block: "nearest" });
+  if (t.playlist.done) archivedControls();
+}
+
+// ---- the waveform
+
+// It is the same editor a rip's Cut screen has, on its own canvas, and a song's edges
+// reach the server only when a marker is let go.
+let tpDrawn = null, tpAudio = null;
+let tpPicked = null;                  // the edge a person chose, which − + and arrows may move
+let tpNudge = null;                   // {tape, song, seen, start, end, timer}, not yet saved
+
+const songOf = (n) => tape?.songs.find((s) => s.number === n);
+const earOf = (n) => tape?.ear.find((r) => r.number === n);
+
+const STANDING = (song) => (song.skip ? "–" : song.set_by === "ear" ? "•" : song.heard ? "✓"
+  : CHOICE_HELD[song.filing] ? "⚑" : "");
+
+function tapeTracks(t) {
+  return t.songs.filter((s) => s.start != null && s.end != null).map((s) => ({
+    number: s.number, title: s.title, start: s.start, end: s.end, cat: s.length,
+    flag: !!earOf(s.number)?.doubtful, mark: STANDING(s),
+  }));
+}
+
+// A found edge sits in a gap's quiet interior, which can reach a window past the
+// gap's stated end, so both are what counts as being in the gap.
+const tapeGaps = (t) => t.gaps.map(([lo, hi], i) => {
+  const [quietLo, quietHi] = t.quiet[i];
+  return { lo: Math.min(lo, quietLo), hi: Math.max(hi, quietHi) };
+});
+
+function waveSay(text, warn) {
+  const say = $("#tp-wave-say");
+  say.textContent = text || "";
+  say.className = warn ? "tp-warn" : "dim";
+}
+
+// The window comes from the real length, which is the grid boundaries were placed
+// on, so what is drawn at an instant is what was measured there.
+async function loadTapeWave(t, drawn) {
+  try {
+    const env = await fetchEnvelope(`/api/tapes/${t.id}/envelope`);
+    if (tpDrawn !== drawn) return;
+    tpEd.load({ ...env, windowMs: (t.duration * 1000) / env.peak.length, duration: t.duration,
+                gaps: { band: { gaps: tapeGaps(t) } } },
+              tapeTracks(tape));
+    if (tpOpen != null) tapeSelect(tpOpen, "start", false);
+    tapeReadout();
+    showTapeTools();
+  } catch (e) {
+    tpDrawn = null;
+    waveSay(`no waveform: ${e.message}`, true);
+  }
+}
+
+function showTapeWave(t) {
+  tpEd.frozen = tapeHeld() || t.playlist.done;
+  const drawn = t.waveform ? `${t.id}/${t.created}` : null;
+  if (drawn !== tpDrawn) {
+    tpPlayer.stop();
+    tpAudio = null;
+    tpDrawn = drawn;
+    tpEd.clear();
+    waveSay(drawn ? "" : "This tape has no waveform kept. Find boundaries measures it, and leaves any boundary you set where it is.", !drawn);
+    if (drawn) loadTapeWave(t, drawn);
+  } else if (tpEd.side) {
+    tpEd.side.gaps.band.gaps = tapeGaps(t);
+    tpEd.setTracks(tapeTracks(t));
+    tapeReadout();
+  }
+  showTapeTools();
+}
+
+function showEar(t) {
+  const placed = t.songs.some((s) => s.start != null);
+  $("#tp-wave-wrap").hidden = !placed;
+  if (!placed) {
+    tpPlayer.stop();
+    tpDrawn = tpAudio = null;
+    tpEd.clear();
+    return;
+  }
+  showTapeWave(t);
+}
+
+const toolLabel = (id, text) => { $(id).querySelector("span").textContent = text; };
+const tapeWhole = () => !!tpEd.side && tpEd.t1 - tpEd.t0 >= tpEd.side.duration - 0.01;
+
+function showTapeView() {
+  const whole = tapeWhole();
+  $("#tp-whole").classList.toggle("on", whole);
+  $("#tp-song").classList.toggle("on", !!tpEd.side && !whole);
+}
+
+function showTapeTools() {
+  const done = !!tape?.playlist.done, wave = !!tpEd.side;
+  const song = wave ? songOf(tpEd.sel?.track) : null;
+  const doubts = tape?.ear.filter((r) => r.doubtful).length ?? 0;
+  const none = !tape?.songs.length;
+  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = none;
+  $("#tp-doubt").disabled = !doubts || !wave || done;
+  toolLabel("#tp-doubt", doubts ? `Next doubt (${doubts})` : "No doubts");
+  const picked = !!song && tpPicked?.track === song.number;
+  const moves = !!song && !tpEd.frozen;
+  for (const edge of ["start", "end"]) {
+    const b = $(`#tp-edge-${edge}`);
+    b.disabled = !moves;
+    b.classList.toggle("on", picked && tpPicked.edge === edge);
+  }
+  for (const id of ["#tp-minus", "#tp-plus"]) $(id).disabled = !moves || !picked;
+  $("#tp-play").disabled = !tape?.audio;
+  toolLabel("#tp-play", tpPlayer.playing ? "Stop" : song ? "Play song" : "Play");
+  $("#tp-hear").disabled = !tape?.audio || !song;
+  $("#tp-accept").disabled = done || !song || song.set_by === "ear";
+  toolLabel("#tp-accept", song?.heard ? "Take back" : "Accept");
+  $("#tp-accept").classList.toggle("primary", !!song && !!earOf(song.number)?.doubtful);
+  $("#tp-skip").disabled = done || !song;
+  toolLabel("#tp-skip", song?.skip ? "Unskip" : "Skip");
+  $("#tp-song").disabled = done || !song;
+  for (const id of ["#tp-in", "#tp-out", "#tp-whole"]) $(id).disabled = !wave;
+  showTapeView();
+}
+
+function tapeReadout() {
+  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
+  if (!t) {
+    $("#tp-ro-time").textContent = fmtLong(tpEd.playhead);
+    $("#tp-ro-song").textContent = ""; $("#tp-ro-len").textContent = "";
+    $("#tp-ro-gap").textContent = ""; $("#tp-ro-gap").className = "";
+    return;
+  }
+  const v = t[sel.edge], len = t.end - t.start, d = len - t.cat;
+  $("#tp-ro-time").textContent = `${fmtLong(v)}  ${v.toFixed(2)}s`;
+  $("#tp-ro-song").textContent = `${sel.edge} of ${t.number} “${t.title}”`;
+  $("#tp-ro-len").textContent = `${len.toFixed(2)}s (list ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`;
+  sayGap($("#tp-ro-gap"), v, tpEd.side?.gaps.band.gaps ?? []);
+}
+
+function tapeSelect(num, edge, fit, picked = false) {
+  if (tpNudge && tpNudge.song !== num) flushNudge();
+  if (num != null) tpLanded = tape.id;
+  tpEd.sel = num == null ? null : { track: num, edge };
+  tpPicked = picked && num != null ? { track: num, edge } : null;
+  const t = tpEd.tracks.find((x) => x.number === num);
+  if (fit && t) tpEd.fitRange(t.start, t.end); else tpEd.render();
+  tapeReadout();
+  showTapeTools();
+  if (num == null) return;
+  const opening = tpOpen !== num;
+  if (opening) tpListAsk = null;
+  tpOpen = num;
+  waveSay("");
+  if (opening) showSongs(tape);
+  rowIntoView(num);
+}
+
+// The table's own head stays over its top, which a browser's scrolling into view does not
+// allow for. All of the row and what opened under it if that fits, and its top if not. On
+// a phone the table does not scroll by itself, and the page's way is the right one.
+function rowIntoView(num) {
+  const row = document.querySelector(`#tp-rows tr[data-song="${num}"]`);
+  if (!row) return;
+  const wrap = $("#tp-table-wrap");
+  if (getComputedStyle(wrap).overflowY === "visible") { row.scrollIntoView({ block: "nearest" }); return; }
+  const under = row.nextElementSibling?.matches(".tp-open") ? row.nextElementSibling : row;
+  const head = $("#tp-table thead").offsetHeight;
+  const box = wrap.getBoundingClientRect();
+  const top = row.getBoundingClientRect().top - box.top - head;
+  const bottom = under.getBoundingClientRect().bottom - box.bottom;
+  if (top < 0) wrap.scrollTop += top;
+  else if (bottom > 0) wrap.scrollTop += Math.min(top, bottom + 1);
+}
+
+// Whole stays whole, so stepping along a long tape does not lose the view of it.
+function stepSong(by) {
+  if (!tape?.songs.length) return;
+  const here = tpEd.sel?.track ?? tpOpen ?? (by > 0 ? 0 : tape.songs.length + 1);
+  const next = Math.max(1, Math.min(tape.songs.length, here + by));
+  tapeSelect(next, "start", !tapeWhole());
+}
+
+function stepDoubt(by) {
+  if (!tape || !tpEd.side) return;
+  const doubts = tape.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
+  if (!doubts.length) return;
+  const here = tpEd.sel?.track ?? 0;
+  const next = by > 0 ? doubts.find((n) => n > here) ?? doubts[0]
+    : doubts.findLast((n) => n < here) ?? doubts.at(-1);
+  tapeSelect(next, "start", true);
+}
+
+function stepAlbum() {
+  const open = tape.songs.filter((s) => !s.skip && !s.settled_by).map((s) => s.number);
+  if (!open.length) return;
+  const next = open.find((n) => n > (tpOpen ?? 0)) ?? open[0];
+  tapeSelect(next, "start", true);
+}
+
+// Asked for only when something is to be played: a long tape's file is gigabytes,
+// and opening its page should not start reading it.
+function tapeAudioReady() {
+  if (!tape?.audio) return false;
+  const url = `/api/tapes/${tape.id}/audio`;
+  if (tpAudio !== url) { tpPlayer.load(url); tpAudio = url; }
+  return true;
+}
+
+// A paused song carries on from the playhead; from anywhere else it plays from its top.
+function tapePlay() {
+  if (!tapeAudioReady()) return;
+  if (tpPlayer.playing) { tpPlayer.toggle(null); return; }
+  const t = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  const at = tpEd.playhead;
+  tpPlayer.toggle(t && (at < t.start || at >= t.end) ? t.start : at);
+  if (t) tpPlayer.stopAt = t.end;
+}
+
+function tapeHear(at) {
+  if (tapeAudioReady()) tpPlayer.audition(at);
+}
+
+function tapeHearSelected() {
+  const t = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  if (t) tapeHear(t[tpEd.sel.edge]);
+}
+
+function tapeHearSilence(lo, hi) {
+  if (!tapeAudioReady()) return;
+  if (tpEd.side) tpEd.fitRange(Math.max(0, lo - 4), hi + 4);
+  tpPlayer.stop();
+  tpPlayer.toggle(Math.max(0, lo - 4));
+}
+
+// What a move means from here: only this song moved, and its cut no longer matches.
+function moveSaid(after, num) {
+  const stale = after.ear.filter((r) => r.cut === "out of date").length;
+  return [
+    `Song ${num} is yours now, and nothing will move it.`,
+    stale ? `${stale} cut${stale === 1 ? " is" : "s are"} now out of date - press Cut again.` : "",
+  ].filter(Boolean).join(" ");
+}
+
+async function saveTapeEdges(num, start, end) {
+  if (tpNudge?.tape === tape.id && tpNudge.song === num) dropNudge();
+  else await flushNudge();
+  tpEd.frozen = true;
+  try {
+    const seen = songOf(num);
+    const after = await postJSON(`/api/tapes/${tape.id}/songs/${num}/edges`,
+      { start, end, seen_start: seen.start, seen_end: seen.end });
+    showTape(after);
+    if (tpEd.sel?.track === num) tapeSelect(num, tpEd.sel.edge, false, tpPicked?.track === num);
+    waveSay(moveSaid(after, num));
+  } catch (e) {
+    tpEd.frozen = tapeHeld() || !!tape?.playlist.done;
+    if (tape) tpEd.setTracks(tapeTracks(tape));
+    tapeReadout();
+    // What this page believed may be what was wrong, so the markers show the truth.
+    try { if (tape) showTape(await api(`/api/tapes/${tape.id}`)); } catch { /* it was asked again only to be sure, and the reason below still stands */ }
+    waveSay(`Not moved: ${e.message}`, true);
+  }
+}
+
+function tapeEdgeDropped(num, edge, landed) {
+  if (!landed) {
+    tpEd.setTracks(tapeTracks(tape));
+    waveSay("the drag was interrupted, so nothing moved", true);
+    return;
+  }
+  const t = tpEd.tracks.find((x) => x.number === num);
+  const key = keyOf(num);
+  rowTurn(() => saveTapeEdges(numberOf(key), t.start, t.end));
+}
+
+function dropNudge() {
+  const n = tpNudge;
+  if (n) clearTimeout(n.timer);
+  tpNudge = null;
+  return n;
+}
+
+// What a person nudged is saved whatever happens next. It belongs to its tape and song,
+// which may not be the ones on screen by the time it goes.
+async function flushNudge() {
+  const n = dropNudge();
+  if (!n) return;
+  if (tape?.id === n.tape) { await saveTapeEdges(n.song, n.start, n.end); return; }
+  try { await postJSON(nudgeUrl(n), nudgeBody(n)); }
+  catch (e) { if (e.status) $("#tp-err").textContent = `song ${n.song} was not moved: ${e.message}`; else lostContact(); }
+}
+
+const nudgeUrl = (n) => `/api/tapes/${n.tape}/songs/${n.song}/edges`;
+const nudgeBody = (n) => ({ start: n.start, end: n.end, seen_start: n.seen[0], seen_end: n.seen[1] });
+
+// `keepalive` is what lets a request outlive the page that sent it.
+function flushNudgeOnLeaving() {
+  const n = dropNudge();
+  if (n) fetch(nudgeUrl(n), { method: "POST", keepalive: true, credentials: "same-origin",
+                              headers: { "content-type": "application/json" }, body: JSON.stringify(nudgeBody(n)) });
+}
+
+function nudgeTapeEdge(t, edge, by) {
+  if (tpEd.frozen) return;
+  t[edge] += by;
+  tpEd.render(); tapeReadout();
+  const song = songOf(t.number);
+  const seen = tpNudge?.song === t.number ? tpNudge.seen : [song.start, song.end];
+  dropNudge();
+  tpNudge = { tape: tape.id, song: t.number, seen, start: t.start, end: t.end };
+  tpNudge.timer = setTimeout(() => rowTurn(flushNudge), 500);
+  waveSay(`Song ${t.number} becomes yours when this saves, and nothing will move it after that.`);
+}
+
+// A nudge sets a boundary for good, so a song chosen from its row is not enough: the
+// edge has to have been asked for, by its marker or by Start, End or E.
+function nudgeChosen(by) {
+  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
+  if (!t) return false;
+  if (tpPicked?.track !== sel.track || tpPicked.edge !== sel.edge) {
+    waveSay("Choose Start or End first (E), or press a marker, and then this moves it.");
+    return false;
+  }
+  nudgeTapeEdge(t, sel.edge, by);
+  return true;
+}
+
+function tapeChooseEdge(edge) {
+  const num = tpEd.sel?.track;
+  if (num != null) tapeSelect(num, edge, false, true);
+}
+
+// The first press chooses the edge the readout is showing, and the next ones swap it.
+function tapeSwapEdge() {
+  const sel = tpEd.sel;
+  if (!sel) return;
+  const chosen = tpPicked?.track === sel.track;
+  tapeChooseEdge(chosen ? (sel.edge === "start" ? "end" : "start") : sel.edge);
+}
+
+function tapeJudge(send) {
+  return settleSong(async () => {
+    const after = await send();
+    waveSay("");
+    return after;
+  });
+}
+function tapeAccept(song) {
+  const key = keyOf(song.number);
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard }));
+}
+function tapeSkip(song) {
+  const key = keyOf(song.number);
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip }));
+}
+
+function tapeZoom(by) {
+  if (!tpEd.side) return;
+  const span = (tpEd.t1 - tpEd.t0) * by;
+  const sel = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
+  tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
+}
+
+function tapeShowSong() {
+  const t = tpEd.tracks.find((x) => x.number === tpEd.sel?.track);
+  if (t) tpEd.fitRange(t.start, t.end);
+}
+
+// Every key but the two nudges presses its button, so a key does what the button
+// would and a disabled button refuses it.
+const TAPE_KEYS = {
+  k: "#tp-prev", j: "#tp-next", h: "#tp-hear", a: "#tp-accept", s: "#tp-skip",
+};
+const NUDGE_KEYS = { ",": -1, "<": -1, ".": 1, ">": 1, ArrowLeft: -1, ArrowRight: 1 };
+
+function tapeKey(e) {
+  // Alt-left is the browser going back. Shift is this page's own larger step.
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (NUDGE_KEYS[e.key]) {
+    if (nudgeChosen(NUDGE_KEYS[e.key] * (e.shiftKey ? 0.5 : 0.05))) e.preventDefault();
+  } else if (e.code === "Space") {
+    e.preventDefault();
+    // A button keeps the focus after a press, and would be pressed again by this.
+    if (e.target.tagName === "BUTTON") e.target.blur();
+    tapePlay();
+  } else if (TAPE_KEYS[key]) {
+    e.preventDefault(); $(TAPE_KEYS[key]).click();
+  } else if (key === "n") {
+    e.preventDefault(); stepDoubt(e.shiftKey ? -1 : 1);
+  } else if (key === "e") {
+    e.preventDefault(); tapeSwapEdge();
+  } else if (key === "f" || key === "0") {
+    e.preventDefault(); tpEd.fit();
+  } else if (key === "z") {
+    e.preventDefault();
+    if (tapeWhole()) tapeShowSong(); else tpEd.fit();
+  } else if (key === "?") {
+    e.preventDefault(); $("#helpdlg").showModal();
+  } else if (key === "Escape") { tpPlayer.stop(); }
+}
+
+function wireTapeWave() {
+  tpEd = new Editor($("#tp-cv"),
+    (num, edge, at) => {
+      const t = tpEd.tracks.find((x) => x.number === num);
+      if (t) { t[edge] = at; tpEd.render(); tapeReadout(); }
+    },
+    (num, edge) => tapeSelect(num, edge, false, true),
+    (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
+    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView });
+  tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
+  for (const change of ["play", "pause", "ended"]) tpPlayer.el.addEventListener(change, showTapeTools);
+  // The rail coming and going changes the canvas's width with no window resize.
+  new ResizeObserver(() => tpEd.render()).observe($("#tp-cv"));
+  $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
+  addEventListener("pagehide", flushNudgeOnLeaving);
+  setInterval(heartbeat, 4000);
+  $("#tp-prev").onclick = () => stepSong(-1);
+  $("#tp-next").onclick = () => stepSong(1);
+  $("#tp-doubt").onclick = () => stepDoubt(1);
+  $("#tp-edge-start").onclick = () => tapeChooseEdge("start");
+  $("#tp-edge-end").onclick = () => tapeChooseEdge("end");
+  $("#tp-minus").onclick = () => nudgeChosen(-0.05);
+  $("#tp-plus").onclick = () => nudgeChosen(0.05);
+  $("#tp-play").onclick = tapePlay;
+  $("#tp-hear").onclick = tapeHearSelected;
+  $("#tp-in").onclick = () => tapeZoom(0.5);
+  $("#tp-out").onclick = () => tapeZoom(2);
+  $("#tp-whole").onclick = () => tpEd.fit();
+  $("#tp-song").onclick = tapeShowSong;
+  $("#tp-accept").onclick = () => tapeAccept(songOf(tpEd.sel?.track));
+  $("#tp-skip").onclick = () => tapeSkip(songOf(tpEd.sel?.track));
+}
+
+// ---- jobs and arrivals
+
+async function startTapeJob(path, body) {
+  tpActing += 1;
+  try {
+    await tpListSaved;
+    await postTapeJob(path, body);
+  } finally { tpActing -= 1; }
+}
+
+async function postTapeJob(path, body) {
+  $("#tp-err").textContent = "";
+  await flushNudge();
+  try {
+    await postJSON(path, body);
+    watchTape();
+  } catch (e) { tpFail(e); }
+}
+
+function cutTape() {
+  if (tpPrepareStarting || cutWouldWait(tape)) {
+    tpCutWaits = true;
+    showRail(tape);
+    return undefined;
+  }
+  return startTapeJob(`/api/tapes/${tape.id}/cut`, {});
+}
+const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
+const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
+function archiveTape() {
+  if (confirm(`Archive ${tape.name}? Its uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.`))
+    startTapeJob(`/api/tapes/${tape.id}/archive`, {});
+}
+
+async function sendTapeList(file) {
+  $("#tp-err").textContent = "";
+  const url = `/api/tapes/${tape.id}/list`;
+  try {
+    try {
+      showTape(await pushChunk(url, file));
+    } catch (e) {
+      if (!e.needsConfirm) throw e;
+      if (!confirm(`${e.message}. Load it?`)) return;
+      showTape(await pushChunk(`${url}?confirm=1`, file));
+    }
+    await loadTapes(tape.id);
+    status(`${tape.songs.length} songs read from ${file.name}`);
+  } catch (e) { tpFail(e); }
+}
+
+async function sendTape(file) {
+  $("#tp-err").textContent = "";
+  $("#tp-go").hidden = true;
+  const id = tape.id;
+  stepBusy("recording");
+  try {
+    const begun = await postJSON(`/api/tapes/${id}/upload/begin`,
+      { name: file.name, size: file.size });
+    let at = begun.have, failures = 0;
+    while (at < file.size) {
+      const end = Math.min(at + begun.chunk, file.size);
+      try {
+        at = (await pushChunk(`/api/tapes/${id}/upload/chunk?at=${at}`,
+                              file.slice(at, end))).have;
+        failures = 0;
+      } catch (e) {
+        const said = /is at (\d+)/.exec(e.message);
+        if (e.status === 409 && said) { at = Number(said[1]); continue; }
+        if (++failures >= TRIES) throw e;
+        continue;
+      }
+      setBar(at / file.size, "#tp-bar");
+      $("#tp-state").textContent = `${mb(at)} of ${mb(file.size)}`;
+      status(`uploading ${file.name}: ${mb(at)} of ${mb(file.size)}`, true);
+    }
+    status("");
+    tapePicked = null;
+    tpStopped.delete(id);
+    stepIdle();
+    await openTape(id);
+  } catch (e) {
+    stepIdle();
+    tpFail(e);
+    status("");
+    try { showTape(await api(`/api/tapes/${id}`)); } catch { /* the reason above is what matters, and the page keeps what it last knew */ }
+  }
+}
+
+async function cancelTapeUpload() {
+  if (!confirm("Drop what has arrived of this upload?")) return;
+  try {
+    await postJSON(`/api/tapes/${tape.id}/upload/cancel`, {});
+    tapePicked = null;
+    stepIdle();
+    await openTape(tape.id);
+  } catch (e) { tpFail(e); }
+}
+
+const processTape = () => startTapeJob(`/api/tapes/${tape.id}/process`, {});
+const matchTape = (again) => startTapeJob(`/api/tapes/${tape.id}/match`, { again });
+
+// A job that only asks the catalogue saves a song at a time, so a person can carry on
+// beside it. Any other holds the tape, and a marker is not to be moved.
+const ASKS_AS_IT_GOES = ["prepare", "match"];
+const tapeHeld = () => tapeWatching && !ASKS_AS_IT_GOES.includes(tpWatchOp);
+
+function unsentWords() {
+  if (tapeHeld()) return "Not saved yet: it saves when this job finishes.";
+  return "Not saved yet: it saves when the server can be reached.";
+}
+
+const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
+
+// An answer has a status, whatever it says. Anything else never got there, and that is
+// one message, which goes by itself, in place of a browser's words for it that stay.
+function tpFail(e) {
+  tpErrIsJobs = false;
+  if (e.status) $("#tp-err").textContent = e.message;
+  else lostContact();
+}
+
+function lostContact() {
+  tpGone = true;
+  $("#tp-gone").hidden = false;
+}
+
+function regained() {
+  tpGone = false;
+  tpMisses = 0;
+  $("#tp-gone").hidden = true;
+  status("");
+  if (!tape || tapeWatching) return;
+  reloadTape().then(sendUnsent);
+}
+
+// Asked while the page is being looked at, so that a person learns of a lost connection
+// before they press something, and of its return with nothing pressed.
+async function heartbeat() {
+  if (document.body.dataset.mode !== "tapes" || document.hidden) return;
+  try {
+    await api("/api/me");
+  } catch (e) {
+    if (!e.status) {
+      tpMisses += 1;
+      if (tpMisses >= 2) lostContact();
+      return;
+    }
+  }
+  tpMisses = 0;
+  if (tpGone) regained();
+}
+
+function serverGone() {
+  lostContact();
+  status("The server can't be reached. Trying again…", true);
+  if (tpJobStep) stepBox(tpJobStep).querySelector(".tp-state").textContent = "No contact";
+}
+
+// Also what a reload lands in when a job is still going.
+async function watchTape() {
+  if (tapeWatching) return;
+  tapeWatching = true;
+  const { id, key } = tape;
+  for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
+  $("#tp-next-act").hidden = true;
+  tpEd.frozen = true;
+  let missed = 0, answered = -1;
+  try {
+    for (;;) {
+      // Another tape was opened. Its own job, if it has one, is what is watched now.
+      if (tape?.id !== id) break;
+      let j;
+      try {
+        j = await api(`/api/job/${key}`);
+        if (missed >= TRIES && tpJobStep) stepBusy(tpJobStep);
+        if (tpGone) regained();
+        missed = 0;
+      } catch (e) {
+        // Anything that answered is an answer. Nothing else says whether the job is
+        // still going, so this only keeps asking, which can do nothing twice, and comes
+        // back by itself. A server that restarted says so when it does answer: a 404.
+        if (e.status) throw e;
+        if (++missed >= TRIES) serverGone();
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      tpWatchOp = j.op;
+      if (!tpNudge && tape?.id === id) tpEd.frozen = tapeHeld() || tape.playlist.done;
+      const stepNow = JOB_STEP[j.phase] ?? JOB_STEP[j.op];
+      const moved = stepNow && tpJobStep !== stepNow;
+      if (moved) {
+        tpJobStep = stepNow;
+        stepBusy(tpJobStep);
+        showLeft();
+      }
+      // What a job finds is saved as it goes, so the rows and the other steps can show it.
+      if ((moved || (tpJobStep === "albums" && j.finished !== answered)) && tape?.id === id) {
+        answered = j.finished;
+        // A person may be saving beside this, and an older answer must not undo what theirs left.
+        try {
+          const saves = tpSaves;
+          const fresh = await api(`/api/tapes/${id}`);
+          if (saves === tpSaves && !tpSaving) showTape(fresh);
+        } catch { /* the job is what is being watched, and it says the rest */ }
+      }
+      if (j.total) setBar(j.finished / j.total, "#tp-bar");
+      const doing = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
+      $("#tp-state").textContent = doing;
+      status(doing, true);
+      if (j.done) {
+        status("");
+        const parts = j.op === "prepare" ? [j.result?.boundaries, j.result?.albums] : [];
+        const said = [j.error, ...parts].filter(Boolean).join(" ");
+        if (said) $("#tp-err").textContent = said;
+        tpErrIsJobs = !!said;
+        if (j.error) tpStopped.add(id); else tpStopped.delete(id);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  } catch (e) {
+    status("");
+    tpStopped.add(id);
+    $("#tp-err").textContent = e.status === 404
+      ? "the server no longer knows that job, which it forgets half an hour after one ends and when it restarts - what it finished is kept, so start it again if anything is left"
+      : e.message;
+  } finally {
+    tapeWatching = false;
+    tpWatchOp = "";
+    tpJobStep = null;
+    stepIdle();
+  }
+  if (tape?.id !== id) {
+    if (tape?.job && !tape.job.done) watchTape();
+    else if (tape) showTape(tape);
+    return;
+  }
+  await loadTapes(id);
+  cutAfterLookup(id);
+  if (tape?.id === id) sendUnsent();
+}
+
+async function removeTape() {
+  if (!confirm(`Remove ${tape.name}? Its audio and list are moved aside, not deleted. An upload still arriving is dropped. This does not remove its playlist from the music server.`)) return;
+  try {
+    const gone = await postJSON(`/api/tapes/${tape.id}/remove`, {});
+    tape = null;
+    await loadTapes();
+    status(`moved to ${gone.moved_to}`);
+  } catch (e) { tpFail(e); }
+}
+
 // -------------------------------------------------------------------- modes
 
 function setMode(mode) {
+  document.body.dataset.mode = mode;
+  remember("rd-mode", mode);
   for (const b of document.querySelectorAll("#modes button"))
     b.classList.toggle("on", b.dataset.mode === mode);
   // Rip and Upload are one job from two sources, so they share a column and the
   // names in it. Punch is its own form. Only the two that own the capture
   // device get the pane beside it - an upload has no capture to meter.
   const source = mode === "rip" || mode === "punch" || mode === "upload"
-    || mode === "precut";
+    || mode === "precut" || mode === "tapes";
   const metering = mode === "rip" || mode === "punch";
   $("#cv").hidden = source;
-  $("#captureview").hidden = !source;
+  $("#captureview").hidden = !source || mode === "tapes";
+  $("#tapeview").hidden = mode !== "tapes";
+  $("#tp-head").hidden = mode !== "tapes";
   // A pre-cut album is not a record: it has no sides and nothing to cut, so
   // the record's own fields have no bearing on it. ADR-062.
-  $("#sourceform").hidden = mode === "punch" || mode === "precut";
+  $("#sourceform").hidden = mode === "punch" || mode === "precut" || mode === "tapes";
   $("#precutform").hidden = mode !== "precut";
   $("#precutpane").hidden = mode !== "precut";
   $("#punchform").hidden = mode !== "punch";
@@ -1205,6 +3148,7 @@ function setMode(mode) {
   if (mode === "punch") loadPunchTracks();
   if (mode === "upload") loadIncoming();
   if (mode === "precut") loadPrecut();
+  if (mode === "tapes") { player?.stop(); status(""); loadTapes(); } else { tpPlayer?.stop(); flushNudge(); }
   if (!source) ed.render();
 }
 
@@ -1292,6 +3236,7 @@ async function pushChunk(url, blob) {
   if (!r.ok) {
     const e = new Error((body && body.error) || `chunk failed: ${r.status}`);
     e.status = r.status;
+    e.needsConfirm = !!body?.needs_confirm;
     throw e;
   }
   return body;
@@ -2165,6 +4110,7 @@ function wire() {
     (t) => { if (player.playing) player.seek(t); });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
+  wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();
   $("#help-close").onclick = () => $("#helpdlg").close();
@@ -2210,6 +4156,53 @@ function wire() {
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
   $("#imp-stale-clear").onclick = clearStale;
+  $("#tp-new-form").onsubmit = (e) => { e.preventDefault(); createTape(); };
+  $("#tp-new").onclick = () => showNaming(true);
+  $("#tp-new-cancel").onclick = () => showNaming(false);
+  $("#tp-pick").onchange = (e) => { $("#tp-err").textContent = ""; openTape(e.target.value); };
+  const pickFile = () => $("#tp-file").click();
+  $("#tp-file-pick").onclick = pickFile;
+  $("#tp-start-file").onclick = pickFile;
+  $("#tp-cover-file").onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (file && tpCoverFor != null) uploadCover(tpCoverFor, file);
+  };
+  $("#tp-file").onchange = (e) => {
+    tapePicked = e.target.files[0] || null;
+    e.target.value = "";
+    if (tapePicked) sendTape(tapePicked);
+  };
+  $("#tp-go").onclick = () => { if (tapePicked) sendTape(tapePicked); };
+  $("#tp-cancel").onclick = cancelTapeUpload;
+  const pickList = () => $("#tp-csv").click();
+  $("#tp-csv-pick").onclick = pickList;
+  $("#tp-start-csv").onclick = pickList;
+  $("#tp-csv").onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (file) sendTapeList(file);
+  };
+  $("#tp-add").onclick = startDraft;
+  $("#tp-list-add").onclick = startDraft;
+  $("#tp-start-add").onclick = startDraft;
+  $("#tp-process").onclick = processTape;
+  $("#tp-start-find").onclick = processTape;
+  $("#tp-review-next").onclick = () => stepDoubt(1);
+  $("#tp-match").onclick = () => matchTape(false);
+  $("#tp-rematch").onclick = () => matchTape(true);
+  $("#tp-next-album").onclick = stepAlbum;
+  $("#tp-all-list").onclick = () => { tpAllAsk = true; showRail(tape); };
+  $("#tp-rail-bar").onclick = () => {
+    const open = $("#tp-rail").classList.toggle("open");
+    $("#tp-rail-bar").setAttribute("aria-expanded", open);
+    if (open) $("#tp-rail").scrollIntoView({ block: "start" });
+  };
+  $("#tp-cut").onclick = cutTape;
+  $("#tp-file-songs").onclick = fileTape;
+  $("#tp-playlist").onclick = writePlaylist;
+  $("#tp-archive").onclick = archiveTape;
+  $("#tp-remove").onclick = removeTape;
   $("#pc-pick").onclick = () => $("#pc-file").click();
   $("#pc-file").onchange = (e) => {
     pcPicked = e.target.files[0] || null;
@@ -2378,6 +4371,7 @@ function wire() {
     // a shortcut firing behind an open dialog once split a track while the
     // First-pass dialog had focus
     if (document.querySelector("dialog[open]")) return;
+    if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }
     const sel = ed.sel, t = sel && trackByNum(sel.track);
     if (e.code === "Space") {
       e.preventDefault();
@@ -2416,6 +4410,8 @@ async function boot() {
   // there looking empty.
   try {
     await refreshAlbums();
+    // A reload on a tape stays there; a job still going is picked up by opening it.
+    if (recalled("rd-mode") === "tapes") setMode("tapes");
   } catch (e) {
     status(`load failed: ${e.message}`, true);
     logline(String(e.stack || e));

@@ -82,6 +82,11 @@ The test is the invariant: if a proposed intake produces a side that the middle
 three verbs treat like any other, it belongs; if it needs its own notion of what
 a side is, or its own cutting path, it does not.
 
+A tape, one uncut recording of songs that each belong to a different album, is
+the named exception and is in scope because the same five verbs hold and only
+tagging and filing work per song (ADR-063), which does not license general audio
+importing.
+
 Live monitoring stays a thing this does that a tool which only accepts uploads
 cannot. That was true when it was written and it is still true; it was never an
 argument against also accepting one.
