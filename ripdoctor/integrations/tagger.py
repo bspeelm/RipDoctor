@@ -9,6 +9,7 @@ report what is there so the archive gate has something to check.
 from __future__ import annotations
 
 import shutil
+import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,6 +97,15 @@ def set_file_modes(files: Iterable[Path], file_mode: int) -> int:
             p.chmod(file_mode)
             changed += 1
     return changed
+
+
+def widen_dir(where: Path, dir_mode: int) -> None:
+    """Add what a directory lacks of `dir_mode`, and take nothing away: a folder that
+    existed before a song joined it keeps what its owner gave it, setgid included. One
+    made under a service's umask would otherwise stay unreadable to anything else."""
+    now = stat.S_IMODE(where.stat().st_mode)
+    if now | dir_mode != now:
+        where.chmod(now | dir_mode)
 
 
 def write_tags(runner: Runner, path: str, tags: dict[str, str]) -> None:

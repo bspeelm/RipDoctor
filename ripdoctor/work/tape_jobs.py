@@ -456,14 +456,22 @@ class _Filing:
     def complete(self, song: TP.Song, state: str, path: str, *notes: str) -> None:
         """A song this tape's own import filed. Beets rewrites what it files at the
         writer's umask, so the modes come back last, before the outcome is recorded.
-        An album this tape never touched is not its to change. ADR-056."""
-        said = [*notes, *self.repaired(song, path)]
-        try:
-            TG.set_modes(Path(path).parent, self.file_mode, self.dir_mode)
-        except OSError as e:  # said on the song, whose outcome stands
-            said.append(f"its modes could not be set: {e}")
+        A folder it joined can hold what is not this tape's to change. ADR-056."""
+        said = [*notes, *self.repaired(song, path), self.with_modes(path)]
         self.tell(song, state, path, "; ".join(n for n in said if n))
         self.covers(song, path)
+
+    def with_modes(self, path: str) -> str:
+        """This file and its album row's cover, and whatever its folder lacks. Said on
+        the song, whose outcome stands."""
+        try:
+            art = self.beets.art_of(self.runner, self.library, path)
+            files = [Path(path), *([Path(art)] if art else [])]
+            TG.set_file_modes(files, self.file_mode)
+            TG.widen_dir(Path(path).parent, self.dir_mode)
+        except (OSError, ImportFailed, ToolMissing, ToolFailed, TimedOut) as e:
+            return f"its modes could not be set: {e}"
+        return ""
 
     def covers(self, song: TP.Song, path: str) -> None:
         if lacks_cover(self.runner, self.beets, self.library, path):

@@ -1301,7 +1301,7 @@ def test_a_song_recovered_after_a_restart_gets_its_modes_back(
     assert not file_it(app, tape, service)["error"]
     assert songs(service, tape)[0].filing == F.ALREADY
     assert not songs(service, tape)[0].import_begun
-    for found in (tmp_path / "lib" / "rel-1").iterdir():
+    for found in (tmp_path / "lib" / "rel-1").glob("*.flac"):
         assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
 
 
@@ -1512,7 +1512,7 @@ def test_modes_are_set_on_each_album_directory_after_its_import(
     tape = pinned(app, service)
     file_it(app, tape, service)
     for release in ("rel-1", "rel-2"):
-        for found in (tmp_path / "lib" / release).iterdir():
+        for found in (tmp_path / "lib" / release).glob("*.flac"):
             assert stat.S_IMODE(found.stat().st_mode) == service.settings.file_mode
 
 
@@ -1546,12 +1546,58 @@ def test_modes_that_cannot_be_set_are_a_note_on_a_song_that_stays_filed(
     def refused(*_a: object) -> int:
         raise PermissionError("not yours to change")
 
-    monkeypatch.setattr(TJ.TG, "set_modes", refused)
+    monkeypatch.setattr(TJ.TG, "set_file_modes", refused)
     app = build(service)
     tape = pinned(app, service)
     assert not file_it(app, tape, service)["error"]
     one = songs(service, tape)[0]
     assert one.filing == F.FILED and "not yours to change" in one.filing_note
+
+
+def test_a_song_joining_a_folder_stripped_its_setgid_and_opened_what_was_there(
+    service: Service, tmp_path: Path
+) -> None:
+    """Measured on a real album: its directory went 2775 to 775, and an old cover from
+    600 to 664, for one song a tape added beside it."""
+    folder = tmp_path / "lib" / "rel-1"
+    folder.mkdir(parents=True)
+    folder.chmod(0o2775)
+    old_track, old_cover = folder / "03 Old.flac", folder / "cover-old.jpg"
+    for theirs in (old_track, old_cover):
+        theirs.write_bytes(b"theirs")
+        theirs.chmod(0o600)
+    app = build(service)
+    tape = pinned(app, service)
+    beet_of(service).art = str(folder / "cover.jpg")
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert Path(one.path).parent == folder
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o2775
+    assert stat.S_IMODE(old_track.stat().st_mode) == 0o600
+    assert stat.S_IMODE(old_cover.stat().st_mode) == 0o600
+    mode = service.settings.file_mode
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == mode
+    assert stat.S_IMODE((folder / "cover.jpg").stat().st_mode) == mode
+
+
+def test_a_folder_a_tape_s_import_made_is_readable_by_what_serves_the_library(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    beet = beet_of(service)
+    original = beet._import
+
+    def under_a_umask(args: tuple[str, ...]) -> Result:
+        said = original(args)
+        (tmp_path / "lib" / args[args.index("--search-id") + 1]).chmod(0o700)
+        return said
+
+    beet._import = under_a_umask  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    want = service.settings.dir_mode
+    folder = Path(songs(service, tape)[0].path).parent
+    assert stat.S_IMODE(folder.stat().st_mode) & want == want
 
 
 # ---------------------------------------------------------------- what beets left out
