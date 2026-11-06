@@ -1192,6 +1192,7 @@ def test_the_record_s_toolbar_names_the_key_each_button_answers_to() -> None:
         ("cut-plus", "&rarr;"),
         ("cut-play", "Space"),
         ("cut-audition", "A"),
+        ("cut-checked", "&crarr;"),
         ("cut-split", "S"),
         ("cut-zoom-track", "Z"),
         ("cut-zoom-side", "F"),
@@ -1267,7 +1268,8 @@ def test_every_way_of_moving_a_boundary_marks_it_set_by_the_person() -> None:
         assert "setByHand(t)" in body, function
     drag = js[js.index('ed = new Editor($("#cv")') :]
     assert "setByHand(tr)" in drag[: drag.index("player = new Player")]
-    assert "t.forced = false" not in js.replace(helper, "")
+    checked = re.search(r"function checkSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.forced = false" not in js.replace(helper, "").replace(checked, "")
     assert "tr.forced = false" not in js
 
 
@@ -1276,3 +1278,18 @@ def test_the_first_pass_no_longer_warns_it_replaces_what_a_person_corrected() ->
     asked = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "already corrected" not in asked
     assert "Boundaries you set or checked stay where they are" in asked
+
+
+def test_checked_keeps_the_boundaries_and_only_a_catalogue_placed_track_offers_it() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function checkSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (!t?.forced) return;" in body
+    assert "t.forced = false" in body and 't.settled = "ear"' in body
+    assert "markDirty()" in body, "it waits for a save like any other edit"
+    assert "t.start" not in body and "t.end" not in body
+    tools = re.search(r"function showCutTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "const doubt = !!selectedTrack()?.forced;" in tools
+    assert '$("#cut-checked").disabled = !doubt;' in tools
+    assert '$("#cut-checked").onclick = checkSelected' in js

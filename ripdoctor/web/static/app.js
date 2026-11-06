@@ -250,7 +250,8 @@ function railCheck(f) {
     const titles = namedList(f.forced.map((t) => t.title));
     return cutStep("check", "todo", `${f.forced.length} to check`, `${titles} did not fit the gaps and ${f.forced.length === 1 ? "was" : "were"} placed from the catalogue.`);
   }
-  return cutStep("check", "done", "Clear", "No boundary was placed from the catalogue.");
+  const heard = f.tracks.some((t) => t.settled === "ear");
+  return cutStep("check", "done", heard ? "All checked" : "Clear", "Nothing placed from the catalogue is waiting on your ear.");
 }
 
 function railSave(f) {
@@ -634,6 +635,17 @@ function nudgeSelected(step) {
   markDirty(); ed.render(); updateReadout(); renderTracks();
 }
 
+// The boundaries stay, and the doubt goes. It is an edit like any other, so it waits for a
+// save, which Cut does for itself.
+function checkSelected() {
+  const t = selectedTrack();
+  if (!t?.forced) return;
+  t.forced = false;
+  t.settled = "ear";
+  markDirty(); updateReadout(); renderTracks();
+  status(`“${t.title}” checked by ear`);
+}
+
 function zoomToSelected() {
   const t = selectedTrack();
   if (t) ed.fitRange(t.start, t.end);
@@ -643,6 +655,9 @@ function showCutTools() {
   const none = !selectedTrack();
   for (const id of ["#cut-minus", "#cut-plus", "#cut-audition", "#cut-zoom-track"]) $(id).disabled = none;
   for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side"]) $(id).disabled = !ed.side;
+  const doubt = !!selectedTrack()?.forced;
+  $("#cut-checked").disabled = !doubt;
+  $("#cut-checked").classList.toggle("primary", doubt);
   $("#cut-play").querySelector("span").textContent = player.playing ? "Pause" : "Play";
 }
 
@@ -4334,6 +4349,7 @@ function wire() {
   $("#cut-plus").onclick = (e) => nudgeSelected(e.shiftKey ? 0.5 : 0.05);
   $("#cut-play").onclick = playOrPause;
   $("#cut-audition").onclick = auditionSelected;
+  $("#cut-checked").onclick = checkSelected;
   $("#cut-split").onclick = splitAtPlayhead;
   $("#cut-zoom-track").onclick = zoomToSelected;
   $("#cut-zoom-side").onclick = () => ed.fit();
@@ -4605,6 +4621,10 @@ function wire() {
       playOrPause();
     } else if (e.key === "a" || e.key === "A") {
       if (t) { e.preventDefault(); auditionSelected(); }
+    } else if (e.key === "Enter") {
+      // A button that kept the focus after a press would be pressed again by this.
+      if (e.target.tagName === "BUTTON") { e.preventDefault(); e.target.blur(); }
+      $("#cut-checked").click();
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
       e.preventDefault();
       nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
