@@ -31,6 +31,7 @@ from ripdoctor.core.tape import (
 from ripdoctor.core.tape import (
     CUT,
     LENGTH_TOLERANCE,
+    NO_CUT,
     PENDING,
     SKIPPED,
     Song,
@@ -727,7 +728,7 @@ def file_refusal(tape: Tape, on_disk: Collection[str]) -> str:
         ),
         (
             "not cut - cut them first",
-            [s for s in active if cut_status(s, count, on_disk) != CUT],
+            [s for s in active if cut_status(s, count, on_disk) not in (CUT, NO_CUT)],
         ),
     )
     said = [

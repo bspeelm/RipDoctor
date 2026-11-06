@@ -746,3 +746,10 @@ def test_a_failed_run_is_said_after_a_restart_from_what_the_tape_keeps() -> None
     js = (STATIC / "app.js").read_text()
     opened = re.search(r"async function openTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tape.prepare_failed" in opened
+
+
+def test_a_song_that_needs_no_cut_is_not_counted_or_called_uncut() -> None:
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'r.cut !== "not needed"' in step
+    assert '"not needed"].includes(cutSaid)' in js

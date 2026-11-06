@@ -823,6 +823,86 @@ def test_a_copy_found_at_lookup_is_found_again_at_file_and_written_to_the_playli
     assert Path(playlist["path"]).read_text(encoding="utf-8").count(".flac") == 2
 
 
+def an_owned_song_and_another(
+    app,
+    service: Service,
+    catalogue: Catalogue,  # type: ignore[no-untyped-def]
+) -> str:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("One", 5), ("Two", 5)])
+    ]
+    owned_row(service, "One", length="0:05", mb_trackid="rec-r-1", mb_albumid="r")
+    tape = placed(app, service)
+    view = looked_up(app, service, tape)
+    assert statuses(view) == [M.OWNED, M.MATCHED]
+    beet_of(service).recordings["Two"] = "rec-r-2"
+    return tape
+
+
+def test_a_song_found_in_the_library_was_cut_anyway_and_needs_no_cut(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = an_owned_song_and_another(app, service, catalogue)
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    done = T.read(service.layout, tape)
+    assert done.songs[0].cut is None and done.songs[1].cut is not None
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert [r["cut"] for r in sorted(view["ear"], key=lambda r: r["number"])] == [
+        TP.NO_CUT,
+        TP.CUT,
+    ]
+    assert view["all_cut"] is True
+    assert view["file_refusal"] == ""
+    assert post(app, f"/api/tapes/{tape}/file", service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert [s.filing for s in T.read(service.layout, tape).songs] == [
+        F.ALREADY,
+        F.FILED,
+    ]
+
+
+def test_a_failed_cut_of_a_song_the_library_has_does_not_stop_the_rest_filing(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = an_owned_song_and_another(app, service, catalogue)
+    beet_of(service).inner.bad.add("One")  # type: ignore[attr-defined]
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert get(app, f"/api/tapes/{tape}", service).json()["file_refusal"] == ""
+
+
+def test_a_doubt_on_a_song_the_library_has_asks_nobody_and_stops_no_cut(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = an_owned_song_and_another(app, service, catalogue)
+    current = T.read(service.layout, tape)
+    doubt = replace(current.songs[0], verdict=TP.DOUBT, owes_ear=True)
+    T.save(service.layout, replace(current, songs=(doubt, current.songs[1])))
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["cut_refusal"] == ""
+    assert not any(r["doubtful"] for r in view["ear"])
+
+
+def test_a_song_whose_library_copy_went_needs_cutting_again(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = an_owned_song_and_another(app, service, catalogue)
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    beet = beet_of(service)
+    beet.rows = [r for r in beet.rows if r["title"] != "One"]
+    assert post(app, f"/api/tapes/{tape}/file", service).status == 202
+    assert job_of(app, tape, service)
+    one = T.read(service.layout, tape).songs[0]
+    assert one.proposal is not None and one.proposal.status == M.REVIEW
+    assert TP.cut_status(one, 2, set()) == TP.NOT_CUT
+
+
 @pytest.mark.parametrize("by_id", [True, False])
 def test_a_copy_found_at_lookup_and_gone_at_file_goes_back_to_choosing_an_album(
     service: Service, catalogue: Catalogue, by_id: bool

@@ -266,7 +266,7 @@ def cut(
     if refusal:
         raise ValueError(refusal)
     count = len(tape.songs)
-    active = [s for s in tape.songs if not s.skip]
+    active = [s for s in tape.songs if not s.skip and not TP.needs_no_cut(s)]
     job.skipped = [TP.label(s) for s in tape.songs if s.skip]
     job.total = len(active)
 

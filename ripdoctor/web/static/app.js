@@ -1465,7 +1465,7 @@ function cutWaits(t) {
 function stepCut(t) {
   const failed = t.ear.filter((r) => r.cut === "failed").map((r) => r.number);
   const stale = t.ear.filter((r) => r.cut === "out of date").length;
-  const live = t.songs.filter((s) => !s.skip).length;
+  const live = t.ear.filter((r) => r.cut !== "skipped" && r.cut !== "not needed").length;
   const skipped = t.songs.filter((s) => s.skip).map((s) => s.number);
   const left = skipped.length ? ` ${songsNamed(skipped)} left out, by your choice.` : "";
   const refused = !!t.cut_refusal || !t.audio;
@@ -2155,7 +2155,7 @@ function songOpenView(song, row, t) {
   }
   // Archiving clears the cuts of songs already proved to be in the library.
   const cutSaid = !row || song.skip ? "" : t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
-  if (cutSaid && cutSaid !== "not cut" && cutSaid !== "cut") {
+  if (cutSaid && !["not cut", "cut", "not needed"].includes(cutSaid)) {
     box.append(el("p", cutSaid === "failed" || cutSaid === "out of date" ? "tp-warn" : "dim",
       `Cut: ${cutSaid}${cutSaid === "failed" && song.cut?.why ? `: ${song.cut.why}` : ""}`));
   }

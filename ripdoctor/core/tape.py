@@ -39,6 +39,7 @@ PENDING = "pending"
 START, END = "start", "end"
 CUT, CUT_FAILED = "cut", "failed"
 NOT_CUT, OUT_OF_DATE, SKIPPED = "not cut", "out of date", "skipped"
+NO_CUT = "not needed"
 ALREADY, FILED, UNKNOWN = "already", "filed", "unknown"
 FINISHED = frozenset((ALREADY, FILED))
 
@@ -1151,6 +1152,13 @@ def skip(tape: Tape, number: int, skipped: bool = True) -> Tape:
     return _changed(tape, number, skip=skipped)
 
 
+def needs_no_cut(song: Song) -> bool:
+    """A lookup found this in the library, and File finds it there again and imports
+    nothing. If it has gone by then, the song goes back to choosing an album, which
+    makes it a song to cut like any other."""
+    return bool(song.proposal and song.proposal.status == OWNED)
+
+
 def doubtful(song: Song) -> bool:
     """Waiting for an ear: its own doubt, or a stretch of the list its audio disagrees
     with, where a length that happens to fit proves nothing. Setting its neighbours can
@@ -1158,6 +1166,8 @@ def doubtful(song: Song) -> bool:
     stays flagged until it is judged itself. What reached the library was judged
     before it got there."""
     if song.skip or song.heard or song.set_by == EAR or edges_held(song):
+        return False
+    if needs_no_cut(song):
         return False
     return song.verdict == DOUBT or song.owes_ear
 
@@ -1185,6 +1195,7 @@ def cut_refusal(tape: Tape) -> str:
     active = [s for s in tape.songs if not s.skip]
     if not active:
         return "every song is marked skip, so there is nothing to cut"
+    active = [s for s in active if not needs_no_cut(s)]
     groups = (
         (
             "no boundaries yet - find them first",
@@ -1223,6 +1234,8 @@ def is_current(song: Song, count: int) -> bool:
 def cut_status(song: Song, count: int, on_disk: Collection[str]) -> str:
     if song.skip:
         return SKIPPED
+    if needs_no_cut(song):
+        return NO_CUT
     if song.cut is None:
         return NOT_CUT
     if song.cut.status == CUT_FAILED:
@@ -1235,7 +1248,7 @@ def cut_status(song: Song, count: int, on_disk: Collection[str]) -> str:
 def all_cut(tape: Tape, on_disk: Collection[str]) -> bool:
     count = len(tape.songs)
     statuses = [cut_status(s, count, on_disk) for s in tape.songs if not s.skip]
-    return bool(statuses) and all(status == CUT for status in statuses)
+    return bool(statuses) and all(status in (CUT, NO_CUT) for status in statuses)
 
 
 def with_cut(tape: Tape, number: int, record: CutRecord | None) -> Tape:
