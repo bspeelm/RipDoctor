@@ -1208,6 +1208,7 @@ let tpRedrawing = false;              // inputs leaving the page now are not a p
 let tpWatchOp = "";                   // the job being watched
 let tpSaving = false;                 // a list is on its way, so what the page holds is about to change
 let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
+let tpAllAsk = false;                 // Albums is asking about filing all from the list
 let tpGone = false;                   // the server is not answering
 let tpMisses = 0;                     // heartbeats in a row with no answer
 
@@ -1362,7 +1363,7 @@ function cutAfterLookup(id) {
 // An archived tape stays as it is, so nothing here may offer to change it. Its
 // waveform can still be looked around, and its playlist can still be asked about.
 function archivedControls() {
-  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-list-add", "#tp-process", "#tp-match", "#tp-rematch"])
+  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-list-add", "#tp-process", "#tp-match", "#tp-rematch", "#tp-all-list"])
     $(id).disabled = true;
   for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
   for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = !tpEd.side;
@@ -1464,13 +1465,35 @@ function stepAlbums(t) {
   const failed = live.filter((s) => !s.settled_by && s.proposal?.status === "failed").length;
   tpAction("#tp-match", t.songs.length > 0 && unasked > 0, true);
   tpAction("#tp-rematch", t.songs.length > 0 && !unasked && open.length > 0);
-  tpAction("#tp-next-album", open.length > 0 && !unasked, true);
+  const ready = t.from_list.numbers;
+  const onlyThose = ready.length > 0 && ready.length === open.length;
+  tpAction("#tp-next-album", open.length > 0 && !unasked, !onlyThose);
+  tpAction("#tp-all-list", ready.length > 0 && !tapeWatching, onlyThose);
+  $("#tp-all-list").textContent = `File ${counted(ready.length, "song", "songs")} from my list`;
+  showAllAsk(ready, open.length - ready.length - t.from_list.no_album, t.from_list.no_album);
   if (!t.songs.length) return tpStep("albums", "wait", "Waiting", "Needs the song list.");
   if (unasked === live.length && live.length) return tpStep("albums", "ready", "Not run", "Find the album each song belongs to.");
   if (unasked) return tpStep("albums", "ready", `${unasked} not looked up`, `${songsNamed(open)} still ${open.length === 1 ? "needs" : "need"} an album.`);
   if (failed) return tpStep("albums", "fail", `${failed} failed`, `${counted(failed, "lookup", "lookups")} could not finish. Look again to retry.`);
   if (open.length) return tpStep("albums", "todo", `${open.length} to choose`, `${songsNamed(open)} ${open.length === 1 ? "needs" : "need"} an album chosen.`);
   return tpStep("albums", "done", "All chosen", "Every song knows its album.");
+}
+
+// One question, saying what counts: no match at all, and an album to file it under.
+function showAllAsk(ready, choosing, noAlbum) {
+  const box = $("#tp-all-ask");
+  tpAllAsk = tpAllAsk && ready.length > 0 && !tapeWatching;
+  box.hidden = !tpAllAsk;
+  if (!tpAllAsk) { box.replaceChildren(); return; }
+  const said = [
+    `${counted(ready.length, "song has", "songs have")} no match at all, so each is tagged from your list, with no release, cover or date.`,
+    choosing > 0 ? `${counted(choosing, "song", "songs")} with something to choose stay as they are.` : "",
+    noAlbum ? `${counted(noAlbum, "song", "songs")} with no album on your list stay too.` : "",
+  ].filter(Boolean).join(" ");
+  box.replaceChildren(askView(said, "File them", () => {
+    tpAllAsk = false;
+    settleSong(() => postJSON(`/api/tapes/${tape.id}/from-list`, { numbers: ready }));
+  }, () => { tpAllAsk = false; showRail(tape); }));
 }
 
 // The cut's own refusal names every song; a rail line counts what it is waiting on.
@@ -4096,6 +4119,7 @@ function wire() {
   $("#tp-match").onclick = () => matchTape(false);
   $("#tp-rematch").onclick = () => matchTape(true);
   $("#tp-next-album").onclick = stepAlbum;
+  $("#tp-all-list").onclick = () => { tpAllAsk = true; showRail(tape); };
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;

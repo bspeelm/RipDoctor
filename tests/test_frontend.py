@@ -928,3 +928,15 @@ def test_a_job_forgotten_after_half_an_hour_was_called_a_restart() -> None:
     body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "half an hour" in body
     assert "so the server has restarted" not in body
+
+
+def test_a_hundred_songs_with_no_match_have_one_action_and_one_question() -> None:
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepAlbums\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'tpAction("#tp-all-list", ready.length > 0' in step
+    assert "t.from_list.numbers" in step
+    ask = re.search(r"function showAllAsk\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "askView(said" in ask and "no match at all" in ask
+    assert "stay as they are" in ask and "with no album" in ask
+    assert "/from-list`, { numbers: ready }" in ask
+    assert 'id="tp-all-list"' in tape_markup()
