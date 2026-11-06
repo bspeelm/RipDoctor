@@ -21,6 +21,7 @@ async function api(path, opts = {}) {
     // matters, because it means the work asked for is happening.
     const e = new Error(body?.error || `${r.status} ${r.statusText}`);
     e.status = r.status;
+    e.needsConfirm = !!body?.needs_confirm;
     throw e;
   }
   return body;
@@ -1543,6 +1544,7 @@ function releaseWord(song) {
   if (song.filing === "filed") return ["Filed", "good"];
   if (song.filing === "already") return ["In your library", "good"];
   if (song.filing === "failed") return ["Filing failed", "bad"];
+  if (song.proposal?.status === "owned") return ["In your library", "good"];
   if (song.settled_by === "catalogue") return ["Matched", "good"];
   if (song.settled_by) return [song.proposal?.choice ? "Your choice" : "From your list", "good"];
   const p = song.proposal;
@@ -1677,11 +1679,16 @@ function smallButton(text, title, act, cls = "ghost tiny") {
   return b;
 }
 
-// Answers replace the page's rows, and a pending nudge belongs to the row it left.
+// Answers replace the page's rows, and a pending nudge belongs to the row it left. A
+// refusal that only wants saying twice is asked here and sent again.
 async function settleSong(send) {
   $("#tp-err").textContent = "";
   await flushNudge();
-  try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
+  try { showTape(await send({})); } catch (e) {
+    if (!e.needsConfirm) { $("#tp-err").textContent = e.message; return; }
+    if (!confirm(`${e.message}. Choose it anyway?`)) return;
+    try { showTape(await send({ confirm: true })); } catch (again) { $("#tp-err").textContent = again.message; }
+  }
 }
 
 function releaseOptions(song) {
@@ -1698,7 +1705,7 @@ function releaseOptions(song) {
     for (const c of offered) {
       const on = song.settled_by && c.release === current?.release;
       pick.append(smallButton(`${editionText(c)}: ${trackText(c)}`, "file this song under this album",
-        () => settleSong(() => postJSON(release, { release: c.release })), on ? "tp-cand on" : "tp-cand"));
+        () => settleSong((more) => postJSON(release, { release: c.release, ...more })), on ? "tp-cand on" : "tp-cand"));
     }
     change.append(pick);
   }
@@ -1712,7 +1719,7 @@ function releaseOptions(song) {
   track.setAttribute("aria-label", "track number, if the title is not found");
   by.append(id, track,
     smallButton("Use this release", "look this release up and file the song under it",
-      () => settleSong(() => postJSON(release, { release: id.value, track: track.value }))),
+      () => settleSong((more) => postJSON(release, { release: id.value, track: track.value, ...more }))),
     smallButton("File from my list", "tag this song from the list, with no release",
       () => settleSong(() => postJSON(fromList, {}))));
   change.append(by);
@@ -1729,7 +1736,8 @@ function releaseOptions(song) {
 function releaseBlock(song) {
   const settled = !!song.settled_by;
   const choice = song.proposal?.choice;
-  const said = settled
+  const copy = song.proposal?.copy;
+  const said = copy ? `In your library: ${copy.album_artist} / ${copy.album}` : settled
     ? choice ? `${editionText(choice)}: ${trackText(choice)}` : "Filed from your list, with no release."
     : song.proposal?.reason || (song.proposal ? "" : "Not looked up yet.");
   const block = el("details", "tp-more");

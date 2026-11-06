@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -56,6 +59,8 @@ class Catalogue:
         for name, body in self.malformed.items():
             if name in asked:
                 return body
+        if "/recording?" in url:
+            return json.dumps(self.recordings(asked)).encode()
         if "query=" in url:
             hits = [
                 e
@@ -73,8 +78,62 @@ class Catalogue:
             an_edition(wanted, tracks=[("A Song", 200), ("Another", 150)])
         ).encode()
 
+    def recordings(self, asked: str) -> dict[str, object]:
+        """What the catalogue's recording search says of these editions: only the
+        tracks that hold the phrase, by the artist asked for, each under its release."""
+        phrase = re.search(r'recording:"((?:[^"\\\\]|\\\\.)*)"', asked)
+        by = re.search(r'artist:"((?:[^"\\\\]|\\\\.)*)"', asked)
+        assert phrase and by, asked
+        title = unicodedata.normalize("NFC", phrase.group(1)).casefold()
+        artist = by.group(1).casefold()
+        found = []
+        for editions in self.albums.values():
+            for edition in editions:
+                credit = "".join(
+                    str(c.get("name", "")) + str(c.get("joinphrase", ""))
+                    for c in edition.get("artist-credit", [])  # type: ignore[attr-defined]
+                )
+                if artist not in credit.casefold():
+                    continue
+                for medium in edition["media"]:  # type: ignore[attr-defined]
+                    for at, track in enumerate(medium["tracks"]):
+                        said = unicodedata.normalize("NFC", track["title"])
+                        if title in said.casefold():
+                            found.append(a_recording(edition, medium, at, track))
+        return {"count": len(found), "recordings": found}
+
     def searches(self) -> int:
         return sum("query=" in c for c in self.calls)
+
+
+def a_recording(
+    edition: dict[str, Any], medium: dict[str, Any], at: int, track: dict[str, Any]
+) -> dict[str, Any]:
+    release = {k: v for k, v in edition.items() if k != "media"}
+    shown = {
+        "position": medium["position"],
+        "format": medium.get("format", "CD"),
+        "track-count": len(medium["tracks"]),
+        "track-offset": at,
+        "track": [
+            {
+                "id": "t",
+                "number": "A1",
+                "title": track["title"],
+                "length": track["length"],
+            }
+        ],
+    }
+    return {
+        "id": track["recording"]["id"],
+        "title": track["recording"].get("title", track["title"]),
+        "disambiguation": track["recording"].get("disambiguation", ""),
+        "length": track["length"],
+        "artist-credit": track["recording"].get(
+            "artist-credit", edition.get("artist-credit", [])
+        ),
+        "releases": [{**release, "media": [shown]}],
+    }
 
 
 def an_edition(
@@ -84,12 +143,13 @@ def an_edition(
     title: str = "A Record",
     group: str = "g1",
     date: str = "1990",
+    status: str = "Official",
 ) -> dict[str, object]:
     return {
         "id": mbid,
         "title": title,
         "date": date,
-        "status": "Official",
+        "status": status,
         "artist-credit": [{"name": "A Band"}],
         "release-group": {"id": group},
         "media": [
@@ -175,38 +235,36 @@ def test_what_the_list_says_is_never_altered_by_a_match(service, catalogue) -> N
     assert view["songs"][0]["proposal"]["choice"]["track_title"] == "a song"
 
 
-def test_songs_from_one_album_share_one_search_and_one_fetch(
-    service, catalogue
-) -> None:  # type: ignore[no-untyped-def]
+def test_each_song_asks_once_and_needs_no_tracklist_fetched(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     run(
         app,
         service,
         a_tape(app, service, [row("A Song"), row("B Song", length="3:00")]),
     )
-    assert catalogue.searches() == 1
+    assert catalogue.searches() == 2
     assert len(catalogue.calls) == 2
 
 
-def test_two_albums_ask_twice_and_no_more(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+def test_three_songs_ask_three_times_and_no_more(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     run(app, service, a_tape(app, service))
-    assert catalogue.searches() == 2
-    assert len(catalogue.calls) == 4
+    assert catalogue.searches() == 3
+    assert len(catalogue.calls) == 3
 
 
 def test_a_whole_run_keeps_to_the_pace(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     run(app, service, a_tape(app, service))
     gaps = [b - a for a, b in zip(catalogue.times, catalogue.times[1:], strict=False)]
-    assert len(gaps) == 3
+    assert len(gaps) == 2
     assert all(gap >= 1.0 for gap in gaps)
 
 
 def test_a_failed_lookup_is_retryable_and_never_reads_as_no_match(
     service, catalogue
 ) -> None:  # type: ignore[no-untyped-def]
-    catalogue.down = {'release:"B Record"'}
+    catalogue.down = {'recording:"C Song"'}
     app = build(service)
     tape = a_tape(app, service)
     view = run(app, service, tape)
@@ -223,12 +281,12 @@ def test_a_failed_lookup_is_retryable_and_never_reads_as_no_match(
 
 @pytest.mark.parametrize(
     "body",
-    [b"{}", b"[]", b"null", b'{"releases": 7}', b'{"releases": [1]}'],
+    [b"{}", b"[]", b"null", b'{"recordings": 7}', b'{"recordings": [1]}'],
 )
-def test_a_malformed_answer_fails_one_album_and_the_rest_carry_on(
+def test_a_malformed_answer_fails_one_song_and_the_rest_carry_on(
     service, catalogue, body: bytes
 ) -> None:  # type: ignore[no-untyped-def]
-    catalogue.malformed = {'release:"B Record"': body}
+    catalogue.malformed = {'recording:"C Song"': body}
     app = build(service)
     tape = a_tape(app, service)
     view = run(app, service, tape)
@@ -239,8 +297,8 @@ def test_a_malformed_answer_fails_one_album_and_the_rest_carry_on(
     assert statuses(run(app, service, tape)) == [M.MATCHED] * 3
 
 
-def test_an_empty_list_of_releases_is_still_none(service, catalogue) -> None:  # type: ignore[no-untyped-def]
-    catalogue.malformed = {'release:"B Record"': b'{"releases": []}'}
+def test_an_empty_list_of_recordings_is_still_none(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+    catalogue.malformed = {'recording:"C Song"': b'{"count": 0, "recordings": []}'}
     app = build(service)
     view = run(app, service, a_tape(app, service))
     assert statuses(view) == [M.MATCHED, M.MATCHED, M.NONE]
@@ -263,21 +321,19 @@ def test_the_album_asked_for_is_fetched_past_a_series(service, catalogue) -> Non
     assert view["songs"][0]["proposal"]["choice"]["release"] == "the-one"
 
 
-def test_a_second_album_of_the_name_past_the_probe_is_seen_and_forces_review(
+def test_a_second_album_of_the_name_does_not_stop_for_a_person(
     service, catalogue
 ) -> None:  # type: ignore[no-untyped-def]
-    without = [("Other", 100)]
     catalogue.albums["A Record"] = [
-        an_edition("first", group="a", date="1991", tracks=[("A Song", 200)]),
-        an_edition("b", group="b", date="1992", tracks=without),
-        an_edition("c", group="c", date="1993", tracks=without),
-        an_edition("d", group="d", date="1994", tracks=without),
         an_edition("late", group="e", date="2005", tracks=[("A Song", 200)]),
+        an_edition("first", group="a", date="1991", tracks=[("A Song", 200)]),
     ]
     app = build(service)
     view = run(app, service, a_tape(app, service, [row("A Song")]))
-    assert statuses(view) == [M.REVIEW]
-    assert "fits 2 albums" in view["songs"][0]["proposal"]["reason"]
+    assert statuses(view) == [M.MATCHED]
+    assert view["songs"][0]["proposal"]["choice"]["release"] == "first"
+    offered = view["songs"][0]["proposal"]["candidates"]
+    assert [c["release"] for c in offered] == ["first", "late"]
 
 
 def test_a_name_holding_a_comma_is_not_answered_by_its_first_word(
@@ -286,7 +342,7 @@ def test_a_name_holding_a_comma_is_not_answered_by_its_first_word(
     app = build(service)
     rows = [row("A Song"), {**row("B Song", length="3:00"), "artist": "A Band, B & C"}]
     view = run(app, service, a_tape(app, service, rows))
-    assert catalogue.searches() == 2
+    assert catalogue.searches() == 3
     assert statuses(view) == [M.MATCHED, M.REVIEW]
     assert "credits" in view["songs"][1]["proposal"]["reason"]
 
@@ -313,11 +369,12 @@ def test_no_release_stands_on_the_lists_album_and_needs_a_person(
     assert view["all_settled"] is False
 
 
-def test_a_blank_album_is_answered_without_asking(service, catalogue) -> None:  # type: ignore[no-untyped-def]
+def test_a_blank_album_is_found_by_the_song(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app = build(service)
     view = run(app, service, a_tape(app, service, [row("A Song", album="")]))
-    assert statuses(view) == [M.NONE]
-    assert catalogue.calls == []
+    assert statuses(view) == [M.MATCHED]
+    assert view["songs"][0]["proposal"]["note"] == ""
+    assert catalogue.searches() == 1
 
 
 def test_a_guest_in_the_artist_is_not_searched_for(service, catalogue) -> None:  # type: ignore[no-untyped-def]
@@ -346,24 +403,26 @@ def test_a_live_album_named_by_its_group_is_not_accepted(service, catalogue) -> 
     assert "live album" in view["songs"][0]["proposal"]["reason"]
 
 
-def test_two_release_groups_arrive_in_review_with_both_to_pick_from(
+def test_two_release_groups_settle_on_the_earlier_with_both_to_pick_from(
     service, catalogue
 ) -> None:  # type: ignore[no-untyped-def]
     catalogue.albums["A Record"] = [
-        an_edition("rel-a", tracks=[("A Song", 200)]),
         an_edition("rel-z", tracks=[("A Song", 200)], group="g9", date="2001"),
+        an_edition("rel-a", tracks=[("A Song", 200)]),
     ]
     app = build(service)
     view = run(app, service, a_tape(app, service, [row("A Song")]))
-    assert statuses(view) == [M.REVIEW]
+    assert statuses(view) == [M.MATCHED]
     offered = view["songs"][0]["proposal"]["candidates"]
-    assert {c["release"] for c in offered} == {"rel-a", "rel-z"}
+    assert [c["release"] for c in offered] == ["rel-a", "rel-z"]
 
 
 def doubtful(service: Service, catalogue: Catalogue) -> tuple:  # type: ignore[type-arg]
     catalogue.albums["A Record"] = [
-        an_edition("rel-a", tracks=[("A Song", 200)]),
-        an_edition("rel-z", tracks=[("A Song", 200)], group="g9", date="2001"),
+        an_edition("rel-a", tracks=[("A Song", 200)], status="Promotion"),
+        an_edition(
+            "rel-z", tracks=[("A Song", 200)], group="g9", date="2001", status="Bootleg"
+        ),
     ]
     app = build(service)
     tape = a_tape(app, service, [row("A Song")])
@@ -425,7 +484,7 @@ def test_a_release_without_the_song_asks_for_the_track_and_changes_nothing(
     assert "1 Unrelated" in refused.json()["error"]
     assert T.read(service.layout, tape).songs[0].settled_by == ""
 
-    named = post(app, path, service, {"release": PASTED, "track": "1"})
+    named = post(app, path, service, {"release": PASTED, "track": "1", "confirm": True})
     assert named.json()["songs"][0]["proposal"]["choice"]["track_title"] == "Unrelated"
 
 
@@ -517,7 +576,7 @@ def test_a_person_may_not_settle_a_song_while_a_run_holds_the_tape(service) -> N
 def test_an_interrupted_run_keeps_what_it_finished_and_resumes_after_it(
     service, catalogue
 ) -> None:  # type: ignore[no-untyped-def]
-    catalogue.broken = {'release:"B Record"'}
+    catalogue.broken = {'recording:"C Song"'}
     app = build(service)
     tape = a_tape(app, service)
     assert post(app, f"/api/tapes/{tape}/match", service).status == 202
@@ -543,7 +602,7 @@ def test_a_first_run_after_a_stated_doubt_does_not_ask_again(
 
 def test_looking_again_asks_about_a_stated_doubt(service, catalogue) -> None:  # type: ignore[no-untyped-def]
     app, tape = doubtful(service, catalogue)
-    catalogue.albums["A Record"].pop()
+    catalogue.albums["A Record"] = [an_edition("rel-a", tracks=[("A Song", 200)])]
     view = run(app, service, tape, again=True)
     assert catalogue.calls
     assert statuses(view) == [M.MATCHED]

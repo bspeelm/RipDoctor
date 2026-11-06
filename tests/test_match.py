@@ -32,8 +32,22 @@ def edition(
     status: str = "Official",
     live: bool = False,
     secondary: tuple[str, ...] = (),
+    primary: str = "Album",
+    credit: tuple[str, ...] = (),
+    recording_title: str = "",
+    disambiguation: str = "",
+    recording: str = "",
 ) -> M.Edition:
-    track = M.CatalogueTrack(title, 3, 1, length, f"rec-{release}")
+    track = M.CatalogueTrack(
+        title,
+        3,
+        1,
+        length,
+        recording or f"rec-{release}",
+        recording_title,
+        disambiguation,
+        credit,
+    )
     return M.Edition(
         release,
         group,
@@ -43,7 +57,7 @@ def edition(
         status,
         (track,),
         live,
-        primary="Album",
+        primary=primary,
         secondary=secondary,
     )
 
@@ -87,13 +101,13 @@ def test_only_the_last_dash_of_a_title_can_begin_a_remaster_suffix() -> None:
     assert got.status == M.REVIEW
 
 
-def test_of_several_editions_the_nearest_length_wins() -> None:
+def test_of_several_editions_within_the_limit_the_earliest_wins() -> None:
     got = M.propose(
         wanted(),
-        [edition("early", length=202.5, date="1980"), edition("near", date="2001")],
+        [edition("near", date="2001"), edition("early", length=202.5, date="1980")],
     )
     assert got.status == M.MATCHED
-    assert got.choice is not None and got.choice.release == "near"
+    assert got.choice is not None and got.choice.release == "early"
 
 
 def test_of_equally_near_editions_the_earliest_date_wins() -> None:
@@ -115,15 +129,14 @@ def test_less_than_a_second_is_not_nearer_than_a_whole_second_list_can_say() -> 
     assert got.choice is not None and got.choice.release == "z-early"
 
 
-def test_two_release_groups_that_fit_go_to_review_and_name_both() -> None:
+def test_two_release_groups_that_fit_settle_on_the_earlier_and_offer_both() -> None:
     got = M.propose(
         wanted(),
-        [edition("a", group="ga", date="1980"), edition("b", group="gb", date="1999")],
+        [edition("b", group="gb", date="1999"), edition("a", group="ga", date="1980")],
     )
-    assert got.status == M.REVIEW
-    assert "1980" in got.reason and "1999" in got.reason
+    assert got.status == M.MATCHED
     assert got.choice is not None and got.choice.release == "a"
-    assert len(got.candidates) == 2
+    assert [c.release for c in got.candidates] == ["a", "b"]
 
 
 def test_the_album_the_list_names_settles_two_groups() -> None:
@@ -137,7 +150,7 @@ def test_the_album_the_list_names_settles_two_groups() -> None:
 
 def test_editions_with_no_group_are_not_assumed_to_share_one() -> None:
     got = M.propose(wanted(), [edition("a", group=""), edition("b", group="")])
-    assert got.status == M.REVIEW
+    assert [c.release for c in got.candidates] == ["a", "b"]
 
 
 def test_no_length_within_three_seconds_goes_to_review_and_says_how_far() -> None:
@@ -337,7 +350,6 @@ def test_a_feat_credit_in_the_artist_still_agrees_with_the_album_artist() -> Non
     ("listed", "credited"),
     [
         ("A Band, Another Band", "A Band"),
-        ("Another Band, A Band", "A Band & Another Band"),
         ("Sun, Sea & Stars", "Sun, Sea & Stars"),
     ],
 )
@@ -393,8 +405,6 @@ def test_a_shared_word_or_an_empty_name_is_no_agreement(
         ("A BAND", "a band"),
         ("Hill and Dale", "Hill & Dale"),
         ("A Band (feat. A Guest)", "A Band"),
-        ("A Band feat. A Guest", "A Band feat. A Guest"),
-        ("A Band, A Guest", "A Band feat. A Guest"),
         ("AC/DC", "AC/DC"),
     ],
 )
@@ -403,15 +413,47 @@ def test_the_same_names_or_a_listed_lead_agree(listed: str, credited: str) -> No
     assert got.status == M.MATCHED
 
 
+@pytest.mark.parametrize(
+    ("listed", "credit"),
+    [
+        ("A Band", ("A Band", "Another Band")),
+        ("Another Band, A Band", ("A Band", "Another Band")),
+        ("A Band feat. A Guest", ("A Band", "A Guest")),
+        ("A Band, A Guest", ("A Band", "A Guest")),
+        ("A Band & Another Band", ("A Band", "Another Band")),
+        ("The Hats", ("Hats",)),
+        ("Hats", ("The Hats",)),
+        ("the hats", ("The Hats",)),
+    ],
+)
+def test_the_lead_on_a_credit_of_several_agrees_and_the_is_ignored(
+    listed: str, credit: tuple[str, ...]
+) -> None:
+    got = M.propose(wanted(artist=listed), [edition(credit=credit)])
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    ("listed", "credit"),
+    [
+        ("A Guest, A Band", ("A Band",)),
+        ("A Band & Another Band", ("A Band",)),
+        ("Sun", ("Sun, Moon & Stars",)),
+        ("The Hats", ("The Hat Band",)),
+    ],
+)
+def test_a_credit_without_the_lead_is_held(
+    listed: str, credit: tuple[str, ...]
+) -> None:
+    got = M.propose(wanted(artist=listed), [edition(credit=credit)])
+    assert got.status == M.REVIEW
+    assert "credits" in got.reason
+
+
 def test_a_band_with_ft_in_its_name_is_not_cut_at_it() -> None:
     assert M.search_artists("Six Ft Under") == ("Six Ft Under",)
     got = M.propose(wanted(artist="Six Ft Under"), [edition(artist="Six")])
     assert got.status == M.REVIEW
-
-
-def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> None:
-    whole = M.lookup_key(wanted(artist="Sun, Moon & Stars"))
-    assert whole != M.lookup_key(wanted(artist="Sun"))
 
 
 @pytest.mark.parametrize(
@@ -423,25 +465,43 @@ def test_a_name_holding_a_comma_and_its_first_word_do_not_share_a_lookup() -> No
         ("A Record", "A Record: A Tribute"),
         ("A Record", "A Record (Live Edition)"),
         ("A Record", "A Record - Remixed"),
-        ("A Record", "A Record (Original Version)"),
         ("A Record", "A Record (Special Karaoke Edition)"),
         ("A Record", "A Record (Deluxe Instrumental Edition)"),
-        ("A Record", "A Record (1999)"),
-        ("Hits", "Hits Vol. 2"),
         ("Live 1970", "Live 1985"),
-        ("A Record (Deluxe)", "B Record (Deluxe)"),
-        ("Ma\u00df", "Mass"),
-        ("", "A Record"),
-        ("(Deluxe Edition)", "(Expanded Edition)"),
     ],
 )
-def test_a_release_that_is_not_the_lists_album_is_never_accepted(
+def test_a_release_that_reads_as_another_version_is_never_accepted(
     listed: str, release: str
 ) -> None:
     got = M.propose(wanted(album=listed), [edition(album=release)])
     assert got.status == M.REVIEW
     assert release in got.reason
     assert got.choice is not None and got.choice.release_title == release
+
+
+@pytest.mark.parametrize(
+    ("listed", "release"),
+    [
+        ("A Record", "A Record (Original Version)"),
+        ("A Record", "A Record (1999)"),
+        ("Hits", "Hits Vol. 2"),
+        ("A Record (Deluxe)", "B Record (Deluxe)"),
+        ("Ma\u00df", "Mass"),
+        ("(Deluxe Edition)", "(Expanded Edition)"),
+    ],
+)
+def test_a_different_album_from_the_list_is_a_note_and_not_a_block(
+    listed: str, release: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album=release)])
+    assert got.status == M.MATCHED
+    assert listed in got.note and release in got.note
+    assert got.reason == ""
+
+
+def test_no_album_on_the_list_is_no_note() -> None:
+    got = M.propose(wanted(album=""), [edition()])
+    assert (got.status, got.note) == (M.MATCHED, "")
 
 
 @pytest.mark.parametrize(
@@ -505,21 +565,26 @@ def test_a_deluxe_edition_can_answer_when_the_exact_album_is_off_in_length() -> 
 
 @pytest.mark.parametrize(
     "kind",
-    [
-        "Compilation",
-        "Remix",
-        "Soundtrack",
-        "Karaoke",
-        "Mixtape/Street",
-        "DJ-mix",
-        "Demo",
-    ],
+    ["Compilation", "Soundtrack", "Karaoke", "DJ-mix", "Demo"],
 )
 def test_a_release_of_another_kind_is_a_persons_to_judge(kind: str) -> None:
     named = "A Record (Deluxe Edition)"
     got = M.propose(wanted(), [edition(album=named, secondary=(kind,))])
     assert got.status == M.REVIEW
     assert kind in got.reason
+
+
+@pytest.mark.parametrize("kind", ["Remix", "Mixtape/Street"])
+def test_a_remix_or_mixtape_release_ranks_as_the_record_it_is(kind: str) -> None:
+    got = M.propose(
+        wanted(),
+        [
+            edition("ep", album="B Record", group="b", primary="EP", date="1980"),
+            edition("lp", album="C Record", group="c", secondary=(kind,), date="1999"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "lp"
 
 
 @pytest.mark.parametrize(
@@ -634,15 +699,6 @@ def test_what_to_ask_the_catalogue_for_drops_guests_then_tries_the_lead() -> Non
     assert M.search_album("A Record (Remastered 2011)") == "A Record"
 
 
-def test_songs_from_one_album_share_a_lookup_however_they_are_credited() -> None:
-    one = M.lookup_key(wanted(artist="A BAND", album="A Record"))
-    assert one == M.lookup_key(wanted(artist="A Band feat. Guest", album="a record"))
-    assert one == M.lookup_key(
-        wanted(artist="A Band, Guest", album="A Record - 2011 Remaster")
-    )
-    assert one != M.lookup_key(wanted(album="Another Record"))
-
-
 def test_a_release_id_is_found_in_a_pasted_link() -> None:
     uuid = "12345678-90ab-cdef-1234-567890abcdef"
     assert M.release_id(f" https://catalogue.example/release/{uuid}#x ") == uuid
@@ -665,6 +721,224 @@ def test_a_person_can_name_the_track_whatever_it_is_called() -> None:
     assert (choice.track_title, choice.number) == ("Another", 3)
     with pytest.raises(M.NoTrack, match="no track 2"):
         M.track_on(wanted(), edition(title="Another"), 2)
+
+
+# ------------------------------------------------------- what is accepted unasked
+
+
+def test_a_recording_called_something_else_on_a_track_of_the_listed_name_is_held() -> (
+    None
+):
+    got = M.propose(
+        wanted("Harbour"),
+        [edition(title="Harbour", recording_title="Harbour (with brass band)")],
+    )
+    assert got.status == M.REVIEW
+    assert "close title" in got.reason
+
+
+def test_a_track_called_something_else_for_a_recording_of_the_listed_name_is_held() -> (
+    None
+):
+    got = M.propose(
+        wanted("Harbour"),
+        [edition(title="Harbour (brass band mix)", recording_title="Harbour")],
+    )
+    assert got.status == M.REVIEW
+
+
+def test_a_remaster_suffix_on_either_name_of_the_track_does_not_hold_it() -> None:
+    got = M.propose(
+        wanted("Harbour"),
+        [edition(title="Harbour - 2011 Remaster", recording_title="Harbour")],
+    )
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "live, 1999-05-01: a town hall",
+        "acoustic",
+        "instrumental",
+        "demo",
+        "extended remix",
+        "radio edit",
+        "karaoke",
+        "studio sessions",
+        "alternate take",
+        "clean",
+        "Dolby Atmos mix",
+        "part of a DJ-mix",
+        "music video",
+    ],
+)
+def test_a_recording_the_catalogue_calls_another_version_is_held(said: str) -> None:
+    got = M.propose(wanted(), [edition(disambiguation=said)])
+    assert got.status == M.REVIEW
+    assert said in got.reason
+
+
+def test_the_lists_own_title_can_ask_for_that_version() -> None:
+    got = M.propose(
+        wanted("A Song (Acoustic)"),
+        [edition(title="A Song (Acoustic)", disambiguation="acoustic")],
+    )
+    assert got.status == M.MATCHED
+
+
+def test_a_disambiguation_that_says_no_other_version_does_not_hold_it() -> None:
+    got = M.propose(wanted(), [edition(disambiguation="album version")])
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize("kind", ["Compilation", "DJ-mix", "Live"])
+@pytest.mark.parametrize("listed", ["", "The Wrong Album"])
+def test_a_wrong_or_blank_album_never_lets_a_kept_out_release_in(
+    kind: str, listed: str
+) -> None:
+    got = M.propose(wanted(album=listed), [edition(album="Best Of", secondary=(kind,))])
+    assert got.status == M.REVIEW
+
+
+def test_a_compilation_the_list_names_is_accepted() -> None:
+    got = M.propose(
+        wanted(album="Best Of"), [edition(album="Best Of", secondary=("Compilation",))]
+    )
+    assert got.status == M.MATCHED
+
+
+def test_a_compilation_does_not_stop_an_album_being_accepted() -> None:
+    got = M.propose(
+        wanted(album=""),
+        [
+            edition("comp", album="Best Of", secondary=("Compilation",), date="1980"),
+            edition("lp", album="Second", group="g2", date="1999"),
+        ],
+    )
+    assert got.status == M.MATCHED
+    assert got.choice is not None and got.choice.release == "lp"
+    assert [c.release for c in got.candidates] == ["lp", "comp"]
+
+
+def test_a_tie_comes_out_the_same_whatever_order_it_was_given_in() -> None:
+    one = edition("a", group="ga", date="1999")
+    two = edition("b", group="gb", date="1999")
+    first = M.propose(wanted(album=""), [one, two])
+    second = M.propose(wanted(album=""), [two, one])
+    assert first.status == M.MATCHED
+    assert first == second
+    assert first.choice is not None and first.choice.release == "a"
+
+
+def test_an_edition_in_the_library_comes_before_the_album_on_the_list() -> None:
+    mine = edition("mine", album="Another Record", group="g2", date="2005")
+    got = M.propose(
+        wanted(),
+        [edition("named"), mine],
+        held=(M.Held("mine", "Another Record", "A Band", 13),),
+    )
+    assert got.choice is not None and got.choice.release == "mine"
+
+
+def test_the_album_on_the_list_comes_before_an_earlier_album() -> None:
+    got = M.propose(
+        wanted(),
+        [edition("early", album="First", group="g2", date="1970"), edition("named")],
+    )
+    assert got.choice is not None and got.choice.release == "named"
+
+
+def test_an_album_comes_before_an_ep_and_an_ep_before_a_single() -> None:
+    single = edition("s", album="S", group="gs", primary="Single", date="1970")
+    ep = edition("e", album="E", group="ge", primary="EP", date="1980")
+    lp = edition("a", album="A", group="ga", date="1990")
+    got = M.propose(wanted(album=""), [single, ep, lp])
+    assert got.choice is not None and got.choice.release == "a"
+    assert [c.release for c in got.candidates] == ["a", "e", "s"]
+
+
+def test_an_edition_with_no_date_comes_last() -> None:
+    got = M.propose(
+        wanted(album=""),
+        [
+            edition("nodate", album="X", group="gx", date=""),
+            edition("dated", album="Y", group="gy", date="2020"),
+        ],
+    )
+    assert got.choice is not None and got.choice.release == "dated"
+
+
+def test_a_search_on_a_shorter_title_is_only_ever_a_set_of_candidates() -> None:
+    got = M.propose(wanted(), [edition()], loose=True)
+    assert got.status == M.REVIEW
+    assert got.candidates
+
+
+def test_options_are_capped_and_keep_the_chosen_recordings_single() -> None:
+    albums = [
+        edition(f"a{n}", album=f"A{n}", group=f"g{n}", date=f"19{n:02d}", recording="r")
+        for n in range(20)
+    ]
+    single = edition(
+        "s", album="S", group="gs", primary="Single", date="1950", recording="r"
+    )
+    got = M.propose(wanted(album=""), [*albums, single])
+    assert len(got.candidates) == M.OFFERED + 1
+    assert got.candidates[-1].release == "s"
+
+
+def test_the_same_recording_on_an_album_is_offered_once_the_librarys_first() -> None:
+    one = edition("one", date="1990", recording="r")
+    two = edition("two", date="1991", recording="r")
+    assert len(M.propose(wanted(), [one, two]).candidates) == 1
+    held = (M.Held("two", "A Record", "A Band", 13),)
+    offered = M.propose(wanted(), [one, two], held=held).candidates
+    assert offered[0].release == "two"
+
+
+def test_an_option_says_all_a_person_chooses_by() -> None:
+    held = (M.Held("r1", "A Record", "A Band", 13),)
+    made = M.propose(
+        wanted(),
+        [
+            M.Edition(
+                "r1",
+                "g1",
+                "A Record",
+                "A Band",
+                "1990-02-03",
+                "Official",
+                (M.CatalogueTrack("A Song", 3, 2, 202.5, "rec", tracks=13),),
+                primary="EP",
+                country="GB",
+                format="CD",
+            )
+        ],
+        held=held,
+    )
+    option = M.options(wanted(), made)[0]
+    assert (option["release"], option["group"]) == ("r1", "g1")
+    assert (option["release_title"], option["year"]) == ("A Record", "1990")
+    assert (option["country"], option["format"]) == ("GB", "CD")
+    assert (option["track_title"], option["disc"], option["number"]) == ("A Song", 2, 3)
+    assert (option["tracks"], option["length"], option["delta"]) == (13, 202.5, 2.5)
+    assert (option["kind"], option["in_library"]) == ("ep", True)
+
+
+def test_a_title_loses_only_a_trailing_clause_when_shortened() -> None:
+    assert M.base_title("A Song (Single Edit)") == "A Song"
+    assert M.base_title("A Song [Extended]") == "A Song"
+    assert M.base_title("A Song - Album Version") == "A Song"
+    assert M.base_title("A Song (Club Remix [Radio Edit])") == "A Song"
+    assert M.base_title("A Song") == "A Song"
+    assert M.base_title("(Interlude)") == ""
+
+
+def test_a_document_from_before_these_fields_still_reads() -> None:
+    old = {"status": "review", "reason": "r", "choice": None, "candidates": []}
+    made = M.Proposal.from_dict(old)
+    assert (made.note, made.held, made.copy, made.library_note) == ("", (), None, "")
 
 
 # ------------------------------------------------------------ the document

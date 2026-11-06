@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,055, and
-at 3,355 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,503, and
+at 3,803 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2207,23 +2207,76 @@ this song. The same title, artist and album is not evidence. Nothing is cleared
 until every entry is proved, and in doubt a song is named, not guessed, and not
 cleared.
 
-**The match rule.** The list supplies album and length. `matched` files a song
-with nobody looking, so it means all of: the same title, artist and album, on an
-official edition, with a length within 3 s. The nearest length wins among those,
-an exactly named album first, then the earliest date.
+**The search is by song.** A song is looked for by a recording search on its title and
+artist, as quoted phrases, up to the hundred the service answers. An album-first search
+kept a handful of editions and looked inside them, so a song on any other edition, or a
+wrong or empty album on the list, found nothing. A comma credit that finds nothing is
+retried by its lead. Past a full page without the list's album, that album is added to
+the query. What the reply says is enough to choose a release with no further request,
+and at most three are made for a song. A track's place comes from its offset, because
+its number can be `A6`, and a recording's length stands in for a track that has none.
+Comparison stays in Python.
 
-A title is the same in canonical form and case, typographic quotes and dashes
-aside. A trailing suffix wholly of remaster words and years is ignored, and so is
-a bracketed or dash-led clause starting `feat.`, `ft.` or `featuring`, though two
-different such clauses disagree. Equality reached only by compatibility folding
-is a close title. An album is the same, or differs only by a suffix of edition
-words. A group with a secondary type needs the list to name exactly it, and a live
-one also needs that name to say live. Artists are the same names, or the list's
-lead credit alone; Various Artists agrees with nobody. Two tracks a list cannot
-tell apart are a doubt.
+**The match rule.** `matched` files a song with nobody looking, so it means all of:
+the title on both the recording and the track, nothing saying it is another version, a
+release of no kind the list did not ask for, the list's lead on the credit, a length
+within 3 s, and Official. The album is not among these: the list's album only chooses,
+and a different one is a note. The false-accept judgement below is against three lists.
 
-Everything else goes to review, and nothing files until review is settled. The
-false-accept rate of this rule has not been measured.
+A title is the same in canonical form and case, typographic quotes and dashes aside. A
+trailing suffix wholly of remaster words and years is ignored, and so is a bracketed or
+dash-led clause starting `feat.`, `ft.` or `featuring`, though two different such clauses
+disagree. Equality reached only by compatibility folding is a close title. A recording
+and its track can disagree, and the difference is often the version. Another version is
+a net over free text: words like live, acoustic, remix, edit, mix or tribute in the
+recording's disambiguation, and in the release's title or disambiguation unless the list
+names that release, none of them the list's title says. It catches what it catches. A
+release with a secondary type other than Remix or Mixtape/Street, which rank as their
+primary type, needs the list to name exactly it, and a live one also needs that name to
+say live. The lead is compared whole, so a shared word is no agreement, a leading The
+aside, against each name as credited and as the artist is known; a list crediting several
+names outright needs all of them. Various Artists agrees with nobody. Two tracks a list
+cannot tell apart on one release are a doubt, as far as the search showed both: a reply
+holds only tracks of the recordings it found, so a same-named track of a recording it
+did not find is not seen until File's read-back.
+
+**Choosing the release among those** goes: an edition the library has, then the album
+the list names or an edition of it, then the earliest album, EP and single, anything else
+last, and then the date, the length to the second and the id. So a tie never stops for a
+person and always comes out the same. A date can be missing from the index and sorts
+last.
+
+**A title the catalogue only has shorter.** With nothing found, a trailing clause the list
+may have added, like (Single Edit), is dropped and searched again, and what that finds
+is offered and never accepted. A classical `Work: movement` title goes to review as it
+stands: a search on loose words is unquoted terms, which this does not send.
+
+**Everything else goes to review,** with the options best first, one to an album and
+recording, at most twelve, and the chosen recording's single past that. A person chooses
+one with no typing, since it carries its track, or searches inside the row by their own
+title and artist, whose results are offered and settle nothing. A choice more than 3 s
+off the list is refused until it is said twice, because a song was once settled on the
+233 s original when the list said the 202 s remix. Nothing files until review is settled.
+
+**Measured.** Three lists through this rule against the service's replies, and every
+accept read for a wrong version: 39 accepted, none wrong; 6 to review; 4 with nothing.
+The same songs with their albums taken away accepted 36, 35 of them the same recording,
+and nothing on a compilation. More than a page of results can leave out the first edition
+of an album, and then a later one is chosen: the right recording on a less apt release.
+
+**The library first.** Each song is checked at lookup by the same pre-check File uses,
+against the rows by its artist and any row with the chosen recording. A copy it proves
+is `owned`, counts as settled, and names its album artist, album, path and release; File
+then finds it again and the playlist points at it. A doubt's best guess proves nothing by
+its id, only by name. A copy the pre-check could not vouch for sends the song to review,
+with Use-copy to hand, rather than failing at File. A library that cannot be read is said
+on the song and stops nothing, and File still asks. What the library holds is kept with
+the proposal, which is what ranks an edition it has and marks an option.
+
+**Beside an edition already held.** A release of an album the library has as another
+edition carries a note: not on your edition, its track number and count, a second album
+entry in the same folder, your tracks unchanged. The same recording's single is offered
+if the search showed one.
 
 **A song with no release** takes the ADR-049 route when a person chooses it: tagged
 from the list, marked as having no release, with no fetched art or date. It still

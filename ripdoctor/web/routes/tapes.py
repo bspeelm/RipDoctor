@@ -43,23 +43,6 @@ def _size(body: dict[str, Any]) -> int:
     return size
 
 
-def _answers(service: Service, songs: list[TP.Song]) -> dict[int, TM.Proposal]:
-    """One album's songs from one set of requests. Failing to ask is not "none"."""
-    first = TP.wanted(songs[0])
-    try:
-        found = MB.editions(
-            MB.Paced(service.fetcher, service.pace),
-            TM.search_artists(first.artist),
-            TM.search_album(first.album),
-            sleep=service.pace.sleep,
-        )
-    except MB.LookupFailed as e:
-        failed = TM.Proposal(TM.FAILED, f"{e} - look again to retry")
-        return {s.number: failed for s in songs}
-    editions = [MB.edition_of(r) for r in found]
-    return {s.number: TM.propose(TP.wanted(s), editions) for s in songs}
-
-
 def _position(body: dict[str, Any]) -> int | None:
     value = body.get("track")
     if value in (None, ""):
@@ -150,6 +133,21 @@ def add(app: App, service: Service) -> None:
             for s in TP.ear_order(tape)
         ]
 
+    def asking() -> TJ.Asking:
+        settings = service.settings
+        beets = None
+        if settings.library:
+            found = IMP.choose(service.runner, settings.importer, service.state_dir)
+            beets = found if isinstance(found, IMP.Beets) else None
+        return TJ.Asking(
+            MB.Paced(service.fetcher, service.pace),
+            service.pace.sleep,
+            service.runner,
+            layout,
+            settings.library,
+            beets,
+        )
+
     def view(tape: TP.Tape) -> dict[str, Any]:
         key = T.key_of(tape.id)
         upload = IN.state(layout, key)
@@ -157,6 +155,9 @@ def add(app: App, service: Service) -> None:
         cuts = T.cuts_on_disk(layout, tape.id)
         return {
             **tape.to_dict(),
+            "releases": [
+                {"number": s.number, **TF.release_view(s)} for s in tape.songs
+            ],
             "audio": T.audio_file(layout, tape.id).is_file(),
             "waveform": T.envelope_file(layout, tape.id).is_file(),
             "upload": None if upload is None else upload.as_dict(),
@@ -393,18 +394,7 @@ def add(app: App, service: Service) -> None:
         again = bool(r.json().get("again"))
 
         def work(job: Job) -> dict[str, Any]:
-            current = T.read(layout, tape.id)
-            waiting = TP.to_match(current, again=again)
-            albums: dict[tuple[str, str], list[TP.Song]] = {}
-            for song in waiting:
-                albums.setdefault(TM.lookup_key(TP.wanted(song)), []).append(song)
-            job.total = len(waiting)
-            for songs in albums.values():
-                job.step(tape.name, f"asking about {songs[0].album or songs[0].title}")
-                current = TP.with_proposals(current, _answers(service, songs))
-                T.save(layout, current)
-                job.finished += len(songs)
-            return current.to_dict()
+            return TJ.look_up(asking(), tape.id, job, again=again).to_dict()
 
         return started(tape.id, "match", work)
 
@@ -425,18 +415,29 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(409, refused)
         return song
 
+    def chosen(
+        tape: TP.Tape, song: TP.Song, choice: TM.Choice, confirmed: bool
+    ) -> H.Response:
+        """A person's choice, said twice if it is far from what the list says."""
+        far = TM.off_the_list(TP.wanted(song), choice)
+        if far and not confirmed:
+            return H.ok({"error": far, "needs_confirm": True}, 409)
+        return kept(TP.settle(tape, song.number, choice))
+
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/release")
     @settled
     def release(r: H.Request, tape: TP.Tape) -> H.Response:
-        """One of the candidates needs no request; anything else is looked up."""
+        """One of the candidates needs no request and no track, since it carries its
+        own; anything else is looked up."""
         song = choosable(tape, r)
         body = r.json()
         given = str(body.get("release", "")).strip()
+        confirmed = body.get("confirm") is True
         position = _position(body)
         offered = song.proposal.candidates if song.proposal else ()
         for candidate in offered:
             if candidate.release == given and candidate.number and position is None:
-                return kept(TP.settle(tape, song.number, candidate))
+                return chosen(tape, song, candidate, confirmed)
         try:
             found = MB.release_by_id(
                 MB.Paced(service.fetcher, service.pace),
@@ -450,7 +451,30 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, str(e)) from e
         except MB.LookupFailed as e:
             raise H.HttpError(503, str(e)) from e
-        return kept(TP.settle(tape, song.number, choice))
+        return chosen(tape, song, choice, confirmed)
+
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/search")
+    @settled
+    def search(r: H.Request, tape: TP.Tape) -> H.Response:
+        """A person's own words for a song. What it finds is offered and never settled,
+        and is kept with the song so that choosing one takes no typing."""
+        song = choosable(tape, r)
+        body = r.json()
+        title = str(body.get("title") or song.title).strip()
+        artist = str(body.get("artist") or song.artist).strip()
+        if not title or not artist:
+            raise H.HttpError(400, "a search needs a title and an artist")
+        asked = TM.Wanted(title, artist, song.album, song.length)
+        made = song.proposal or TM.Proposal(TM.NONE)
+        answer = asking().catalogue(asked, made.held)
+        if answer.status == TM.FAILED:
+            raise H.HttpError(503, answer.reason)
+        changed = TP.offered(tape, song.number, answer.candidates)
+        T.save(layout, changed)
+        said = "" if answer.candidates else answer.reason
+        return H.ok(
+            {"options": TM.options(asked, answer), "reason": said, "song": song.number}
+        )
 
     @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/from-list")
     @settled

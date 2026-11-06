@@ -19,6 +19,7 @@ from ripdoctor.core.match import (
     FAILED,
     MATCHED,
     NONE,
+    OWNED,
     PERSON,
     Choice,
     Proposal,
@@ -816,15 +817,19 @@ def to_match(tape: Tape, *, again: bool = False) -> tuple[Song, ...]:
     )
 
 
-def with_proposals(tape: Tape, found: dict[int, Proposal]) -> Tape:
-    """The catalogue's answers. A person's choice is not the catalogue's to change."""
+def with_proposals(
+    tape: Tape, found: dict[int, Proposal], maybe: dict[int, str] | None = None
+) -> Tape:
+    """The catalogue's answers. A person's choice is not the catalogue's to change.
+    `maybe` is a song's library copy that only a person can say is this song."""
 
     def answered(song: Song) -> Song:
         made = found.get(song.number)
         if made is None or song.settled_by == PERSON:
             return song
-        by = CATALOGUE if made.status == MATCHED else ""
-        return replace(song, proposal=made, settled_by=by)
+        by = CATALOGUE if made.status in (MATCHED, OWNED) else ""
+        copy = (maybe or {}).get(song.number, "")
+        return replace(song, proposal=made, settled_by=by, unconfirmed=copy)
 
     return replace(tape, songs=tuple(answered(s) for s in tape.songs))
 
@@ -839,11 +844,29 @@ def settle(tape: Tape, number: int, choice: Choice | None) -> Tape:
         status = MATCHED if choice else NONE
         return replace(
             song,
-            proposal=replace(was, status=status, reason="", choice=choice),
+            proposal=replace(
+                was, status=status, reason="", choice=choice, note="", copy=None
+            ),
             settled_by=PERSON,
         )
 
     return replace(tape, songs=tuple(chosen(s) for s in tape.songs))
+
+
+def offered(tape: Tape, number: int, found: tuple[Choice, ...]) -> Tape:
+    """What a search found goes first among a song's options, changing nothing else."""
+
+    def added(song: Song) -> Song:
+        if song.number != number:
+            return song
+        was = song.proposal or Proposal(NONE)
+        fresh = {(c.release, c.recording) for c in found}
+        others = tuple(
+            c for c in was.candidates if (c.release, c.recording) not in fresh
+        )
+        return replace(song, proposal=replace(was, candidates=(*found, *others)))
+
+    return replace(tape, songs=tuple(added(s) for s in tape.songs))
 
 
 def music_of(tape: Tape) -> Music:

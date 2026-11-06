@@ -508,3 +508,16 @@ def test_a_running_job_is_shown_on_its_own_step() -> None:
     body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "stepBusy(tpJobStep)" in body
     assert "status(doing, true)" in body
+
+
+def test_a_release_far_from_the_list_is_asked_about_and_sent_again() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "e.needsConfirm = !!body?.needs_confirm" in js
+    body = re.search(r"async function settleSong\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "confirm: true" in body and "confirm(" in body
+
+
+def test_a_copy_found_at_lookup_says_where_it_is() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert '"owned") return ["In your library", "good"]' in js
+    assert "In your library: ${copy.album_artist} / ${copy.album}" in js

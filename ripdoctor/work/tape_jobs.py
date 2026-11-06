@@ -1,7 +1,8 @@
-"""The long work on a tape: its cuts and its filing. ADR-063."""
+"""The long work on a tape: looking it up, its cuts and its filing. ADR-063."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -9,13 +10,107 @@ from typing import Any
 from ripdoctor.audio import split
 from ripdoctor.audio.runner import Runner
 from ripdoctor.core import filing as F
+from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as TG
 from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains
 from ripdoctor.work.jobs import Job
+
+
+def _sited(
+    layout: Layout, tape_id: str, library: str, rows: tuple[F.Row, ...]
+) -> tuple[F.Row, ...]:
+    """Whether each row is in the library. Rows carrying a tape's own paths are an
+    import that never finished, and nothing has reached the library."""
+    ours = T.dir_for(layout, tape_id)
+    return tuple(
+        replace(r, home=contains(library, r.path) and not contains(ours, r.path))
+        for r in rows
+    )
+
+
+@dataclass
+class Asking:
+    """What a lookup asks. `beets` is None where there is no library to ask."""
+
+    fetcher: MB.Fetcher
+    sleep: Callable[[float], None]
+    runner: Runner
+    layout: Layout
+    library: str
+    beets: Beets | None
+    known: dict[str, tuple[F.Row, ...]] = field(default_factory=dict)
+
+    def by_artist(self, beets: Beets, tape_id: str, artist: str) -> tuple[F.Row, ...]:
+        """Once per artist in a job, however many songs are theirs."""
+        if artist not in self.known:
+            rows = beets.artist_copies(self.runner, self.library, artist)
+            self.known[artist] = _sited(self.layout, tape_id, self.library, rows)
+        return self.known[artist]
+
+    def by_recording(
+        self, beets: Beets, tape_id: str, made: TM.Proposal
+    ) -> tuple[F.Row, ...]:
+        recording = made.choice.recording if made.choice else ""
+        if not recording or made.status != TM.MATCHED:
+            return ()
+        rows = beets.recording_copies(self.runner, self.library, recording)
+        return _sited(self.layout, tape_id, self.library, rows)
+
+    def catalogue(
+        self, wanted: TM.Wanted, held: tuple[TM.Held, ...] = ()
+    ) -> TM.Proposal:
+        try:
+            found = MB.find_song(self.fetcher, wanted, sleep=self.sleep)
+        except MB.LookupFailed as e:
+            return TM.Proposal(TM.FAILED, f"{e} - look again to retry")
+        return TM.propose(wanted, found.editions, held=held, loose=found.loose)
+
+
+def _lookup_one(
+    asking: Asking, tape: TP.Tape, song: TP.Song
+) -> tuple[TM.Proposal, str]:
+    """The library is read first, because an edition it has comes first among releases,
+    and then answers the catalogue's answer. Not being able to read it is said, and does
+    not stop the lookup: File asks again, and refuses to guess."""
+    wanted = TP.wanted(song)
+    beets = asking.beets
+    if beets is None:
+        return asking.catalogue(wanted), ""
+    try:
+        by_name = asking.by_artist(beets, tape.id, F.lead(song.artist))
+    except Exception as e:  # any failure to ask is reported on the song, never a miss
+        unread = (
+            f"the library could not be read, so this was not checked against it: {e}"
+        )
+        return replace(asking.catalogue(wanted), library_note=unread), ""
+    made = asking.catalogue(wanted, F.held_albums(by_name))
+    taken = F.claimed(tape, song)
+    try:
+        return F.at_lookup(
+            song, made, asking.by_recording(beets, tape.id, made), by_name, taken
+        )
+    except Exception as e:  # as above
+        return replace(made, library_note=f"the library could not be read: {e}"), ""
+
+
+def look_up(asking: Asking, tape_id: str, job: Job, *, again: bool = False) -> TP.Tape:
+    """Every song with no answer, or with `again` every one unsettled, saved after each
+    so a restart carries on."""
+    tape = T.read(asking.layout, tape_id)
+    waiting = TP.to_match(tape, again=again)
+    job.total, job.finished = len(waiting), 0
+    for song in waiting:
+        job.step(TP.label(song), "looking it up")
+        made, maybe = _lookup_one(asking, tape, song)
+        tape = TP.with_proposals(tape, {song.number: made}, {song.number: maybe})
+        T.save(asking.layout, tape)
+        job.finished += 1
+    return tape
 
 
 def _cut_one(
@@ -138,15 +233,7 @@ class _Filing:
         self.job.finished += 1
 
     def sited(self, rows: tuple[F.Row, ...]) -> tuple[F.Row, ...]:
-        """Whether each row is in the library. Rows carrying a tape's own paths are
-        an import that never finished, and nothing has reached the library."""
-        ours = T.dir_for(self.layout, self.tape.id)
-        return tuple(
-            replace(
-                r, home=contains(self.library, r.path) and not contains(ours, r.path)
-            )
-            for r in rows
-        )
+        return _sited(self.layout, self.tape.id, self.library, rows)
 
     def clear_leftovers(self) -> set[str]:
         """Forget rows beets made for this tape's copies and never moved on, which

@@ -8,17 +8,19 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from difflib import SequenceMatcher
 from typing import Any
 
 WITHIN = 3.0
 CLOSE_RATIO = 0.8
+# Options a person is offered for one song: more than this is reading, not choosing.
+OFFERED = 12
 OFFICIAL = "official"
 VARIOUS = "various artists"
 
-MATCHED, REVIEW, NONE, FAILED = "matched", "review", "none", "failed"
+MATCHED, REVIEW, NONE, FAILED, OWNED = "matched", "review", "none", "failed", "owned"
 CATALOGUE, PERSON = "catalogue", "person"
 
 EXACT, CLOSE, NOTHING = 0, 1, 2
@@ -62,6 +64,19 @@ _LEAD = re.compile(r"\s*[,;&]\s*")
 _NAMES = re.compile(rf"\s*(?:[,;&]|\band\b|\b{_GUEST})\s*", re.I)
 _ANY_NAMES = re.compile(r"\s*(?:[,;&/()]|\band\b|\bfeat\b\.?|\bft\b\.?)\s*")
 _PROSE_LIST = re.compile(r"&|\band\b", re.I)
+# A net over free text, so it can miss a version and say nothing of one it catches
+# beyond the word: "unless the list says so" is the whole of its judgement.
+_VERSION = re.compile(
+    r"\b(live|acoustic|instrumental|demo|remix|edit|karaoke|session|alternate|clean"
+    r"|atmos|spatial|a cappella|acapella|sped|slowed|rehearsal|unplugged|stripped"
+    r"|extended|dub|mix|video|tribute)(?:ed|e?s)?\b",
+    re.I,
+)
+_THE = re.compile(r"^the\s+")
+_SUFFIX = re.compile(r"\s*(?:\(.*\)|\[.*\]|\s-\s.*)\s*$")
+# Catalogued as one of these, a release is still that primary kind of record.
+_ONLY_A_FLAVOUR = frozenset(("Remix", "Mixtape/Street"))
+_PREFERRED_KINDS = ("album", "ep", "single")
 _RELEASE_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
 
 
@@ -84,6 +99,10 @@ class CatalogueTrack:
     disc: int
     length: float | None
     recording: str = ""
+    recording_title: str = ""
+    disambiguation: str = ""
+    credit: tuple[str, ...] = ()  # each name, as credited and as the artist is known
+    tracks: int = 0  # on its disc
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +118,9 @@ class Edition:
     note: str = ""
     primary: str = ""
     secondary: tuple[str, ...] = ()
+    country: str = ""
+    format: str = ""
+    disambiguation: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,16 +139,45 @@ class Choice:
     disc: int = 0
     length: float | None = None
     recording: str = ""
+    country: str = ""
+    format: str = ""
+    kind: str = ""
+    tracks: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Held:
+    """An album row the library has, as many rows as `tracks`."""
+
+    release: str
+    album: str
+    album_artist: str
+    tracks: int
+
+
+@dataclass(frozen=True, slots=True)
+class Copy:
+    """The library's copy of a song."""
+
+    album_artist: str
+    album: str
+    path: str
+    release: str
 
 
 @dataclass(frozen=True, slots=True)
 class Proposal:
-    """`choice` is None when the list's own album stands."""
+    """`choice` is None when the list's own album stands. `held` is what the library
+    has of the albums in question and `copy` its copy of this song, as of the lookup."""
 
     status: str
     reason: str = ""
     choice: Choice | None = None
     candidates: tuple[Choice, ...] = ()
+    note: str = ""
+    held: tuple[Held, ...] = ()
+    copy: Copy | None = None
+    library_note: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -139,6 +190,10 @@ class Proposal:
             reason=data["reason"],
             choice=Choice(**choice) if choice else None,
             candidates=tuple(Choice(**c) for c in data["candidates"]),
+            note=data.get("note", ""),
+            held=tuple(Held(**h) for h in data.get("held", ())),
+            copy=Copy(**data["copy"]) if data.get("copy") else None,
+            library_note=data.get("library_note", ""),
         )
 
 
@@ -185,6 +240,16 @@ def search_album(album: str) -> str:
     return _bare(album.translate(_VARIANTS))
 
 
+def search_title(title: str) -> str:
+    return _bare(title.translate(_VARIANTS))
+
+
+def base_title(title: str) -> str:
+    """Without what a list may add and a catalogue not have, like (Single Edit). Empty
+    for a title that is only that."""
+    return _SUFFIX.sub("", title).strip()
+
+
 def _lead(listed: str) -> str:
     """The credit before any guests and, in a comma list, its first name.
 
@@ -193,11 +258,6 @@ def _lead(listed: str) -> str:
     """
     credit = _LISTED_GUESTS.sub("", _CREDIT.sub("", listed)).strip()
     return credit if _PROSE_LIST.search(credit) else credit.split(",")[0].strip()
-
-
-def lookup_key(wanted: Wanted) -> tuple[str, str]:
-    """Songs with the same key are answered by the same requests."""
-    return fold(_lead(wanted.artist)), fold(search_album(wanted.album))
 
 
 def release_id(text: str) -> str:
@@ -226,12 +286,6 @@ def album_agreement(listed: str, title: str) -> int:
     return EDITION if base and base == _album_base(theirs) else ELSEWHERE
 
 
-def album_nearness(listed: str, title: str) -> float:
-    """How unlike two album titles are, from 0 for the same: an order, not a rule."""
-    alike = SequenceMatcher(None, _loose(fold(listed)), _loose(fold(title))).ratio()
-    return 1.0 - alike
-
-
 def _grade(wanted: str, found: str) -> int:
     ours, theirs = _exact(wanted), _exact(found)
     a, b = _bare(ours), _bare(theirs)
@@ -258,16 +312,23 @@ def names(credit: str, *, loosely: bool = False) -> set[str]:
     return {name for name in (_ANY_NAMES if loosely else _NAMES).split(credit) if name}
 
 
-def agrees(listed: str, credited: str) -> bool:
-    """The same names, or the list's lead credit alone being who is credited.
+def _name(name: str) -> frozenset[str]:
+    return frozenset(_THE.sub("", n) for n in names(name))
 
-    A shared word is no agreement, and Various Artists names nobody.
+
+def lead_credited(listed: str, credit: Iterable[str]) -> bool:
+    """The list's lead is on the credit, whoever else is, a leading The aside.
+
+    A name is compared whole: a shared word is no agreement, and Various Artists names
+    nobody. A list crediting several names outright needs all of them.
     """
-    ours, theirs = _exact(listed), _exact(credited)
-    if theirs == VARIOUS:
-        return False
-    said = names(theirs)
-    return bool(said) and said in (names(ours), names(_lead(ours)))
+    said = {_name(_exact(c)) for c in credit if _exact(c) != VARIOUS}
+    ours = _name(_lead(_exact(listed)))
+    return bool(ours) and (ours in said or all(frozenset((n,)) in said for n in ours))
+
+
+def kind_of(primary: str, secondary: Sequence[str]) -> str:
+    return "compilation" if "Compilation" in secondary else primary.lower()
 
 
 def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:
@@ -279,6 +340,9 @@ def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:
         date=edition.date,
         status=edition.status,
         note=edition.note,
+        country=edition.country,
+        format=edition.format,
+        kind=kind_of(edition.primary, edition.secondary),
     )
     if track is None:
         return base
@@ -289,15 +353,33 @@ def _choice(edition: Edition, track: CatalogueTrack | None) -> Choice:
         disc=track.disc,
         length=track.length,
         recording=track.recording,
+        tracks=track.tracks,
     )
 
 
+def _title_grade(wanted: str, track: CatalogueTrack) -> int:
+    """Both names of the track must say it: a recording called one thing can sit on a
+    track called another, and the difference is often the version."""
+    grade = _grade(wanted, track.title)
+    return max(grade, _grade(wanted, track.recording_title or track.title))
+
+
 def _track(wanted: Wanted, edition: Edition) -> tuple[int, CatalogueTrack | None]:
-    graded = [(_grade(wanted.title, t.title), t) for t in edition.tracks]
+    graded = [(_title_grade(wanted.title, t), t) for t in edition.tracks]
     if not graded:
         return NOTHING, None
     grade, track = min(graded, key=lambda g: (g[0], _off(g[1], wanted.length)))
     return (grade, track) if grade != NOTHING else (NOTHING, None)
+
+
+def _version(wanted: Wanted, *texts: str) -> str:
+    """A word in these that says another version, and the list's title does not."""
+    title = fold(wanted.title)
+    for text in texts:
+        for word in _VERSION.finditer(text):
+            if not re.search(rf"\b{re.escape(word.group(1).lower())}", title):
+                return text
+    return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,45 +390,71 @@ class _Fit:
     official: bool
     live: bool
     credited: bool
+    credit: str
     album: int
     kinds: tuple[str, ...]
     repeats: int
+    version: str
+    other_release: str
+    in_library: bool
 
 
-def _fit(wanted: Wanted, edition: Edition) -> _Fit:
+def _fit(wanted: Wanted, edition: Edition, library: Iterable[str]) -> _Fit:
     grade, track = _track(wanted, edition)
     live = edition.live or bool(_LIVE.search(fold(edition.title)))
     album = album_agreement(wanted.album, edition.title)
-    asked_live = album == NAMED and _LIVE.search(fold(wanted.album))
+    named = album == NAMED
+    asked_live = named and _LIVE.search(fold(wanted.album))
+    credit = (track.credit if track else ()) or (edition.artist,)
     return _Fit(
         choice=_choice(edition, track),
         grade=grade,
         off=math.inf if track is None else _off(track, wanted.length),
         official=fold(edition.status) == OFFICIAL,
         live=live and not asked_live,
-        credited=agrees(wanted.artist, edition.artist),
+        credited=lead_credited(wanted.artist, credit),
+        credit=" & ".join(credit),
         album=album,
-        kinds=() if album == NAMED else (edition.primary, *edition.secondary),
+        kinds=()
+        if named
+        else tuple(k for k in edition.secondary if k not in _ONLY_A_FLAVOUR),
         repeats=sum(
             _grade(wanted.title, t.title) == EXACT and _off(t, wanted.length) <= WITHIN
             for t in edition.tracks
         ),
+        version=_version(wanted, track.disambiguation) if track else "",
+        other_release=""
+        if named
+        else _version(wanted, edition.title, edition.disambiguation),
+        in_library=edition.release in library,
     )
 
 
 def _rank(fit: _Fit) -> tuple[Any, ...]:
-    """A list's length is whole seconds, so a smaller difference is not nearer."""
-    off = fit.off if math.isinf(fit.off) else round(fit.off)
+    """Among those fit to accept. Whatever is equal falls to the date and then the id,
+    so a tie never stops for a person and always comes out the same. A list's length is
+    whole seconds, so a smaller difference is not nearer."""
+    kind = fit.choice.kind
     return (
-        fit.grade == NOTHING,
+        not fit.in_library,
         fit.album,
-        fit.grade,
-        not fit.official,
-        fit.live,
-        not fit.credited,
-        off,
+        _PREFERRED_KINDS.index(kind) if kind in _PREFERRED_KINDS else 9,
         fit.choice.date or "9999",
+        fit.off if math.isinf(fit.off) else round(fit.off),
         fit.choice.release,
+    )
+
+
+def _nearness(fit: _Fit) -> tuple[Any, ...]:
+    """Among those not fit to accept, the nearest first."""
+    return (
+        fit.grade,
+        not fit.credited,
+        not fit.official,
+        fit.album,
+        fit.off > WITHIN,
+        fit.live or bool(fit.kinds) or bool(fit.version or fit.other_release),
+        *_rank(fit)[2:],
     )
 
 
@@ -360,9 +468,6 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
         )
     if fit.grade == NOTHING:
         return f"{c.release_title} has no track like this title"
-    if fit.album == ELSEWHERE:
-        listed = repr(wanted.album) if wanted.album else "no album"
-        return f"a different album: the list has {listed}, this is {c.release_title!r}"
     if not fit.official:
         return (
             f"no Official edition has this title: {c.release_title} "
@@ -370,13 +475,23 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
         )
     if fit.live:
         return f"the title is only on a live album: {c.release_title}"
-    if fit.kinds[1:]:
-        kinds = " + ".join(filter(None, fit.kinds))
+    if fit.kinds:
+        kinds = " + ".join(fit.kinds)
         return (
             f"{c.release_title} is catalogued as {kinds}, which the list did not name"
         )
+    if fit.version:
+        return (
+            f"the catalogue calls this recording {fit.version!r}, "
+            "which the list's title does not say"
+        )
+    if fit.other_release:
+        return (
+            f"{c.release_title} reads as another version: {fit.other_release!r}, "
+            "which the list does not say"
+        )
     if not fit.credited:
-        return f"the catalogue credits {c.album_artist}, the list {wanted.artist}"
+        return f"the catalogue credits {fit.credit}, the list {wanted.artist}"
     if c.length is None:
         return f"{c.release_title} has this title with no length to check it against"
     if fit.off > WITHIN:
@@ -392,39 +507,119 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
     return ""
 
 
-def propose(wanted: Wanted, editions: Sequence[Edition]) -> Proposal:
-    """Accept an Official edition of the list's album, by the list's artist, with
-    the title and a length within `WITHIN`: an exactly named album first, then the
-    nearest length, then the earliest date. Everything else states its doubt."""
+def _offered(fits: Sequence[_Fit]) -> tuple[Choice, ...]:
+    """One of each album and recording, best first, and a copy the library has however
+    far down it comes. The best's own single stays offered past the cap: that is the
+    way out of adding an album entry beside an edition already filed."""
+    seen: set[tuple[str, str]] = set()
+    kept: list[_Fit] = []
+    for fit in fits:
+        c = fit.choice
+        key = (c.group or c.release, c.recording)
+        if fit.in_library or key not in seen:
+            kept.append(fit)
+        seen.add(key)
+    first = kept[0].choice
+    single = next(
+        (
+            f.choice
+            for f in kept[OFFERED:]
+            if f.choice.kind == "single" and f.choice.recording == first.recording
+        ),
+        None,
+    )
+    offered = tuple(f.choice for f in kept[:OFFERED])
+    return (*offered, single) if single else offered
+
+
+def _relevant(held: Sequence[Held], offered: Sequence[Choice]) -> tuple[Held, ...]:
+    titles = [c.release_title for c in offered]
+    return tuple(
+        h
+        for h in held
+        if any(album_agreement(h.album, title) != ELSEWHERE for title in titles)
+    )
+
+
+def propose(
+    wanted: Wanted,
+    editions: Sequence[Edition],
+    *,
+    held: Sequence[Held] = (),
+    loose: bool = False,
+) -> Proposal:
+    """Accept what fits with nobody looking, or state the doubt and offer what there is.
+
+    Accepted means, all of it: the title on both the recording and the track, nothing
+    saying it is another version, a release of no kind the list did not ask for, the
+    list's lead on the credit, a length within `WITHIN`, and Official. The album only
+    chooses among those: an edition the library has, then the one the list names, then
+    the earliest album, EP and single. `loose` is a search on a title the list did not
+    say, whose results are never accepted.
+    """
     if not editions:
         named_album = wanted.album or "no album on the list"
         return Proposal(NONE, f"no release found for {wanted.artist}, {named_album}")
 
-    fits = sorted((_fit(wanted, e) for e in editions), key=_rank)
-    candidates = tuple(f.choice for f in fits)
-    if fits[0].grade == NOTHING:
+    library = {h.release for h in held}
+    fits = [_fit(wanted, e, library) for e in editions]
+    clean = sorted((f for f in fits if not _doubt(wanted, f)), key=_rank)
+    doubted = sorted((f for f in fits if _doubt(wanted, f)), key=_nearness)
+    ordered = [*clean, *doubted]
+    offered = _offered(ordered)
+    albums = _relevant(held, offered)
+    if ordered[0].grade == NOTHING:
         return Proposal(
             REVIEW,
             f"{len(fits)} editions found, none with a track like this title - "
             "pick a release or file from your list",
             None,
-            candidates,
+            offered,
+            held=albums,
         )
-    clean = [f for f in fits if not _doubt(wanted, f)]
+    if loose:
+        reason = (
+            f"nothing in the catalogue is called {wanted.title!r} by this artist - "
+            "these have the title without what follows it, so pick one or file from "
+            "your list"
+        )
+        return Proposal(REVIEW, reason, ordered[0].choice, offered, held=albums)
     if not clean:
-        return Proposal(REVIEW, _doubt(wanted, fits[0]), fits[0].choice, candidates)
+        reason = _doubt(wanted, ordered[0])
+        return Proposal(REVIEW, reason, ordered[0].choice, offered, held=albums)
+    best = clean[0]
+    note = ""
+    if wanted.album and best.album == ELSEWHERE:
+        note = f"the list has {wanted.album}; this is on {best.choice.release_title}"
+    return Proposal(MATCHED, "", best.choice, offered, note, albums)
 
-    named = [f for f in clean if f.album == NAMED] or clean
-    groups = {f.choice.group or f.choice.release: f.choice for f in reversed(named)}
-    best = named[0].choice
-    if len(groups) > 1:
-        seen = ", ".join(
-            f"{c.release_title} ({c.date or 'no date'})" for c in groups.values()
-        )
-        return Proposal(
-            REVIEW, f"fits {len(groups)} albums equally: {seen}", best, candidates
-        )
-    return Proposal(MATCHED, "", best, candidates)
+
+def options(wanted: Wanted, proposal: Proposal | None) -> list[dict[str, Any]]:
+    """What a person can choose from, as the page shows it."""
+    if proposal is None:
+        return []
+    library = {h.release for h in proposal.held}
+    return [
+        {
+            **asdict(c),
+            "year": c.date[:4],
+            "delta": None if c.length is None else round(c.length - wanted.length, 1),
+            "in_library": c.release in library,
+        }
+        for c in proposal.candidates
+    ]
+
+
+def off_the_list(wanted: Wanted, choice: Choice) -> str:
+    """Why a person's choice needs saying twice, or nothing."""
+    if choice.length is None or abs(choice.length - wanted.length) <= WITHIN:
+        return ""
+    gap = choice.length - wanted.length
+    return (
+        f"{choice.track_title or wanted.title} on {choice.release_title} is "
+        f"{abs(gap):.0f} s {'longer' if gap > 0 else 'shorter'} than the list says, so "
+        "it may be another version - say so to choose it anyway"
+    )
 
 
 def track_on(wanted: Wanted, edition: Edition, position: int | None = None) -> Choice:

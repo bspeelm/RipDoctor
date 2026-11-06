@@ -208,6 +208,7 @@ _ROW = _SEP.join(
     ("$title", "$artist", "$album", "$length", "$path", "$mb_trackid", "$track")
 )
 _HELD = _SEP.join((_ROW, "$mb_albumid"))
+_COPY = _SEP.join((_HELD, "$albumartist"))
 
 # What is typed at beets' matcher to accept the candidate it printed, and then
 # at the question it asks when the album is already in the library. One answer
@@ -557,6 +558,25 @@ class Beets:
         )
         return by_id, self.library_rows(runner, root, [term("artist", artist)])
 
+    def artist_copies(self, runner: Runner, root: str, artist: str) -> tuple[Row, ...]:
+        """Everything by this artist, with the album it is on, for a lookup to judge."""
+        return self._copies(runner, root, [term("artist", artist)])
+
+    def recording_copies(
+        self, runner: Runner, root: str, recording: str
+    ) -> tuple[Row, ...]:
+        return self._copies(runner, root, [f"mb_trackid:{recording}"])
+
+    def _copies(self, runner: Runner, root: str, query: list[str]) -> tuple[Row, ...]:
+        result = runner.run(self._argv(["ls", "-f", _COPY, *query]), timeout=300)
+        if not result.ok:
+            raise ImportFailed(TapeRun(result.returncode, result.err).why())
+        return tuple(
+            _row(root, *fields)
+            for fields in _fields(result.text)
+            if len(fields) == _COPY.count(_SEP) + 1
+        )
+
     def forget_row(self, runner: Runner, root: str, path: str) -> None:
         """Drop one row by its exact path. No `-d`: the file stays. ADR-050."""
         query = [_one_file(path)]
@@ -765,6 +785,7 @@ def _row(
     recording: str,
     track: str,
     release: str = "",
+    album_artist: str = "",
 ) -> Row:
     where = _rooted(root, said)
     return Row(
@@ -777,6 +798,7 @@ def _row(
         recording=recording,
         track=int(track) if track.isdigit() else 0,
         release=release,
+        album_artist=album_artist,
     )
 
 

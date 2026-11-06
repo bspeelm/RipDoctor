@@ -8,10 +8,19 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ripdoctor.core.match import (
+    ELSEWHERE,
+    MATCHED,
+    OWNED,
     PERSON,
+    REVIEW,
     Choice,
+    Copy,
+    Held,
+    Proposal,
+    album_agreement,
     fold,
     names,
+    options,
     search_album,
     search_artists,
 )
@@ -38,6 +47,9 @@ from ripdoctor.core.tape import (
 from ripdoctor.core.tape import (
     UNKNOWN as UNKNOWN,
 )
+from ripdoctor.core.tape import (
+    wanted as wanted_of,
+)
 
 FAILED = "failed"
 FILE = "file"
@@ -61,6 +73,7 @@ class Row:
     recording: str = ""
     track: int = 0
     release: str = ""
+    album_artist: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +281,118 @@ def precheck(
             "choose a release, or skip it",
         )
     return Verdict(FILE)
+
+
+def claimed(tape: Tape, song: Song) -> set[str]:
+    """Rows other songs on this tape have been recorded against, or found to own."""
+    paths = set()
+    for other in tape.songs:
+        copy = other.proposal.copy if other.proposal else None
+        if other.number != song.number and other.filing in FINISHED:
+            paths.add(other.path)
+        elif other.number != song.number and copy:
+            paths.add(copy.path)
+    return paths
+
+
+def held_albums(rows: Sequence[Row]) -> tuple[Held, ...]:
+    """What these rows say the library has, one to an album row."""
+    counted: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        key = (row.release, row.album, row.album_artist or row.artist)
+        counted[key] = counted.get(key, 0) + 1
+    return tuple(Held(*key, tracks) for key, tracks in counted.items())
+
+
+def at_lookup(
+    song: Song,
+    made: Proposal,
+    by_id: Sequence[Row],
+    by_name: Sequence[Row],
+    taken: Collection[str] = (),
+) -> tuple[Proposal, str]:
+    """A proposal, as the pre-check would answer it at File, and any copy only a person
+    can vouch for. Only what would be filed is asked about by its recording: a doubt's
+    best guess proves nothing by its id. A copy proved by name holds no release, because
+    File looks for it by the same name."""
+    filing = made.status == MATCHED
+    said = precheck(
+        replace(song, proposal=made if filing else None), by_id, by_name, taken
+    )
+    if said.action == ALREADY:
+        row = next(r for r in (*by_id, *by_name) if r.path == said.path)
+        copy = Copy(row.album_artist or row.artist, row.album, row.path, row.release)
+        kept = made.choice if filing and row in by_id else None
+        return replace(
+            made, status=OWNED, reason="", note="", choice=kept, copy=copy
+        ), ""
+    if said.unconfirmed:
+        reason = (
+            f"your library may already have this at {said.unconfirmed}, with no "
+            "recording id to prove it - listen, then use that copy or choose this "
+            "release"
+        )
+        return replace(made, status=REVIEW, reason=reason), said.unconfirmed
+    if said.action == FAILED and (filing or song.album):
+        return replace(made, library_note=said.note), ""
+    return made, ""
+
+
+def edition_note(song: Song) -> dict[str, Any] | None:
+    """What filing this release beside an edition the library has will do."""
+    made = song.proposal
+    choice = choice_of(song)
+    if made is None or choice is None:
+        return None
+    albums = [
+        h
+        for h in made.held
+        if album_agreement(h.album, choice.release_title) != ELSEWHERE
+    ]
+    if not albums or choice.release in {h.release for h in albums}:
+        return None
+    single = next(
+        (
+            c
+            for c in made.candidates
+            if c.kind == "single"
+            and c.recording == choice.recording
+            and c.release != choice.release
+        ),
+        None,
+    )
+    place = f"track {choice.number}" + (f" of {choice.tracks}" if choice.tracks else "")
+    return {
+        "text": (
+            f"Not on your edition of {albums[0].album}. This edition has it as "
+            f"{place}. It joins the same folder as a second album entry, and your "
+            "tracks don't change. Each further edition adds another entry."
+        ),
+        "album": albums[0].album,
+        "track": choice.number,
+        "tracks": choice.tracks,
+        "single": None if single is None else single.release,
+    }
+
+
+def release_view(song: Song) -> dict[str, Any]:
+    """What a song's row shows of its release, beyond the document's own fields."""
+    made = song.proposal
+    copy = made.copy if made else None
+    return {
+        "options": options(wanted_of(song), made),
+        "copy": copy
+        and {
+            "album_artist": copy.album_artist,
+            "album": copy.album,
+            "path": copy.path,
+            "release": copy.release,
+        },
+        "maybe_copy": song.unconfirmed,
+        "edition_note": edition_note(song),
+        "note": made.note if made else "",
+        "library_note": made.library_note if made else "",
+    }
 
 
 def _is_the_song(song: Song, row: Row, track: int) -> bool:
