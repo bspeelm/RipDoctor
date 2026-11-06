@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-MAX_CODE_LINES = 11932  # ADR-063
+MAX_CODE_LINES = 11940  # ADR-063
 MAX_COMMENT_RATIO = 25
 MAX_DOC_RATIO = 75
 MAX_WHEEL_BYTES = 2 * 1024 * 1024

@@ -9,7 +9,7 @@ from typing import Any
 
 from ripdoctor.audio import ffprobe, split
 from ripdoctor.audio import ingest as G
-from ripdoctor.audio.runner import Runner, ToolFailed, ToolMissing
+from ripdoctor.audio.runner import Runner, TimedOut, ToolFailed, ToolMissing
 from ripdoctor.core import filing as F
 from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
@@ -291,7 +291,7 @@ def lacks_cover(runner: Runner, beets: Beets, library: str, path: str) -> bool:
         if not Path(path).is_file() or TG.has_art(runner, path):
             return False
         return not beets.art_of(runner, library, path)
-    except (ImportFailed, ToolMissing, ToolFailed, OSError):
+    except (ImportFailed, ToolMissing, ToolFailed, TimedOut, OSError):
         return False
 
 

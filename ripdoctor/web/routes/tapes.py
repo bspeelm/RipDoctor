@@ -553,12 +553,21 @@ def add(app: App, service: Service) -> None:
         if not r.body:
             raise H.HttpError(400, "no image was sent")
         importer = beets_for("a filed song's cover is set through beets")
-        library = service.settings.library
         try:
-            album, files = importer.album_files(service.runner, library, song.path)
-            already = importer.art_of(service.runner, library, song.path)
+            return given_cover(importer, tape, song, r.body)
+        except TimedOut as e:
+            raise H.HttpError(
+                503, f"the cover was not set: {e.cmd[0]} did not answer in time"
+            ) from e
         except IMP.ImportFailed as e:
             raise H.HttpError(503, str(e)) from e
+
+    def given_cover(
+        importer: IMP.Beets, tape: TP.Tape, song: TP.Song, image: bytes
+    ) -> H.Response:
+        library = service.settings.library
+        album, files = importer.album_files(service.runner, library, song.path)
+        already = importer.art_of(service.runner, library, song.path)
         if already:
             return H.ok(
                 {**view_saved(TF.cover_given(tape, files)), "cover": {"already": True}}
@@ -569,7 +578,7 @@ def add(app: App, service: Service) -> None:
             p.suffix.lower() == ".flac" and str(p) not in mine for p in folder.iterdir()
         )
         name = f"cover-{album}.jpg" if shared else ART.COVER
-        done = RA.installed(service, folder, r.body, only=files, cover_name=name)
+        done = RA.installed(service, folder, image, only=files, cover_name=name)
         if not done.embedded:
             raise H.HttpError(502, f"the cover did not embed: {'; '.join(done.failed)}")
         why = importer.set_art(service.runner, album, str(done.cover))
