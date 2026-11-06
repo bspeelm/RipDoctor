@@ -1208,7 +1208,8 @@ let tpRedrawing = false;              // inputs leaving the page now are not a p
 let tpWatchOp = "";                   // the job being watched
 let tpSaving = false;                 // a list is on its way, so what the page holds is about to change
 let tpSaves = 0;                      // answers to what a row sent, to tell a reply overtaken by one
-const tpFail = (e) => { $("#tp-err").textContent = e.message; };
+let tpGone = false;                   // the server is not answering
+let tpMisses = 0;                     // heartbeats in a row with no answer
 
 const mss = (seconds) => {
   const whole = Math.round(seconds);
@@ -1238,7 +1239,7 @@ async function loadTapes(keep) {
     if (found.tapes.some((t) => t.id === wanted)) pick.value = wanted;
     if (pick.value) await openTape(pick.value);
     else showTape(null);
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 async function openTape(id) {
@@ -1248,7 +1249,7 @@ async function openTape(id) {
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
     else if (!$("#tp-err").textContent) $("#tp-err").textContent = tape.job?.error || tape.prepare_failed;
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 async function createTape() {
@@ -1258,7 +1259,7 @@ async function createTape() {
     $("#tp-name").value = "";
     tpNaming = false;
     await loadTapes(made.id);
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 function showNaming(on) {
@@ -2177,7 +2178,7 @@ async function uploadCover(number, file) {
          c.note ? `beets did not record it as the album's art: ${c.note}.` : ""].filter(Boolean).join(" "));
   } catch (e) {
     waveSay("");
-    $("#tp-err").textContent = e.message;
+    tpFail(e);
   }
 }
 
@@ -2628,7 +2629,7 @@ async function flushNudge() {
   if (!n) return;
   if (tape?.id === n.tape) { await saveTapeEdges(n.song, n.start, n.end); return; }
   try { await postJSON(nudgeUrl(n), nudgeBody(n)); }
-  catch (e) { $("#tp-err").textContent = `song ${n.song} was not moved: ${e.message}`; }
+  catch (e) { if (e.status) $("#tp-err").textContent = `song ${n.song} was not moved: ${e.message}`; else lostContact(); }
 }
 
 const nudgeUrl = (n) => `/api/tapes/${n.tape}/songs/${n.song}/edges`;
@@ -2756,6 +2757,7 @@ function wireTapeWave() {
   new ResizeObserver(() => tpEd.render()).observe($("#tp-cv"));
   $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
   addEventListener("pagehide", flushNudgeOnLeaving);
+  setInterval(heartbeat, 4000);
   $("#tp-prev").onclick = () => stepSong(-1);
   $("#tp-next").onclick = () => stepSong(1);
   $("#tp-doubt").onclick = () => stepDoubt(1);
@@ -2820,7 +2822,7 @@ async function sendTapeList(file) {
     }
     await loadTapes(tape.id);
     status(`${tape.songs.length} songs read from ${file.name}`);
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 async function sendTape(file) {
@@ -2855,7 +2857,7 @@ async function sendTape(file) {
     await openTape(id);
   } catch (e) {
     stepIdle();
-    $("#tp-err").textContent = e.message;
+    tpFail(e);
     status("");
     try { showTape(await api(`/api/tapes/${id}`)); } catch { /* the reason above is what matters, and the page keeps what it last knew */ }
   }
@@ -2868,7 +2870,7 @@ async function cancelTapeUpload() {
     tapePicked = null;
     stepIdle();
     await openTape(tape.id);
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 const processTape = () => startTapeJob(`/api/tapes/${tape.id}/process`, {});
@@ -2886,7 +2888,46 @@ function unsentWords() {
 
 const TAPE_JOB_BUTTONS = ["#tp-process", "#tp-match", "#tp-rematch", "#tp-cut", "#tp-file-songs", "#tp-playlist", "#tp-archive"];
 
+// An answer has a status, whatever it says. Anything else never got there, and that is
+// one message, which goes by itself, in place of a browser's words for it that stay.
+function tpFail(e) {
+  if (e.status) tpFail(e);
+  else lostContact();
+}
+
+function lostContact() {
+  tpGone = true;
+  $("#tp-gone").hidden = false;
+}
+
+function regained() {
+  tpGone = false;
+  tpMisses = 0;
+  $("#tp-gone").hidden = true;
+  status("");
+  if (!tape || tapeWatching) return;
+  reloadTape().then(sendUnsent);
+}
+
+// Asked while the page is being looked at, so that a person learns of a lost connection
+// before they press something, and of its return with nothing pressed.
+async function heartbeat() {
+  if (document.body.dataset.mode !== "tapes" || document.hidden) return;
+  try {
+    await api("/api/me");
+  } catch (e) {
+    if (!e.status) {
+      tpMisses += 1;
+      if (tpMisses >= 2) lostContact();
+      return;
+    }
+  }
+  tpMisses = 0;
+  if (tpGone) regained();
+}
+
 function serverGone() {
+  lostContact();
   status("The server can't be reached. Trying again…", true);
   if (tpJobStep) stepBox(tpJobStep).querySelector(".tp-state").textContent = "No contact";
 }
@@ -2905,6 +2946,7 @@ async function watchTape() {
       try {
         j = await api(`/api/job/${key}`);
         if (missed >= TRIES && tpJobStep) stepBusy(tpJobStep);
+        if (tpGone) regained();
         missed = 0;
       } catch (e) {
         // Anything that answered is an answer. Nothing else says whether the job is
@@ -2952,7 +2994,7 @@ async function watchTape() {
     status("");
     tpStopped.add(id);
     $("#tp-err").textContent = e.status === 404
-      ? "that job is no longer running, so the server has restarted - what it finished is kept, so start it again"
+      ? "the server no longer knows that job, which it forgets half an hour after one ends and when it restarts - what it finished is kept, so start it again if anything is left"
       : e.message;
   } finally {
     tapeWatching = false;
@@ -2972,7 +3014,7 @@ async function removeTape() {
     tape = null;
     await loadTapes();
     status(`moved to ${gone.moved_to}`);
-  } catch (e) { $("#tp-err").textContent = e.message; }
+  } catch (e) { tpFail(e); }
 }
 
 // -------------------------------------------------------------------- modes

@@ -901,3 +901,30 @@ def test_a_far_option_asked_its_question_inside_a_section_that_had_closed() -> N
     choose = re.search(r"function chooseRelease\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert choose.index("state.open = false") < choose.index("state.open = true")
     assert choose.index("state.ask = {") < choose.index("state.open = true")
+
+
+def test_nothing_was_said_of_a_lost_connection_until_a_press_gave_failed_to_fetch() -> (
+    None
+):
+    """And the raw words stayed on the page after the server came back."""
+    js = (STATIC / "app.js").read_text()
+    fail = re.search(r"function tpFail\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (e.status)" in fail and "lostContact()" in fail
+    start = js.index("// ---" + "-" * 65 + " tapes")
+    tapes = js[start : js.index("// ---" + "-" * 65 + " modes", start)]
+    assert '$("#tp-err").textContent = e.message;' not in tapes
+    beat = re.search(r"async function heartbeat\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'document.body.dataset.mode !== "tapes"' in beat
+    assert "if (tpGone) regained();" in beat
+    assert "setInterval(heartbeat" in js
+    back = re.search(r"function regained\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#tp-gone").hidden = true;' in back
+    assert "reloadTape().then(sendUnsent)" in back
+    assert 'id="tp-gone"' in tape_markup()
+
+
+def test_a_job_forgotten_after_half_an_hour_was_called_a_restart() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "half an hour" in body
+    assert "so the server has restarted" not in body
