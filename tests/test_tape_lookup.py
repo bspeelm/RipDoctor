@@ -442,7 +442,7 @@ def test_a_review_with_a_row_of_no_recording_id_is_asked_about_and_not_owned(
     assert releases(view)["maybe_copy"] == str(where)
 
 
-def test_a_review_whose_candidate_is_the_rows_recording_is_owned_by_that_id(
+def test_a_review_whose_candidate_is_the_rows_recording_is_asked_about_and_not_owned(
     service: Service, catalogue: Catalogue
 ) -> None:
     catalogue.albums["A Record"] = [
@@ -451,9 +451,55 @@ def test_a_review_whose_candidate_is_the_rows_recording_is_owned_by_that_id(
     where = owned_row(service, mb_trackid="rec-r-1", mb_albumid="r")
     app = build(service)
     view = looked_up(app, service, a_tape(app, service, row("A Song")))
-    assert statuses(view) == [M.OWNED]
-    assert releases(view)["copy"]["path"] == str(where)
-    assert proposal(view)["choice"]["recording"] == "rec-r-1"
+    assert statuses(view) == [M.REVIEW]
+    assert view["songs"][0]["settled_by"] == ""
+    assert releases(view)["copy"] is None
+    assert releases(view)["maybe_copy"] == str(where)
+
+
+def test_a_live_album_of_the_list_s_length_was_owned_with_nobody_asked(
+    service: Service, catalogue: Catalogue
+) -> None:
+    """The studio take is 230 s, the list says 200 s, and the library's live album runs
+    201 s. Its id was on offer, so title, artist and length were taken as proof."""
+    catalogue.albums["A Record"] = [
+        a_release("studio", "A Record", [("A Song", 230)]),
+        one_recording(
+            a_release("live", "Live at Somewhere", [("A Song", 201)]), "rec-live"
+        ),
+    ]
+    where = owned_row(
+        service,
+        album="Live at Somewhere",
+        length="3:21",
+        mb_trackid="rec-live",
+        mb_albumid="live",
+    )
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    assert statuses(view) == [M.REVIEW]
+    assert view["songs"][0]["settled_by"] == ""
+    assert releases(view)["copy"] is None
+    assert releases(view)["maybe_copy"] == str(where)
+
+
+def test_a_remix_album_s_copy_was_owned_with_nobody_asked(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(
+            a_release("remixes", "The Remixes", [("A Song", 200)], extras=("Remix",)),
+            "rec-remix",
+        ),
+    ]
+    where = owned_row(
+        service, album="The Remixes", mb_trackid="rec-remix", mb_albumid="remixes"
+    )
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    assert statuses(view) == [M.REVIEW]
+    assert releases(view)["copy"] is None
+    assert releases(view)["maybe_copy"] == str(where)
 
 
 def test_a_failed_lookup_never_settles_on_a_row_and_stays_to_be_retried(

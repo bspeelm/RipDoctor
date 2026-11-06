@@ -335,10 +335,10 @@ def at_lookup(
     taken: Collection[str] = (),
 ) -> tuple[Proposal, str]:
     """A proposal, as the pre-check would answer it at File, and any copy only a person
-    can vouch for. A song is owned with nobody looking only on a recording id: the one a
-    match chose, or one the catalogue offered for this song. A doubt's best guess proves
-    nothing by its id, and a row that only agrees on title, artist and length can be a
-    live album, so that is for a person."""
+    can vouch for. A song is owned with nobody looking only on the recording id a match
+    chose. Anything else on offer was held back for a reason, another version often
+    enough, and a row of that id or of none that only agrees on title, artist and length
+    can be just that version, so it is for a person."""
     if made.status == MATCHED:
         said = precheck(replace(song, proposal=made), by_id, by_name, taken)
         if said.action == ALREADY:
@@ -349,14 +349,7 @@ def at_lookup(
     else:
         said = precheck(replace(song, proposal=None), (), by_name, taken)
         if said.action == ALREADY:
-            row = next(r for r in by_name if r.path == said.path)
-            offered = (
-                c
-                for c in made.candidates
-                if row.recording and c.recording == row.recording
-            )
-            found = next(offered, None)
-            return (_owning(made, row, found), "") if found else _maybe(made, row.path)
+            return _maybe(made, said.path)
     if said.action == FAILED and (made.status == MATCHED or song.album):
         return replace(made, library_note=said.note), ""
     return made, ""
