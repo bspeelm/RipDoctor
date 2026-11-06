@@ -3,6 +3,7 @@ leaves and the document that records them. ADR-063."""
 
 from __future__ import annotations
 
+import re
 import shutil
 import stat
 import subprocess
@@ -40,6 +41,13 @@ TG_TITLE = "TITLE"
 
 class Gone(BaseException):
     """The machine going away: nothing in the program may catch this."""
+
+
+def holds(value: str, asked: str) -> bool:
+    """A query term as beets reads it, a regular expression after a second colon."""
+    if asked.startswith(":"):
+        return re.search(asked[1:], value) is not None
+    return asked.casefold() in value.casefold()
 
 
 class Beet:
@@ -200,7 +208,7 @@ class Beet:
         lines = [
             "\x1f".join(r.get(k, "") for k in asked)
             for r in self.rows
-            if all(v.casefold() in r.get(k, "").casefold() for k, v in terms)
+            if all(holds(r.get(k, ""), v) for k, v in terms)
         ]
         return Result(args, 0, "\n".join(lines).encode(), b"")
 
@@ -669,7 +677,7 @@ def test_a_name_beets_would_read_as_query_syntax_is_asked_for_plainly(
     assert not file_it(app, tape, service)["error"]
     asked = [c for c in beet_of(service).calls if c[0] == "beet" and "ls" in c]
     terms = {t for c in asked for t in c[c.index("-f") + 2 :]}
-    assert {"artist:A Band", "album:A Record"} <= terms
+    assert {F.term("artist", "=A Band"), F.term("album", "A Record,")} <= terms
     assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
     assert not [t for t in terms if t.endswith(",") or t.split(":", 1)[1][:1] == "="]
 

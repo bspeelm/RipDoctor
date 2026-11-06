@@ -823,7 +823,10 @@ def test_the_album_rows_are_read_by_album_artist_and_album_with_their_release() 
     )
     rows = I.Beets().album_rows(runner, "/lib", "A Band", "A Record")
     assert [r.release for r in rows] == ["rel-9"]
-    assert runner.calls[0][-2:] == ("albumartist:A Band", "album:A Record")
+    assert runner.calls[0][-2:] == (
+        F.term("albumartist", "A Band"),
+        F.term("album", "A Record"),
+    )
 
 
 def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) -> None:
@@ -947,7 +950,10 @@ def test_a_library_that_could_not_be_asked_is_never_read_as_a_miss() -> None:
 def test_owned_asks_by_recording_and_by_artist_or_only_by_artist_with_no_id() -> None:
     runner = FakeRunner()
     _beets().owned(runner, "/lib", "rec-1", "A Band")
-    assert [c[-1] for c in runner.calls] == ["mb_trackid:rec-1", "artist:A Band"]
+    assert [c[-1] for c in runner.calls] == [
+        "mb_trackid:rec-1",
+        F.term("artist", "A Band"),
+    ]
     runner = FakeRunner()
     _beets().owned(runner, "/lib", "", "A Band")
-    assert [c[-1] for c in runner.calls] == ["artist:A Band"]
+    assert [c[-1] for c in runner.calls] == [F.term("artist", "A Band")]

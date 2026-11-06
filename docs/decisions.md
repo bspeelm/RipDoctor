@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,814, and
-at 4,114 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,816, and
+at 4,116 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2375,9 +2375,10 @@ them, and as finished it is never run again. A song with no id is owned by clean
 title, artist and length within 3 s. The playlist points at the existing copy. A row
 with no length is a failure that names the row, not an assumption, and a row whose
 file is gone is a stale-row failure. A library that could not be asked is a failure
-too, never a miss. Names go to beets as plain substrings, leaving off a leading `=`,
-`:` or `~` and a trailing comma, which beets reads as syntax and cannot escape, and
-what comes back is judged in Python. A `path:` query is exact for any other character;
+too, never a miss. Names go to beets as case-insensitive regular expressions of the
+literal text, because a plain substring goes to SQLite, which folds the case of ASCII alone
+and misses `ÉCHO` asked for as `écho`, and because a regular expression can escape what
+beets reads as syntax. What comes back is judged in Python. A `path:` query is exact for any other character;
 a path ending in a comma would match every row, so it is never sent.
 
 **The copy.** Filing works on a copy of the cut, not a hard link, since tags written

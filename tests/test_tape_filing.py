@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -57,21 +58,34 @@ def a_row(title: str = "One", length: float | None = 200.0, **kw: object) -> F.R
 
 
 @pytest.mark.parametrize(
-    ("value", "asked"),
+    ("value", "row"),
     [
-        ("A Band", "artist:A Band"),
-        ("=Foo", "artist:Foo"),
-        (":Foo(", "artist:Foo("),
-        ("=~foo", "artist:foo"),
-        ("Odd,", "artist:Odd"),
-        ("Odd, ,", "artist:Odd"),
-        ("Sun, Moon & Stars", "artist:Sun, Moon & Stars"),
+        ("A Band", "a band"),
+        ("=Foo", "=foo"),
+        (":Foo(", "x :FOO( y"),
+        ("=~foo", "=~FOO"),
+        ("Odd,", "Odd,"),
+        ("Sun, Moon & Stars", "SUN, MOON & STARS"),
+        ("\u00c9CHO", "\u00e9cho"),
+        ("\u00c9ric", "\u00c9RIC"),
+        ("a\\:b.$^*", "A\\:B.$^*"),
     ],
 )
-def test_a_query_term_is_only_ever_a_substring_and_never_beets_own_syntax(
-    value: str, asked: str
+def test_a_query_term_finds_the_value_whatever_its_case_and_is_never_beets_syntax(
+    value: str, row: str
 ) -> None:
-    assert F.term("artist", value) == asked
+    """SQLite folds ASCII alone, so a substring query missed an accented capital."""
+    field, _, query = F.term("artist", value).partition("::")
+    assert field == "artist"
+    assert query.startswith("(?i)")
+    assert re.search(query, row)
+    assert "," not in query
+    assert "\\:" not in query and ":" not in query
+
+
+def test_a_query_term_is_the_value_and_not_a_pattern_of_it() -> None:
+    query = F.term("artist", "A.B").partition("::")[2]
+    assert not re.search(query, "AxB")
 
 
 # ------------------------------------------------------------------- the plan

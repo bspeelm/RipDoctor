@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -108,11 +109,13 @@ def lead(artist: str) -> str:
 
 
 def term(field: str, value: str) -> str:
-    """A beets query for any row whose field contains `value`, and what comes back is
-    judged here. Beets reads a leading `=`, `:` or `~` as another kind of query and a
-    trailing comma as an OR with the whole library, and has no escape for either, so
-    they are left off: it can only find more."""
-    return f"{field}:{value.lstrip('=:~# ').rstrip(', ')}"
+    """A beets query for any row whose field holds `value`, and what comes back is
+    judged here. A plain substring is compared by SQLite, which folds the case of ASCII
+    alone and so misses an accented capital. A regular expression does not, and escaping
+    takes care of what beets reads as syntax: a comma is an OR with the whole library,
+    and `\\:` it unescapes before the expression is compiled."""
+    escaped = re.escape(value).replace(",", r"\x2c").replace(":", r"\x3a")
+    return f"{field}::(?i){escaped}"
 
 
 def choice_of(song: Song) -> Choice | None:

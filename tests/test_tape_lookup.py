@@ -462,7 +462,9 @@ def test_one_artists_rows_are_read_once_in_a_job(
         a_tape(app, service, row("A Song"), row("B Song", length="3:00")),
     )
     asked = [
-        c for c in beet_of(service).calls if c[0] == "beet" and "artist:A Band" in c
+        c
+        for c in beet_of(service).calls
+        if c[0] == "beet" and F.term("artist", "A Band") in c
     ]
     assert len(asked) == 1
 

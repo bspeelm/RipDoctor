@@ -27,7 +27,7 @@ from tests.test_web_precut import MATCH, MBID, Moving, a_precut_service, an_albu
 from tests.test_web_precut import upload as upload_album
 from tests.test_web_routes import get, post
 from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed, settle_all
-from tests.test_web_tape_file import Beet, cut_tape, file_it, pinned
+from tests.test_web_tape_file import Beet, cut_tape, file_it, holds, pinned
 from tests.test_web_tapes import a_service, a_tape_runner
 
 KEYS = (
@@ -74,7 +74,7 @@ class Library(Beet):
         lines = [
             "\x1f".join(r.get(k, "") for k in KEYS)
             for r in self.rows
-            if any(v.casefold() in r.get(k, "").casefold() for k, v in terms)
+            if any(holds(r.get(k, ""), v) for k, v in terms)
         ]
         return Result(args, 0, "\n".join(lines).encode(), b"")
 
@@ -402,7 +402,7 @@ def test_a_song_with_no_id_is_found_by_title_artist_and_album(
     runner.moves(old, new)
     rebuild(app, tape, service)
     assert lines_of(service, tape)[2] == "../Elsewhere/1.flac"
-    assert runner.asked[-1][-1] == "artist:A Band"
+    assert runner.asked[-1][-1] == F.term("artist", "A Band")
 
 
 def test_the_same_title_twice_on_a_from_list_album_gets_two_rows_and_two_lines(

@@ -367,9 +367,9 @@ def test_one_query_asks_for_every_id_and_each_artist_an_id_cannot_find() -> None
     )
     assert P.to_ask(tape) == (
         "mb_trackid:rec-One",
-        f"artist:{F.lead('Band, The,').rstrip(',')}",
+        F.term("artist", F.lead("Band, The,")),
         "mb_trackid:rec-Four",
-        "artist:Owned",
+        F.term("artist", "Owned"),
     )
 
 
