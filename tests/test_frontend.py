@@ -496,8 +496,9 @@ def test_a_row_says_where_a_filed_song_went_and_the_column_says_what_became_of_i
     for state in ("filed", "already", "failed"):
         assert f'song.filing === "{state}"' in word
     filed = re.search(r"function filedBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "o.path || o.unconfirmed" in filed
-    assert "useCopyButton(o)" in filed
+    assert "FILED_WORDS[o.state]" in filed and "o.path" in filed
+    block = re.search(r"function releaseBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "maybeCopyView(song, rel.maybe_copy)" in block
 
 
 def test_a_running_job_is_shown_on_its_own_step() -> None:
@@ -514,13 +515,17 @@ def test_a_release_far_from_the_list_is_asked_about_and_sent_again() -> None:
     js = (STATIC / "app.js").read_text()
     assert "e.needsConfirm = !!body?.needs_confirm" in js
     body = re.search(r"async function settleSong\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "confirm: true" in body and "confirm(" in body
+    assert "e.needsConfirm && onAsk" in body and "confirm(" not in body
+    line = re.search(r"function optionLine\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "askView(state.ask.said" in line and "confirm: true" in line
+    assert "than your list. Use it anyway?" in js
 
 
 def test_a_copy_found_at_lookup_says_where_it_is() -> None:
     js = (STATIC / "app.js").read_text()
     assert '"owned") return ["In your library", "good"]' in js
     assert "In your library: ${copy.album_artist} / ${copy.album}" in js
+    assert 'el("p", "dim tp-path", copy.path)' in js
 
 
 def test_a_job_button_waits_for_the_edit_its_click_sent() -> None:
@@ -534,7 +539,7 @@ def test_a_job_button_waits_for_the_edit_its_click_sent() -> None:
         assert "startTapeJob(" in said
     send = re.search(r"async function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tpListSaved = " in send
-    assert "saveList(songs, openAfter)" in send
+    assert "saveList(songs, openAfter, sure)" in send
 
 
 def test_a_file_chosen_over_boundaries_is_asked_about_too() -> None:
@@ -564,3 +569,69 @@ def test_a_tape_goes_on_by_itself_once_its_audio_and_list_are_both_in() -> None:
 def test_a_job_of_several_parts_shows_on_the_rail_step_it_is_in() -> None:
     js = (STATIC / "app.js").read_text()
     assert "JOB_STEP[j.phase] ?? JOB_STEP[j.op]" in js
+
+
+def test_an_option_is_one_line_of_columns_with_no_edition_jargon() -> None:
+    """A release was a sentence of format, country and status, four to a row."""
+    js = (STATIC / "app.js").read_text()
+    line = re.search(r"function optionLine\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for column in ("album", "year", "kind", "place", "off", "lib"):
+        assert f"tp-opt-{column}" in line
+    assert "editionText" not in js and "o.status" not in line
+    assert "const SHOWN_OPTIONS = 4;" in js
+    assert "state.all = true" in js
+
+
+def test_a_pasted_id_is_out_of_sight_until_asked_for() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function releaseOptions\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"Use a release id"' in body
+    assert "if (state.byId) change.append(byIdForm(song))" in body
+    assert "searchForm(song)" in body
+
+
+def test_a_row_is_searched_from_its_own_words_and_settles_nothing() -> None:
+    js = (STATIC / "app.js").read_text()
+    form = re.search(r"function searchForm\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "state.title ?? song.title" in form and "state.artist ?? song.artist" in form
+    run = re.search(r"async function runSearch\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "/search`, { title, artist }" in run
+    assert "showTape(await api(" in run and "settleSong" not in run
+
+
+def test_a_copy_that_might_be_this_song_is_one_click_away() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function maybeCopyView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "This might be your copy at ${path}." in body and "useCopyButton(" in body
+
+
+def test_an_edition_note_is_said_on_the_row_and_offers_the_single() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function editionNoteView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "note.text" in body and "note.single" in body
+    word = re.search(r"function releaseWord\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'rel?.edition_note ? "warn" : null' in word
+
+
+def test_a_list_that_loses_boundaries_is_asked_about_in_its_row() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpListAsk = {" in body and "confirm(" not in body
+    opened = re.search(r"function songOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "listAskView()" in opened
+
+
+def test_a_tape_opens_on_the_song_that_needs_its_person() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function landOn\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "r.doubtful" in body and "!s.settled_by" in body
+    assert 'tapeSelect(doubt ?? open ?? t.songs[0].number, "start", false)' in body
+    shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "landOn(t);" in shown
+
+
+def test_a_field_being_typed_in_holds_the_lookup_back() -> None:
+    """Tabbing from an edited title started the job, and the artist was then refused."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'closest?.("#tp-rows")' in body and "setTimeout" in body
