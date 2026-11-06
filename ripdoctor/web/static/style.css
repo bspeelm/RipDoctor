@@ -93,6 +93,8 @@ header .tabs,header strong{flex:none}
   border-top:1px solid var(--line);border-bottom:1px solid var(--line);
   font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel)}
 #ro-time,#tp-ro-time{color:var(--accent);font-weight:600;min-width:7rem}
+#ro-armed.start{color:var(--start)}
+#ro-armed.end{color:var(--end)}
 #ro-gap.bad,#tp-ro-gap.bad{color:var(--warn)}
 #ro-gap.good,#tp-ro-gap.good{color:var(--start)}
 #readout{gap:0 1.1rem;padding:0;white-space:nowrap;font-size:12.5px}

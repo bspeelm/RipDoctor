@@ -454,9 +454,9 @@ def test_the_toolbar_names_the_key_each_button_answers_to() -> None:
         ("tp-minus", ","),
         ("tp-plus", "."),
         ("tp-play", "Space"),
-        ("tp-hear", "H"),
-        ("tp-accept", "A"),
-        ("tp-skip", "S"),
+        ("tp-hear", "A"),
+        ("tp-accept", "&crarr;"),
+        ("tp-skip", "X"),
         ("tp-song", "Z"),
         ("tp-whole", "Z"),
     ):
@@ -464,8 +464,16 @@ def test_the_toolbar_names_the_key_each_button_answers_to() -> None:
         assert found and found.group(1) == key, button
     js = (STATIC / "app.js").read_text()
     keys = re.search(r"const TAPE_KEYS = \{.*?\};", js, re.S).group(0)  # type: ignore[union-attr]
-    for pair in ('k: "#tp-prev"', 'j: "#tp-next"', 'h: "#tp-hear"', 'a: "#tp-accept"'):
+    for pair in (
+        'k: "#tp-prev"',
+        'j: "#tp-next"',
+        'a: "#tp-hear"',
+        'Enter: "#tp-accept"',
+        'x: "#tp-skip"',
+    ):
         assert pair in keys
+    assert "#tp-hear" not in keys.replace('a: "#tp-hear"', "")
+    assert "s:" not in keys and "h:" not in keys
 
 
 def test_the_tape_page_keeps_its_looks_in_the_stylesheet() -> None:
@@ -1194,6 +1202,10 @@ def test_the_waveform_stays_in_view_while_the_tables_scroll() -> None:
 def test_the_record_s_toolbar_names_the_key_each_button_answers_to() -> None:
     page = cut_markup()
     for button, key in (
+        ("cut-prev", "K"),
+        ("cut-next", "J"),
+        ("cut-edge-start", "E"),
+        ("cut-edge-end", "E"),
         ("cut-minus", "&larr;"),
         ("cut-plus", "&rarr;"),
         ("cut-play", "Space"),
@@ -1328,3 +1340,64 @@ def test_enter_on_a_control_presses_it_only_if_the_keyboard_went_there() -> None
     assert "e.preventDefault();" in body and "control.blur();" in body
     keys = key_listener()
     assert keys.index("enterIsTheControls(e)") < keys.index("tapeKey(e)")
+
+
+def test_selecting_a_track_does_not_arm_a_marker_for_the_arrow_keys() -> None:
+    """A row selection on Tapes let an arrow key set a boundary for good."""
+    js = (STATIC / "app.js").read_text()
+    nudge = re.search(r"function nudgeSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert nudge.index("if (!cutArmed())") < nudge.index("setByHand(t)")
+    picks = re.search(r"function select\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "picked = false" in picks
+    assert "cutPicked = picked && num != null" in picks
+    review = re.search(r"async function reviewNext\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'select(t.number, "start");' in review
+    step = re.search(r"function stepTrack\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'select(next.number, "start");' in step
+
+
+def test_a_marker_is_armed_only_when_it_was_asked_for() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "select(num, edge, true);" in js[js.index('ed = new Editor($("#cv")') :]
+    assert "select(t.number, edge, true);" in js
+    choose = re.search(r"function chooseEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "select(ed.sel.track, edge, true)" in choose
+    assert 'chooseEdge("start")' in js and 'chooseEdge("end")' in js
+    assert "swapEdge();" in key_listener()
+    tools = re.search(r"function showCutTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "$(id).disabled = !armed;" in tools
+
+
+def test_the_readout_says_which_marker_is_chosen() -> None:
+    assert 'id="ro-armed"' in cut_markup()
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function updateReadout\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "chosen`" in body and "#ro-armed" in body
+
+
+def test_the_keys_are_the_same_on_a_record_and_a_tape() -> None:
+    js = (STATIC / "app.js").read_text()
+    keys = key_listener()
+    for branch, does in (
+        ('e.key === "a"', "auditionSelected();"),
+        ('e.key === "Enter"', '$("#cut-checked").click();'),
+        ('e.key === "s"', "splitAtPlayhead();"),
+        ('e.key === "j"', '$("#cut-next").click();'),
+        ('e.key === "k"', '$("#cut-prev").click();'),
+    ):
+        assert keys.index(branch) < keys.index(does), branch
+    assert js.index("function tapeKey(") < js.index("function wireTapeWave(")
+
+
+def test_the_help_dialog_tells_the_truth_about_the_keys() -> None:
+    page = (STATIC / "index.html").read_text()
+    help_ = page[
+        page.index('id="helpdlg"') : page.index("</dialog>", page.index('id="helpdlg"'))
+    ]
+    assert "<kbd>H</kbd>" not in help_
+    assert "<kbd>X</kbd></td><td>on a tape, skip the song" in help_
+    assert "<kbd>S</kbd></td><td>on a record, split" in help_
+    assert "<kbd>&crarr;</kbd></td><td>on a record" in help_
+    assert "<kbd>E</kbd></td><td>choose the start or end" in help_
+    assert "<kbd>J</kbd> <kbd>K</kbd></td><td>the next track or song" in help_
+    assert "Selecting a track chooses nothing" in help_

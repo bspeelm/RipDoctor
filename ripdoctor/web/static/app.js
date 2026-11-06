@@ -575,7 +575,7 @@ function renderTracks() {
     for (const edge of ["start", "end"]) {
       const c = el("td", `t t-${edge}`, fmt(t[edge]));
       c.title = `${t[edge].toFixed(2)} s`;
-      c.onclick = () => { select(t.number, edge); ed.fitRange(t.start, t.end); };
+      c.onclick = () => { select(t.number, edge, true); ed.fitRange(t.start, t.end); };
       tr.appendChild(c);
     }
 
@@ -628,13 +628,46 @@ function auditionSelected() {
   if (t) player.audition(t[ed.sel.edge]);
 }
 
+// A nudge sets a boundary for good, so a track chosen from its row is not enough: the marker
+// has to have been asked for, by pressing it, by its Start or End cell or button, or by E.
+let cutPicked = null;
+const cutArmed = () => !!ed.sel && cutPicked?.track === ed.sel.track && cutPicked.edge === ed.sel.edge;
+
 function nudgeSelected(step) {
   const t = selectedTrack();
-  if (!t) return;
+  if (!t) return false;
+  if (!cutArmed()) {
+    status("Choose Start or End first (E), or press a marker, and then this moves it.", true);
+    return false;
+  }
   if (ed.sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
   else t.end = Math.max(t.end + step, t.start + 0.2);
   setByHand(t);
   markDirty(); ed.render(); updateReadout(); renderTracks();
+  return true;
+}
+
+function chooseEdge(edge) {
+  if (ed.sel) select(ed.sel.track, edge, true);
+}
+
+// The first press chooses the marker the readout is showing, and the next ones swap it.
+function swapEdge() {
+  if (!ed.sel) return;
+  const chosen = cutPicked?.track === ed.sel.track;
+  chooseEdge(chosen ? (ed.sel.edge === "start" ? "end" : "start") : ed.sel.edge);
+}
+
+// Stops at either end of the side, and a whole-side view stays one.
+function stepTrack(by) {
+  const list = tracks();
+  if (!list.length) return;
+  const at = list.findIndex((t) => t.number === ed.sel?.track);
+  const next = list[at < 0 ? (by > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, at + by))];
+  const whole = !!ed.side && ed.t1 - ed.t0 >= ed.side.duration - 0.01;
+  select(next.number, "start");
+  if (!whole) ed.fitRange(next.start, next.end);
+  document.querySelector("#tracks tr.sel")?.scrollIntoView({ block: "nearest" });
 }
 
 // The boundaries stay, and the doubt goes. It is an edit like any other, so it waits for a
@@ -655,7 +688,15 @@ function zoomToSelected() {
 
 function showCutTools() {
   const none = !selectedTrack();
-  for (const id of ["#cut-minus", "#cut-plus", "#cut-audition", "#cut-zoom-track"]) $(id).disabled = none;
+  for (const id of ["#cut-audition", "#cut-zoom-track"]) $(id).disabled = none;
+  for (const id of ["#cut-prev", "#cut-next"]) $(id).disabled = !tracks().length;
+  const armed = cutArmed();
+  for (const edge of ["start", "end"]) {
+    const b = $(`#cut-edge-${edge}`);
+    b.disabled = none;
+    b.classList.toggle("on", armed && ed.sel.edge === edge);
+  }
+  for (const id of ["#cut-minus", "#cut-plus"]) $(id).disabled = !armed;
   for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side"]) $(id).disabled = !ed.side;
   const doubt = !!selectedTrack()?.forced;
   $("#cut-checked").disabled = !doubt;
@@ -749,8 +790,9 @@ function splitAtPlayhead() {
   status(note);
 }
 
-function select(num, edge) {
+function select(num, edge, picked = false) {
   ed.sel = num == null ? null : { track: num, edge };
+  cutPicked = picked && num != null ? { track: num, edge } : null;
   ed.render(); renderTracks(); updateReadout();
 }
 
@@ -758,6 +800,9 @@ function select(num, edge) {
 
 function updateReadout() {
   const sel = ed.sel;
+  const armed = cutArmed();
+  $("#ro-armed").textContent = armed ? `${sel.edge === "start" ? "Start" : "End"} chosen` : "";
+  $("#ro-armed").className = armed ? sel.edge : "";
   if (!sel) {
     $("#ro-time").textContent = fmt(ed.playhead);
     $("#ro-track").textContent = ""; $("#ro-gap").textContent = ""; $("#ro-gap").className = "";
@@ -770,7 +815,7 @@ function updateReadout() {
   const len = t.end - t.start;
   const d = t.cat ? len - t.cat : null;
   $("#ro-track").textContent =
-    `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s` +
+    `${armed ? `${sel.edge} of ` : ""}${t.number} “${t.title}” — ${len.toFixed(2)}s` +
     (t.forced ? "  — forced, placed from the catalogue; check it by ear"
      : d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
 
@@ -3021,7 +3066,7 @@ function tapeShowSong() {
 // Every key but the two nudges presses its button, so a key does what the button
 // would and a disabled button refuses it.
 const TAPE_KEYS = {
-  k: "#tp-prev", j: "#tp-next", h: "#tp-hear", a: "#tp-accept", s: "#tp-skip",
+  k: "#tp-prev", j: "#tp-next", a: "#tp-hear", Enter: "#tp-accept", x: "#tp-skip",
 };
 const NUDGE_KEYS = { ",": -1, "<": -1, ".": 1, ">": 1, ArrowLeft: -1, ArrowRight: 1 };
 
@@ -4341,12 +4386,16 @@ function wire() {
       setByHand(tr);
       markDirty(); ed.render(); updateReadout(); renderTracks();
     },
-    (num, edge) => { ed.sel = num == null ? null : { track: num, edge }; renderTracks(); updateReadout(); },
+    (num, edge) => { select(num, edge, true); },
     (t) => { if (player.playing) player.seek(t); });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
   new ResizeObserver(() => ed.render()).observe($("#cv"));
   for (const type of ["play", "pause", "ended"]) player.el.addEventListener(type, showCutTools);
+  $("#cut-prev").onclick = () => stepTrack(-1);
+  $("#cut-next").onclick = () => stepTrack(1);
+  $("#cut-edge-start").onclick = () => chooseEdge("start");
+  $("#cut-edge-end").onclick = () => chooseEdge("end");
   $("#cut-minus").onclick = (e) => nudgeSelected(e.shiftKey ? -0.5 : -0.05);
   $("#cut-plus").onclick = (e) => nudgeSelected(e.shiftKey ? 0.5 : 0.05);
   $("#cut-play").onclick = playOrPause;
@@ -4635,9 +4684,14 @@ function wire() {
       if (t) { e.preventDefault(); auditionSelected(); }
     } else if (e.key === "Enter") {
       e.preventDefault(); $("#cut-checked").click();
-    } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
-      e.preventDefault();
-      nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      if (nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1))) e.preventDefault();
+    } else if (e.key === "e" || e.key === "E") {
+      e.preventDefault(); swapEdge();
+    } else if (e.key === "j" || e.key === "J") {
+      e.preventDefault(); $("#cut-next").click();
+    } else if (e.key === "k" || e.key === "K") {
+      e.preventDefault(); $("#cut-prev").click();
     } else if (e.key === "s" || e.key === "S") {
       e.preventDefault(); splitAtPlayhead();
     } else if (e.key === "f" || e.key === "F" || e.key === "0") {
