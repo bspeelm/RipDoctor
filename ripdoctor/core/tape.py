@@ -1139,10 +1139,13 @@ def skip(tape: Tape, number: int, skipped: bool = True) -> Tape:
 
 
 def needs_no_cut(song: Song) -> bool:
-    """A lookup found this in the library, and File finds it there again and imports
-    nothing. If it has gone by then, the song goes back to choosing an album, which
-    makes it a song to cut like any other."""
-    return bool(song.proposal and song.proposal.status == OWNED)
+    """The library's copy stands for it: a lookup found one, and File finds it there
+    again and imports nothing, or it is recorded as already there, which is never run
+    again. If a lookup's copy has gone by File, the song goes back to choosing an album,
+    which makes it a song to cut like any other."""
+    return song.filing == ALREADY or bool(
+        song.proposal and song.proposal.status == OWNED
+    )
 
 
 def doubtful(song: Song) -> bool:

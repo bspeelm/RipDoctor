@@ -621,3 +621,13 @@ def test_a_move_that_leaves_a_filed_neighbour_where_it_is_goes_through() -> None
 def test_a_move_for_a_song_not_on_the_list_is_refused() -> None:
     with pytest.raises(TP.BadEdge, match="no song 9"):
         TP.set_edges(three_placed(), 9, 1.0, 2.0)
+
+
+def test_a_person_s_own_copy_was_still_asked_to_be_cut() -> None:
+    """It sat at Waiting on the cut, for a song nothing would ever import."""
+    waiting = a_song(1, "One", unconfirmed="/lib/one.flac", settled_by=M.PERSON)
+    tape = F.person_owns(a_tape(replace(waiting, start=None, end=None)), 1)
+    song = tape.songs[0]
+    assert TP.cut_status(song, 1, ()) == TP.NO_CUT
+    assert TP.cut_refusal(tape) == ""
+    assert F.file_refusal(tape, ()) == ""
