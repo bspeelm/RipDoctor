@@ -142,6 +142,13 @@ class Jobs:
         with self.lock:
             return self.running.get(slug)
 
+    def forget(self, slug: str) -> None:
+        """A finished job whose outcome a person has since acted on."""
+        with self.lock:
+            job = self.running.get(slug)
+            if job and job.done:
+                del self.running[slug]
+
     def start(self, slug: str, op: str, work: Callable[[Job], Any]) -> Job:
         """Claim the record and run `work` on a worker thread.
 

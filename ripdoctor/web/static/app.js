@@ -1306,9 +1306,10 @@ function landOn(t) {
 let tpPrepareSoon = null, tpPrepareStarting = false;
 let tpActing = 0;                     // what a person pressed that has not been answered
 let tpCutWaits = false;               // Cut was pressed during an automatic lookup
+const tpStopped = new Set();          // tapes whose last job ended in error, until a person acts
 
 function autoPrepare(t) {
-  if (!t.prepare_needed || tapeWatching || (t.job && !t.job.done)) return;
+  if (!t.prepare_needed || tapeWatching || (t.job && !t.job.done) || tpStopped.has(t.id)) return;
   // The next field of a row would be refused while the job holds the tape, and what a
   // person just pressed would be too, so this waits for both.
   if (tpActing || document.activeElement?.closest?.("#tp-rows")) {
@@ -1697,6 +1698,7 @@ async function saveList(songs, openAfter, sure, seen) {
     const after = await postJSON(url, sure ? { songs, seen, confirm: true } : { songs, seen });
     tpOpen = openAfter;
     tpRows.clear();
+    tpStopped.delete(tape.id);
     showTape(after);
     await loadTapes(tape.id);
     return true;
@@ -2821,12 +2823,14 @@ async function watchTape() {
         const parts = j.op === "prepare" ? [j.result?.boundaries, j.result?.albums] : [];
         const said = [j.error, ...parts].filter(Boolean).join(" ");
         if (said) $("#tp-err").textContent = said;
+        if (j.error) tpStopped.add(id); else tpStopped.delete(id);
         break;
       }
       await new Promise((r) => setTimeout(r, 800));
     }
   } catch (e) {
     status("");
+    tpStopped.add(id);
     $("#tp-err").textContent = e.status === 404
       ? "that job is no longer running, so the server has restarted - what it finished is kept, so start it again"
       : e.message;

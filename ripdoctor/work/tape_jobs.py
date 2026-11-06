@@ -217,8 +217,11 @@ def prepare(asking: Asking, tape_id: str, job: Job) -> dict[str, Any]:
     job.result = said
     failed = "; ".join(f"{part}: {why}" for part, why in said.items() if why)
     if failed:
-        tape = T.read(asking.layout, tape_id)
-        T.save(asking.layout, replace(tape, prepare_failed=failed))
+        try:
+            tape = T.read(asking.layout, tape_id)
+            T.save(asking.layout, replace(tape, prepare_failed=failed))
+        except OSError as e:  # the job's own error still stops it being started again
+            failed = f"{failed}; that could not be kept with the tape: {e}"
         raise ValueError(failed)
     return said
 

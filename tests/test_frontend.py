@@ -802,3 +802,15 @@ def test_keeping_on_asking_for_a_job_sends_nothing_but_the_question() -> None:
     js = (STATIC / "app.js").read_text()
     body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "postJSON" not in body
+
+
+def test_the_page_never_restarts_a_tape_whose_job_ended_in_error() -> None:
+    """Whatever the document says: if its failure could not be saved, the document still
+    asks for a run, and every look at the page started another."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function autoPrepare\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpStopped.has(t.id)" in body
+    watched = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (j.error) tpStopped.add(id); else tpStopped.delete(id);" in watched
+    saved = re.search(r"async function saveList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "tpStopped.delete(tape.id);" in saved

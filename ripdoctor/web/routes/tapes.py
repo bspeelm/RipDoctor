@@ -151,7 +151,10 @@ def add(app: App, service: Service) -> None:
         )
 
     def wanted_ready(tape: TP.Tape) -> bool:
-        if archived(tape):
+        """Never after a job that ended in error, whatever the document managed to
+        keep: it would only fail again, and until a person acts that is a loop."""
+        job = service.jobs.status(T.key_of(tape.id))
+        if archived(tape) or (job and job.done and job.error):
             return False
         try:
             TJ.arrived(layout, tape)
@@ -250,6 +253,7 @@ def add(app: App, service: Service) -> None:
             changed = TP.relist(tape, songs, gone_from_library(tape))
         except (TP.EarSet, TP.Locked) as e:
             raise H.HttpError(409, str(e)) from e
+        service.jobs.forget(T.key_of(tape.id))
         if any(s.start is not None for s in tape.songs) and not confirmed:
             return H.ok(
                 {
@@ -264,7 +268,9 @@ def add(app: App, service: Service) -> None:
     def with_edits(tape: TP.Tape, songs: tuple[TP.Song, ...]) -> H.Response:
         not_archived(tape)
         try:
-            return kept(TP.edited(tape, songs))
+            changed = TP.edited(tape, songs)
+            service.jobs.forget(T.key_of(tape.id))
+            return kept(changed)
         except TP.Locked as e:
             raise H.HttpError(409, str(e)) from e
 

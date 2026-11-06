@@ -276,6 +276,55 @@ def test_a_failed_run_waits_for_a_person_even_after_a_restart(
     assert "the worker died" in view["prepare_failed"]
 
 
+def test_a_failed_run_whose_failure_could_not_be_saved_was_started_again_for_ever(
+    service: Service, catalogue: Catalogue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalogue.broken = {"recording"}
+    app = build(service)
+    tape = ready(app, service)
+    real = T.save
+
+    def full_disk(layout, changed):  # type: ignore[no-untyped-def]
+        if changed.prepare_failed:
+            raise OSError("no space left on device")
+        real(layout, changed)
+
+    monkeypatch.setattr(T, "save", full_disk)
+    job = prepared(app, service, tape)
+    assert "the worker died" in job["error"]
+    assert "no space left" in job["error"]
+    monkeypatch.undo()
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert T.read(service.layout, tape).prepare_failed == ""
+    assert view["prepare_needed"] is False
+
+
+def test_any_job_that_ended_in_error_holds_the_automatic_run_back(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = ready(app, service)
+    job = service.jobs.start(T.key_of(tape), "cut", lambda _: 1 / 0)
+    assert job.error
+    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is False
+
+
+def test_an_edit_after_an_unsaved_failure_lets_the_tape_go_on_by_itself(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape = ready(app, service)
+    service.jobs.start(T.key_of(tape), "prepare", lambda _: 1 / 0)
+    current = T.read(service.layout, tape)
+    rows = [
+        {"title": s.title, "artist": s.artist, "album": s.album, "length": s.length}
+        for s in current.songs
+    ]
+    rows[0]["title"] = "One Again"
+    assert save_list(app, tape, service, rows).status == 200
+    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is True
+
+
 def test_what_a_person_presses_after_a_failed_run_clears_it(
     service: Service, catalogue: Catalogue
 ) -> None:
