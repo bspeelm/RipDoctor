@@ -2187,6 +2187,28 @@ def test_a_new_list_cleared_not_confirmed_and_could_import_a_second_copy(
     assert songs(service, tape)[0].filing == F.UNKNOWN
 
 
+def test_a_refused_new_list_leaves_not_confirmed_holding_the_release(
+    service: Service,
+) -> None:
+    """#44: a relist was the way round the hold. With or without its confirmation it
+    changes nothing, the release still cannot change, and only a read-back frees it."""
+    app = build(service)
+    tape = pinned(app, service, two="rel-1")
+    runner = beet_of(service)
+    locked_after_the_import(service)
+    file_it(app, tape, service)
+    before = T.read(service.layout, tape)
+    assert before.songs[0].filing == F.UNKNOWN
+    for confirm in (False, True):
+        assert send_csv(app, tape, service, TWO, confirm=confirm).status == 409
+    url = f"/api/tapes/{tape}/songs/1/release"
+    assert post(app, url, service, {"release": "rel-other"}).status == 409
+    assert T.read(service.layout, tape) == before
+    runner.ls_fails = False
+    assert not file_it(app, tape, service)["error"]
+    assert songs(service, tape)[0].filing == F.FILED
+
+
 def test_a_release_held_by_a_lost_import_is_freed_by_filing_again(
     service: Service,
 ) -> None:
