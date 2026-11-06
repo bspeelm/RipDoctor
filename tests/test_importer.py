@@ -983,6 +983,21 @@ def test_a_dollar_or_percent_in_a_cover_s_path_was_read_as_a_template(
             False,
         ),
         ("directory: /x\n", None),
+        ("paths:\n    default: $albumartist/$year - $album/$track\n", None),
+        ("paths:\n    default: $albumartist/$album/Disc $disc/$track\n", None),
+        ("paths:\n    default: %the{$albumartist}/$album/$track\n", None),
+        ("paths:\n    default: $album/$track\n", None),
+        (
+            "paths:\n    default: '$albumartist/$album/$track'\n"
+            "    albumtype:soundtrack: Soundtracks/$album/$track\n",
+            None,
+        ),
+        (
+            "paths:\n    default: '$albumartist/$album/$track $title'\n"
+            "    singleton: Non-Album/$artist/$title\n"
+            "    comp: Compilations/$album%aunique{}/$track $title\n",
+            False,
+        ),
     ],
 )
 def test_whether_album_rows_get_folders_of_their_own_is_read_from_the_default_path(

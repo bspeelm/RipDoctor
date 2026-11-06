@@ -773,6 +773,48 @@ def test_a_note_about_another_album_artist_does_not_promise_the_same_folder(
     assert "a folder of its own" in add["said"]
 
 
+def test_a_note_promised_the_folder_of_an_album_with_another_title(
+    service: Service, catalogue: Catalogue
+) -> None:
+    """Beets names the folder from the release, so the deluxe one is another folder."""
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record (Deluxe)", [("A Song", 200)]), "r")
+    ]
+    owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1", track="1")
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "a folder of its own, apart from your A Record" in add["said"]
+    assert "your A Record folder" not in add["said"]
+
+
+def test_a_note_promised_a_folder_where_a_year_in_the_path_makes_another(
+    service: Service, catalogue: Catalogue
+) -> None:
+    catalogue.albums["A Record"] = [
+        one_recording(a_release("theirs", "A Record", [("A Song", 200)]), "rec")
+    ]
+    owned_row(service, title="Mine", mb_albumid="mine", mb_trackid="m1", track="1")
+    beet_of(service).album_path = "$albumartist/$year - $album/$track $title"
+    app = build(service)
+    view = looked_up(app, service, a_tape(app, service, row("A Song")))
+    add = releases(view)["edition_note"]["choices"][0]
+    assert "or in a folder beside it" in add["said"]
+    assert "your A Record folder" not in add["said"]
+
+
+def test_a_note_about_various_artists_says_only_what_is_true_either_way() -> None:
+    """Beets files such a release by its `comp` path, which `apart` does not read."""
+    choice = M.Choice(
+        "theirs", "g", "A Record", "Various Artists", "", "", number=2, recording="r"
+    )
+    held = M.Held("mine", "A Record", "Various Artists", 3, (1, 2, 3))
+    made = M.Proposal(M.MATCHED, choice=choice, held=(held,), apart=False)
+    song = TP.Song(1, "A Song", "A Band", "A Record", 200.0, proposal=made)
+    add = F.edition_note(song)["choices"][0]  # type: ignore[index]
+    assert "or in a folder beside it" in add["said"]
+
+
 def test_the_paths_are_read_once_in_a_lookup_however_many_songs_it_asks_about(
     service: Service, catalogue: Catalogue
 ) -> None:

@@ -204,6 +204,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # string: beets passes "\t" through as a literal backslash-t, every line then
 # fails to split, and the album reads as having no tracks at all.
 _SEP = "\x1f"
+_PATH_FIELD = re.compile(r"\$\{?(\w+)")
 _ROW = _SEP.join(
     ("$title", "$artist", "$album", "$length", "$path", "$mb_trackid", "$track")
 )
@@ -348,17 +349,24 @@ class Beets:
 
     def folders_apart(self, runner: Runner) -> bool | None:
         """Whether beets' album path gives each album row its own folder, which is what
-        `%aunique` does, with the defaults counted. None if it would not say."""
+        `%aunique` does, with the defaults counted. None if it would not say, or if what
+        it says cannot be foretold from an album's names. `comp` is only for a release
+        by Various Artists, which the note's wording allows for, and `singleton` is for
+        no album; any other path is chosen by a query this does not run."""
         result = runner.run(self._argv(["config", "-d"]), timeout=60)
         if not result.ok:
             return None
-        inside = False
+        inside, found = False, ""
         for line in _plain(result.text).splitlines():
             if line and not line[0].isspace():
                 inside = line.startswith("paths:")
-            elif inside and line.strip().startswith("default:"):
-                return "%aunique" in line
-        return None
+            elif inside and line.strip():
+                key, _, value = line.strip().partition(":")
+                if key == "default":
+                    found = value
+                elif key not in ("comp", "singleton"):
+                    return None
+        return _apart_by(found)
 
     def _argv(self, args: list[str], config: str = "") -> list[str]:
         head = ["beet"]
@@ -804,6 +812,17 @@ class Beets:
             for fields in _fields(result.text)
             if len(fields) == _HELD.count(_SEP) + 1
         )
+
+
+def _apart_by(album_path: str) -> bool | None:
+    """Its folders, without the file's own name. Only the album artist and album make a
+    folder two rows are known to share: a year or a disc is different between editions,
+    and a function could say anything."""
+    folders = album_path.strip().strip("'\"").rpartition("/")[0]
+    if "%aunique" in folders:
+        return True
+    fields = set(_PATH_FIELD.findall(folders))
+    return None if "%" in folders or fields != {"album", "albumartist"} else False
 
 
 def _one_file(path: str) -> str:

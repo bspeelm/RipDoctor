@@ -14,6 +14,7 @@ from ripdoctor.core.match import (
     OWNED,
     PERSON,
     REVIEW,
+    VARIOUS,
     Choice,
     Copy,
     Held,
@@ -401,16 +402,21 @@ def _beside_an_album(song: Song, choice: Choice) -> tuple[Held, Choice] | None:
 
 
 def _where_it_goes(made: Proposal, held: Held, album: Choice) -> str:
-    """Only paths with no `%aunique` and the same album artist make it the same folder,
-    and with no answer to that this says only what is true either way."""
+    """The same folder needs paths with no `%aunique`, and the same album artist and
+    album title. A release by Various Artists takes beets' `comp` path instead, and with
+    no answer about paths this says only what is true either way."""
     place = f"track {album.number}"
     keeps = f"Your {held.tracks} songs don't change."
-    if made.apart is None:
+    artist = fold(album.album_artist)
+    if made.apart is None or artist == VARIOUS:
         return (
             f"goes in with your {held.album} or in a folder beside it, depending on "
             f"your beets paths, as {place}. {keeps}"
         )
-    if made.apart or fold(held.album_artist) != fold(album.album_artist):
+    alike = artist == fold(held.album_artist) and (
+        fold(album.release_title) == fold(held.album)
+    )
+    if made.apart or not alike:
         return (
             f"goes in a folder of its own, apart from your {held.album}, as {place}. "
             f"{keeps}"
