@@ -275,6 +275,8 @@ def test_a_cut_seeks_exactly_and_re_encodes_from_the_tape(service: Service) -> N
         "flac",
         "-compression_level",
         "8",
+        "-frame_size",
+        "4096",
         str(root / T.PARTIAL / "01 One.flac"),
     )
 

@@ -9,10 +9,16 @@ from ripdoctor.audio.runner import Runner, ToolFailed
 from ripdoctor.core.naming import track_filename
 from ripdoctor.core.plan import Plan, PlanTrack
 
+# Explicit for anything encoding from a trimmed start: ffmpeg may otherwise take
+# the size from the first decoded frame, and a start just before a source frame
+# ends leaves one too small for the encoder to open. 4096 is legal in the FLAC
+# subset at any rate, and the choice changes the bytes, never the decoded audio.
+FRAME_SIZE = ("-frame_size", "4096")
+
 # Re-encoding is not optional. Stream copy cannot cut FLAC where it is asked to:
 # it snaps to the nearest frame boundary, so every cut lands a little early or
 # late and the error is different on every track.
-CODEC = ("-c:a", "flac", "-compression_level", "8")
+CODEC = ("-c:a", "flac", "-compression_level", "8", *FRAME_SIZE)
 
 # The tick that makes a boundary answerable. 1400 Hz is clear of anything on a
 # record and short enough not to mask what it sits on.
@@ -130,6 +136,7 @@ def tick_argv(
         "[o]",
         "-c:a",
         "flac",
+        *FRAME_SIZE,
         dest,
     ]
 
