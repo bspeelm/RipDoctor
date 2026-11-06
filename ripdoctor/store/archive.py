@@ -24,7 +24,7 @@ from typing import Any
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
-from ripdoctor.core.plan import OldFormat, Plan
+from ripdoctor.core.plan import OldFormat, Plan, letter_of
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
@@ -56,6 +56,18 @@ def removable(layout: Layout, slug: str) -> list[Path]:
         layout.clips_dir(slug),
         C.dir_for(layout, slug),
     ]
+
+
+def alignable(layout: Layout, slug: str, plan: Plan) -> list[str]:
+    """The sides whose saved times are still on the archived capture, which is all a
+    transform between the two captures is about. A save moves a side's stamp to the
+    capture on disk, and after that its times are not on the old one. ADR-064."""
+    found = []
+    for side in plan.sides:
+        old, new = layout.archive / slug / side.file, layout.raw / slug / side.file
+        if old.is_file() and new.is_file() and side.audio != C.stamp_of(new):
+            found.append(letter_of(side.file))
+    return found
 
 
 def cut_captures(layout: Layout, slug: str, plan: Plan) -> dict[str, str]:

@@ -25,6 +25,7 @@ from ripdoctor.core.plan import (
     saved_over,
 )
 from ripdoctor.core.xcorr import AlignError
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.store.files import SIDE
@@ -201,6 +202,13 @@ def add(app: App, service: Service) -> None:
         if job is None:
             raise H.HttpError(404, "no job")
         return H.ok(job.as_dict())
+
+    @app.route("GET", "/api/align/([^/]+)")
+    def can_align(r: H.Request) -> H.Response:
+        """The sides Align can carry, so it is only offered and named where it can."""
+        slug = slug_of(r)
+        saved = _saved_plan_or_none(layout, slug)
+        return H.ok({"sides": AR.alignable(layout, slug, saved) if saved else []})
 
     @app.route("POST", "/api/align/([^/]+)")
     def align(r: H.Request) -> H.Response:
@@ -393,34 +401,26 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
         else None
     )
     kept = {t.number: t for t in placed.tracks} if placed else {}
-    on_new = placed is not None and placed.audio == C.stamp_of(new)
-    if on_new and not any(t.on_replaced_audio for t in kept.values()):
+    if placed and placed.audio == C.stamp_of(new):
         raise AlignError(
-            f"side {side.letter}'s boundaries are already on this capture, so "
-            "there is nothing to carry"
+            f"side {side.letter}'s saved boundaries are on this capture, so there is "
+            "nothing to carry. If any are from the earlier capture, run First pass, or "
+            "listen and press Checked, or move the boundary"
         )
 
     built = C.prepared(layout, slug, side.letter)
     duration = built.duration if built else true_duration(service.runner, str(new))
     edges = [t for t in side.tracks if t.start is not None and t.end is not None]
-    carried = [
-        t
-        for t in edges
-        if not on_new or (t.number in kept and kept[t.number].on_replaced_audio)
-    ]
-    if not carried:
+    if not edges:
         raise AlignError(f"side {side.letter} has no boundaries to carry")
 
-    first = min(float(t.start) for t in carried)
-    last = max(float(t.end) for t in carried)
+    first = min(float(t.start) for t in edges)
+    last = max(float(t.end) for t in edges)
     transform, _probes, miss = fit_side(
         service.runner, str(old), str(new), first, last, duration
     )
     tracks = []
     for t in edges:
-        if t not in carried:
-            tracks.append(_row(t, t.start, t.end, kept.get(t.number), stayed=True))
-            continue
         start, end = transform.apply(float(t.start)), transform.apply(float(t.end))
         if start < 0 or end > duration or end <= start:
             raise AlignError(
@@ -433,31 +433,26 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
         "offset": round(transform.offset, 3),
         "drift_ms_per_min": round(transform.drift_ms_per_min, 1),
         "check_miss": round(miss, 3),
-        "moved": len(carried),
         "tracks": tracks,
     }
 
 
-def _row(
-    t: Any, start: float, end: float, was: PlanTrack | None, *, stayed: bool = False
-) -> dict[str, Any]:
+def _row(t: Any, start: float, end: float, was: PlanTrack | None) -> dict[str, Any]:
     """One track of an aligned side, saying only what is still true of it.
 
     A person's boundary, carried, is theirs but not yet heard on this capture, so
-    a check by ear does not come across as one. One that stayed was set on this
-    capture and is exactly what it was. `forced` and `length` are about what its
-    place rests on, which a transform does not change. The spec has no word for
-    either, so they come from the plan it was written with.
+    a check by ear does not come across as one. `forced` and `length` are about
+    what its place rests on, which a transform does not change. The spec has no
+    word for either, so they come from the plan it was written with.
     """
     placed = was.placed if was and was.placed in (GAP, LENGTH) else ""
-    settled = t.settled if stayed else HAND if t.settled else ""
     return {
         "number": t.number,
         "title": t.title,
         "start": round(start, 2),
         "end": round(end, 2),
         "cat": t.cat,
-        **({"settled": settled} if settled else {}),
+        **({"settled": HAND} if t.settled else {}),
         **({"forced": True} if was and was.forced else {}),
         **({"placed": placed} if placed else {}),
     }

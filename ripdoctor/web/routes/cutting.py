@@ -21,6 +21,7 @@ from ripdoctor.core.plan import (
     letter_of,
     validate,
 )
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
@@ -84,7 +85,10 @@ def add(app: App, service: Service) -> None:
         # Judged here, on the saved plan: the page saves for itself before it
         # asks, so an edit it has just made is already in what this reads. The
         # stamps are what a save has not yet had the chance to say.
-        refused = cut_refusal(as_it_stands(plan, C.stamps_of(layout, slug)))
+        refused = cut_refusal(
+            as_it_stands(plan, C.stamps_of(layout, slug)),
+            AR.alignable(layout, slug, plan),
+        )
         if refused:
             raise H.HttpError(409, refused)
         dest = layout.review_dir(slug)

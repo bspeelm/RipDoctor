@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -353,14 +354,17 @@ def _heard_here(t: PlanTrack) -> PlanTrack:
     return replace(t, placed="") if t.placed == EARLIER and t.settled else t
 
 
-def cut_refusal(plan: Plan) -> str:
+def cut_refusal(plan: Plan, alignable: Collection[str] = ()) -> str:
     """Why this plan may not be cut yet, naming every track, or nothing. ADR-064.
 
     Give it the plan `as_it_stands`: what was saved says nothing about a capture
-    replaced since it was written.
+    replaced since it was written. `alignable` is the sides Align can still carry,
+    so a way out is only named where it is one.
     """
     said = [
-        _on_replaced_audio(letter_of(side.file), gone)
+        _on_replaced_audio(
+            letter_of(side.file), gone, letter_of(side.file) in alignable
+        )
         for side in plan.sides
         if (gone := [t for t in side.tracks if t.on_replaced_audio])
     ]
@@ -382,13 +386,13 @@ def _names(tracks: list[PlanTrack]) -> str:
     return ", ".join(f'{t.number} "{t.title}"' for t in tracks)
 
 
-def _on_replaced_audio(letter: str, tracks: list[PlanTrack]) -> str:
+def _on_replaced_audio(letter: str, tracks: list[PlanTrack], align: bool) -> str:
+    aligning = ", or Align from archive" if align else ""
     return (
         f"side {letter} was captured again after these were placed, so their times "
         f"are positions on audio that has gone: {_names(tracks)}. Run First pass, "
-        "which keeps what you have set since, or Align from archive if the earlier "
-        "capture is there. A track you have listened to on this capture can be "
-        "marked Checked, or moved."
+        f"which keeps what you have set since{aligning}. "
+        "A track you have listened to on this capture can be marked Checked, or moved."
     )
 
 

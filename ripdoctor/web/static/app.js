@@ -1068,6 +1068,7 @@ async function save() {
     const { released } = await postJSON(`/api/plan/${S.slug}`, buildDoc());
     markDirty(false);
     dropDraft();
+    refreshAlignButton();
     status(released?.length
       ? `saved. ${counted(released.length, "track", "tracks")} (${released.join(", ")}) kept ${released.length === 1 ? "its time" : "their times"} from the earlier capture, no longer marked as yours`
       : "saved plan + spec", !!released?.length);
@@ -3977,18 +3978,15 @@ async function loadOrphans() {
 // refuses while side-X.flac exists, so without this a side taken at the wrong
 // speed - or off the wrong input - means deleting files by hand, which leaves
 // the analysis cache and the plan entry behind describing audio that is gone.
-// "Align from archive" only means anything when the same album exists in both
-// places: an archived capture to correlate against, and a fresh one in raw/.
+// "Align from archive" only means anything where a saved time is still on the archived
+// capture and a fresh one is in raw/. A save ends that, so it is asked again after one.
 async function refreshAlignButton() {
   const b = $("#realign");
   b.hidden = true;
   if (!S.slug || !S.meta?.sides?.length) return;
   try {
-    const { albums } = await api("/api/albums?archive=1");
-    // one entry per slug, and raw shadows archive - so the archived original is
-    // reported by a flag on the raw entry, not as a second row
-    const a = albums.find((x) => x.slug === S.slug);
-    b.hidden = !(a && a.where === "raw" && a.archived_copy);
+    const { sides } = await api(`/api/align/${S.slug}`);
+    b.hidden = !sides.length;
     // The rail offers this by name, and it was drawn before this was known.
     showCutRail();
   } catch { /* leave it hidden */ }
@@ -4855,7 +4853,7 @@ function wire() {
         S.bySide[a.side] = a.tracks.map((t) => ({ ...t }));
         logline(`side ${a.side}: offset ${a.offset > 0 ? "+" : ""}${a.offset}s, `
           + `drift ${a.drift_ms_per_min} ms/min, worst check ${a.check_miss}s `
-          + `— ${a.moved} of ${a.tracks.length} tracks moved`);
+          + `— ${a.tracks.length} boundaries moved`);
       }
       for (const p of r.problems) logline(`side ${p.side}: ${p.why}`);
       // the audio genuinely changed, so nobody has listened to these yet
@@ -4863,9 +4861,9 @@ function wire() {
       renderTracks();
       ed.setTracks(tracks());
       updateReadout();
-      const n = r.aligned.reduce((a, x) => a + x.moved, 0);
+      const n = r.aligned.reduce((a, x) => a + x.tracks.length, 0);
       status(r.aligned.length
-        ? `aligned ${n} tracks across ${r.aligned.length} side(s) — listen, then Save`
+        ? `aligned ${n} boundaries across ${r.aligned.length} side(s) — listen, then Save`
         : "nothing could be aligned — see the log", !r.aligned.length);
     } catch (e) {
       status(`align failed: ${e.message}`, true); logline(e.message, true);

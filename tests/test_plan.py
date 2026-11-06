@@ -267,10 +267,15 @@ def test_a_cut_is_refused_on_times_from_a_replaced_capture_with_the_ways_out() -
             a_track_doc(number=3, title="Three", start=20.0, end=30.0, settled=P.HAND),
         )
     )
-    said = P.cut_refusal(plan)
+    said = P.cut_refusal(plan, ("a",))
     assert "side a was captured again" in said
     assert '1 "One"' in said and '2 "Two"' in said and "Three" not in said
     assert "First pass" in said and "Align from archive" in said and "Checked" in said
+    saved_over = P.cut_refusal(plan)
+    assert "Align" not in saved_over
+    assert (
+        "First pass" in saved_over and "Checked" in saved_over and "moved" in saved_over
+    )
 
 
 def test_a_track_from_a_replaced_capture_is_named_once_even_if_also_in_doubt() -> None:

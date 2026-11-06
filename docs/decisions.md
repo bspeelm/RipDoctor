@@ -2772,7 +2772,8 @@ that never said which capture it was on, since those can only be branch-era docu
 holding one is the hazard. Its report names each track and the reason.
 
 **The way out of a mark.** On a capture that is gone, nothing has to be done: a first
-pass lets it go and says so, and Align carries it when the old capture is in the archive.
+pass lets it go and says so, and Align carries it while the side is unsaved and the old
+capture is in the archive.
 On the same audio a person can move the track, remove it and save, or start over: First
 pass offers an unticked box, `also replace the boundaries I set`, with the number of
 tracks, and only there does a fit go over what they set. It is the one way past a mark,
@@ -2794,7 +2795,7 @@ record is already filed: a re-rip of a filed record is the usual way here.
 
 Nothing about this may be a dead end, and somebody can arrive having already moved
 boundaries on the new capture. So a track they moved is theirs and is never named, a first
-pass holds it and fits the rest, and Align carries only the rows still marked. `Checked`
+pass holds it and fits the rest. `Checked`
 clears a row as well, because a time can turn out right on the new capture and a record with
 no catalogue entry and no archive has nothing else short of nudging every boundary. A press
 on such a row is a claim about what is there now, and the server can tell it from a stale
@@ -2806,15 +2807,12 @@ disk, so a time unchanged from the plan it replaces is marked `placed: earlier`,
 `settled`, and is named in the reply. A time that differs was set on what is there now,
 and is the person's. The page never says which capture a plan is on; the server does.
 
-**Aligning** carries times from the archived capture onto the new one, so what it moves is
-what is still on the old one: a whole side not yet saved over, or the rows still marked
-`earlier` on one that has been. A time already on the new capture would be moved by a
-transform that was never about it, a person's included, so those rows stay put, and a side
-with nothing left to carry is refused.
-
-A track keeps what is true of it through the move: `forced` and `placed: length` say what its
-place rests on, and a transform does not change that. A row marked `earlier` no longer knows
-what it first rested on, and comes across as plainly `Fitted`.
+**Aligning** carries times from the archived capture onto the new one, so it is offered and
+named only for a side still stamped with the old one, and refuses one saved over. Such times
+would be moved by a transform that was never about them, a person's included, and running it
+twice used to do exactly that. A side saved over is not a dead end: a first pass, `Checked`
+after listening, and moving the boundary all remain, and the refusals and the rail name those
+(`test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain`).
 
 ### The refusal
 
