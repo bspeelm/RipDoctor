@@ -366,6 +366,7 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(507, "not enough room in the pool for that file")
         T.sweep(layout)
         IN.begin(layout, key, name=name, size=size, now=service.now())
+        service.jobs.forget(key)
         return H.ok({"have": 0, "total": size, "chunk": CHUNK})
 
     @app.route("POST", "/api/tapes/([^/]+)/upload/chunk")

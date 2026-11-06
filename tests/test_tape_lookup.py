@@ -17,10 +17,10 @@ from ripdoctor.store import tapes as T
 from ripdoctor.web.routes import build
 from ripdoctor.web.service import Service
 from tests.test_web_routes import a_service, get, post
-from tests.test_web_tape_cut import Cutting, cut, job_of, placed
-from tests.test_web_tape_file import Beet
+from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed
+from tests.test_web_tape_file import Beet, file_it
 from tests.test_web_tape_match import Catalogue, Clock, an_edition, row, statuses
-from tests.test_web_tapes import a_tape_runner, save_list
+from tests.test_web_tapes import a_new_tape, a_tape_runner, save_list, send_csv, upload
 
 
 def a_release(
@@ -1031,3 +1031,97 @@ def test_a_copy_found_at_lookup_and_gone_at_file_goes_back_to_choosing_an_album(
     assert one.proposal.copy is None
     assert "no settled release" in view["file_refusal"]
     assert view["songs"][1]["filing"] == F.ALREADY
+
+
+def a_tape_all_found_in_the_library(
+    app,  # type: ignore[no-untyped-def]
+    service: Service,
+    catalogue: Catalogue,
+) -> tuple[str, Path, Path]:
+    catalogue.albums["A Record"] = [
+        a_release("r", "A Record", [("One", 5), ("Two", 5)])
+    ]
+    one = owned_row(service, "One", length="0:05", mb_trackid="rec-r-1", mb_albumid="r")
+    two = owned_row(service, "Two", length="0:05", mb_trackid="rec-r-2", mb_albumid="r")
+    tape = a_new_tape(app, service)
+    assert send_csv(app, tape, service, TWO).status == 200
+    assert statuses(looked_up(app, service, tape)) == [M.OWNED, M.OWNED]
+    return tape, one, two
+
+
+def test_every_song_owned_and_a_copy_gone_at_file_was_a_dead_end(
+    service: Service, catalogue: Catalogue
+) -> None:
+    """Cut asked for boundaries, Find refused because the other song was filed, a new
+    list was locked, and the audio sent to answer it was never taken in."""
+    app = build(service)
+    tape, one, _ = a_tape_all_found_in_the_library(app, service, catalogue)
+    assert not get(app, f"/api/tapes/{tape}", service).json()["file_refusal"]
+    assert not T.audio_file(service.layout, tape).exists()
+    beet = beet_of(service)
+    beet.rows = [r for r in beet.rows if r["path"] != str(one)]
+    one.unlink()
+    job = file_it(app, tape, service)
+    assert "did not file" in job["error"]
+    gone, kept = T.read(service.layout, tape).songs
+    assert kept.filing == F.ALREADY
+    assert gone.filing == F.FAILED and gone.proposal.status == M.REVIEW  # type: ignore[union-attr]
+
+    upload(app, tape, service)
+    view = get(app, f"/api/tapes/{tape}", service).json()
+    assert view["prepare_needed"] is True
+    assert post(app, f"/api/tapes/{tape}/process", service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert T.audio_file(service.layout, tape).is_file()
+    gone, kept = T.read(service.layout, tape).songs
+    assert gone.start is not None
+    assert kept.filing == F.ALREADY
+
+    assert post(app, f"/api/tapes/{tape}/songs/1/heard", service).status == 200
+    assert post(app, f"/api/tapes/{tape}/songs/1/from-list", service).status == 200
+    assert not get(app, f"/api/tapes/{tape}", service).json()["cut_refusal"]
+    assert cut(app, tape, service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert not file_it(app, tape, service)["error"]
+    gone, kept = T.read(service.layout, tape).songs
+    assert (gone.filing, kept.filing) == (F.FILED, F.ALREADY)
+
+
+def test_look_again_answers_a_song_whose_copy_has_gone(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape, one, _ = a_tape_all_found_in_the_library(app, service, catalogue)
+    beet = beet_of(service)
+    beet.rows = [r for r in beet.rows if r["path"] != str(one)]
+    one.unlink()
+    file_it(app, tape, service)
+    assert post(app, f"/api/tapes/{tape}/match", service, {"again": True}).status == 202
+    assert not job_of(app, tape, service)["error"]
+    assert T.read(service.layout, tape).songs[0].proposal.status != M.OWNED  # type: ignore[union-attr]
+
+
+def test_a_library_off_its_mount_sent_every_owned_song_back_to_choosing_an_album(
+    service: Service, catalogue: Catalogue
+) -> None:
+    app = build(service)
+    tape, _, _ = a_tape_all_found_in_the_library(app, service, catalogue)
+    before = T.read(service.layout, tape).songs
+    root = Path(service.settings.library)
+    aside = root.with_name("lib-off-its-mount")
+    root.rename(aside)
+    root.mkdir()
+    beet = beet_of(service)
+    rows, beet.rows = beet.rows, [{**r, "path": r["path"]} for r in beet.rows]
+    job = file_it(app, tape, service)
+    assert "did not file" in job["error"]
+    now = T.read(service.layout, tape).songs
+    assert [s.proposal.status for s in now] == [M.OWNED, M.OWNED]  # type: ignore[union-attr]
+    assert [s.settled_by for s in now] == [s.settled_by for s in before]
+    assert all("off its mount" in s.filing_note for s in now)
+
+    root.rmdir()
+    aside.rename(root)
+    beet.rows = rows
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing for s in T.read(service.layout, tape).songs] == [F.ALREADY] * 2

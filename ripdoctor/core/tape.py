@@ -842,8 +842,15 @@ def _silences_in(
     )
 
 
+def _stays_put(song: Song) -> bool:
+    """A person's edges, and the edges a library's copy was cut from. A copy found in
+    the library has no edges of its own and takes its place in the list like any other.
+    """
+    return song.set_by == EAR or (song.start is not None and bool(edges_held(song)))
+
+
 def place(tape: Tape, music: Music) -> Tape:
-    """Set every boundary not set by ear; those split the list and stay put.
+    """Set every boundary that may be set; those that stay split the list.
 
     What the audio and the list dispute falls on the stretch that disputes it, or on
     the whole list when most of it disagrees, since then no length that happens to fit
@@ -858,13 +865,14 @@ def place(tape: Tape, music: Music) -> Tape:
     cursor = music.start
     index = 0
     while index < len(out):
-        if out[index].set_by == EAR:
-            out[index] = _ear_song(out[index])
+        if _stays_put(out[index]):
+            if out[index].set_by == EAR:
+                out[index] = _ear_song(out[index])
             cursor = out[index].end or cursor
             index += 1
             continue
         stop = index
-        while stop < len(out) and out[stop].set_by != EAR:
+        while stop < len(out) and not _stays_put(out[stop]):
             stop += 1
         after = out[stop].start if stop < len(out) else None
         limit = music.end if after is None else after
@@ -903,14 +911,14 @@ def place(tape: Tape, music: Music) -> Tape:
 
 
 def place_refusal(tape: Tape) -> str:
-    """Why boundaries may not be found again, naming every song, or nothing. Finding
-    them lays every song not set by ear, a song in the library among them."""
-    held = [s for s in tape.songs if edges_held(s)]
-    if not held:
+    """Why boundaries may not be found, or nothing. Only a tape with every song in the
+    library or maybe there has nothing left to place: otherwise the rest are laid around
+    whatever stays, which is the way back for a song whose copy has gone."""
+    if not tape.songs or not all(edges_held(s) for s in tape.songs):
         return ""
     return (
-        f"{', '.join(label(s) for s in held)}: in the library, or may be, and finding "
-        "boundaries again would move them - nothing was changed"
+        "every song on this tape is in the library, or may be, so there is nothing to "
+        "place - nothing was changed"
     )
 
 

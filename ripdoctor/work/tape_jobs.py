@@ -428,10 +428,7 @@ class _Filing:
                 song, self.sited(by_id), self.sited(by_name), self.taken(song)
             )
             if F.found_owned(song) and said.action != F.ALREADY:
-                self.tape = F.copy_gone(self.tape, song)
-                T.save(self.layout, self.tape)
-                self.unanswered.discard(song.number)
-                self.job.finished += 1
+                self.lost_copy(song)
             elif said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY and song.import_begun:
@@ -445,6 +442,22 @@ class _Filing:
                     unconfirmed=said.unconfirmed,
                 )
         return waiting
+
+    def lost_copy(self, song: TP.Song) -> None:
+        """A copy a lookup found and File did not. A library off its mount has lost
+        all of them and nothing has really gone, so nobody chooses albums again."""
+        if not _reachable(self.library):
+            self.tell(
+                song,
+                F.FAILED,
+                note=f"the library at {self.library} has nothing in it, so it may be "
+                "off its mount and this was not filed - put that right and file again",
+            )
+            return
+        self.tape = F.copy_gone(self.tape, song)
+        T.save(self.layout, self.tape)
+        self.unanswered.discard(song.number)
+        self.job.finished += 1
 
     def read_back(self, run: F.Run, song: TP.Song) -> tuple[F.Row, ...]:
         recording = F.recording_of(song)
@@ -641,6 +654,13 @@ class _Filing:
                     self.tell(track.song, F.UNKNOWN, note=_unconfirmed(e))
                 elif number in self.unanswered:
                     self.tell(track.song, F.FAILED, note=str(e))
+
+
+def _reachable(library: str) -> bool:
+    try:
+        return any(Path(library).iterdir())
+    except OSError:  # not there at all, or not to be read: neither holds a song
+        return False
 
 
 def _unconfirmed(why: Exception) -> str:

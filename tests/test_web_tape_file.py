@@ -335,7 +335,7 @@ def a_job() -> Job:
 # ----------------------------------------------------------------- finding them again
 
 
-def test_find_again_on_a_filed_song_used_to_move_it_and_is_refused(
+def test_find_again_with_every_song_filed_has_nothing_to_place_and_is_refused(
     service: Service,
 ) -> None:
     app = build(service)
@@ -344,9 +344,8 @@ def test_find_again_on_a_filed_song_used_to_move_it_and_is_refused(
     before = [(s.start, s.end) for s in songs(service, tape)]
     said = post(app, f"/api/tapes/{tape}/process", service)
     assert said.status == 409
-    assert "song 1 (One)" in said.json()["error"]
-    assert "would move them" in said.json()["error"]
-    with pytest.raises(ValueError, match="would move them"):
+    assert "nothing to place" in said.json()["error"]
+    with pytest.raises(ValueError, match="nothing to place"):
         TJ.find_boundaries(service.runner, service.layout, tape, a_job())
     assert [(s.start, s.end) for s in songs(service, tape)] == before
     assert get(app, f"/api/tapes/{tape}", service).json()["place_refusal"]
@@ -364,8 +363,27 @@ def test_a_tape_with_a_held_song_and_a_lost_boundary_stops_asking_to_prepare(
     assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is False
     assert post(app, f"/api/tapes/{tape}/prepare", service).status == 202
     job = job_of(app, tape, service)
-    assert "would move them" in job["error"]
-    assert "would move them" in job["result"]["boundaries"]
+    assert "nothing to place" in job["error"]
+    assert "nothing to place" in job["result"]["boundaries"]
+
+
+def test_find_again_used_to_refuse_a_tape_with_one_song_filed_and_one_to_place(
+    service: Service,
+) -> None:
+    """Which was the only way to get boundaries for a song whose copy has gone."""
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    filed, other = current.songs
+    moved = replace(filed, start=(filed.start or 0.0) + 1.0)
+    lost = replace(other, filing=F.PENDING, path="", start=None, end=None)
+    T.save(service.layout, replace(current, songs=(moved, lost)))
+    assert post(app, f"/api/tapes/{tape}/process", service).status == 202
+    assert not job_of(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    assert (one.start, one.end) == (moved.start, moved.end), "the filed song stays"
+    assert two.start is not None and two.start >= (one.end or 0.0)
 
 
 # ---------------------------------------------------------------- one run an album

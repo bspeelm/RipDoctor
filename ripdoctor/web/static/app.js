@@ -2751,6 +2751,7 @@ async function sendTape(file) {
     }
     status("");
     tapePicked = null;
+    tpStopped.delete(id);
     stepIdle();
     await openTape(id);
   } catch (e) {
