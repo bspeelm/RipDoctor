@@ -671,3 +671,9 @@ def test_a_line_of_options_sends_the_recording_it_shows() -> None:
     assert "{ recording: o.recording }" in line
     assert "chooseRelease(song, o.release, o, mine)" in line
     assert "{ recording: c.recording }" in js
+
+
+def test_a_note_choice_said_twice_still_sends_its_recording() -> None:
+    """The second sending named the release alone, which takes the first recording."""
+    js = (STATIC / "app.js").read_text()
+    assert "{ release: asked.release, recording: asked.recording, ...extra" in js

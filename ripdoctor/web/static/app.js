@@ -1969,7 +1969,7 @@ function editionNoteView(song, note) {
     box.append(askView(state.ask.said, "Use it", () => {
       state.ask = null;
       settleSong((extra) => postJSON(`/api/tapes/${tape.id}/songs/${song.number}/release`,
-        { release: asked.release, ...extra, confirm: true }));
+        { release: asked.release, recording: asked.recording, ...extra, confirm: true }));
     }, () => { state.ask = null; showSongs(tape); }));
   }
   return box;
