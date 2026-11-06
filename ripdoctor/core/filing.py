@@ -435,6 +435,7 @@ def edition_note(song: Song) -> dict[str, Any] | None:
                 f"Your {held.tracks} songs don't change."
             ),
             "release": album.release,
+            "recording": album.recording,
             "current": choice.release == album.release,
         }
     ]
@@ -447,6 +448,7 @@ def edition_note(song: Song) -> dict[str, Any] | None:
                     f"{single.album_artist} / {single.release_title}."
                 ),
                 "release": single.release,
+                "recording": single.recording,
                 "current": choice.release == single.release,
             }
         )

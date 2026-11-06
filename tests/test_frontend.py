@@ -663,3 +663,11 @@ def test_the_playlist_step_claims_the_file_and_not_the_music_server() -> None:
     assert "imports it within about a minute" in step
     assert "may need to make imported playlists public" in step
     assert '"Written"' not in step and "visible" not in step
+
+
+def test_a_line_of_options_sends_the_recording_it_shows() -> None:
+    js = (STATIC / "app.js").read_text()
+    line = re.search(r"function optionLine\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "{ recording: o.recording }" in line
+    assert "chooseRelease(song, o.release, o, mine)" in line
+    assert "{ recording: c.recording }" in js

@@ -1804,7 +1804,9 @@ function optionLine(song, o, kind) {
   go.type = "button";
   go.disabled = kind === "on";
   go.title = kind === "on" ? "chosen" : "file this song under this album";
-  go.onclick = (e) => { e.stopPropagation(); chooseRelease(song, o.release, o); };
+  // One release can be offered with two recordings, and this line is one of them.
+  const mine = o.recording ? { recording: o.recording } : {};
+  go.onclick = (e) => { e.stopPropagation(); chooseRelease(song, o.release, o, mine); };
   const name = el("span", "tp-opt-album");
   name.append(el("span", null, o.release_title));
   const named = [song.title.toLowerCase(), o.release_title.toLowerCase()];
@@ -1818,7 +1820,7 @@ function optionLine(song, o, kind) {
     el("span", `tp-opt-off ${offClass}`.trim(), off),
     el("span", "tp-opt-lib", o.in_library ? "In your library" : ""));
   box.append(go);
-  if (state.ask?.release === o.release) {
+  if (state.ask?.release === o.release && (state.ask.more?.recording ?? "") === (o.recording ?? "")) {
     box.append(askView(state.ask.said, "Use it", () => {
       const { more } = state.ask;
       state.ask = null;
@@ -1956,7 +1958,8 @@ function editionNoteView(song, note) {
     b.append(el("b", null, c.label), el("span", null, c.said));
     b.onclick = (e) => {
       e.stopPropagation();
-      chooseRelease(song, c.release, options.find((o) => o.release === c.release));
+      chooseRelease(song, c.release, options.find((o) => o.release === c.release && o.recording === c.recording),
+        c.recording ? { recording: c.recording } : {});
     };
     choices.append(b);
   }

@@ -263,6 +263,61 @@ def test_a_choice_carries_its_track_so_no_id_or_number_is_typed(
     assert catalogue.calls == []
 
 
+def two_recordings_on_one_release(service: Service, tape: str) -> None:
+    choice = M.Choice(
+        "r",
+        "g",
+        "A Record",
+        "A Band",
+        "1990",
+        "Official",
+        track_title="A Song",
+        number=1,
+        disc=1,
+        length=200.0,
+        recording="the-one",
+    )
+    other = replace(
+        choice, track_title="A Song (Remix)", number=2, recording="the-other"
+    )
+    current = T.read(service.layout, tape)
+    made = M.Proposal(M.REVIEW, "a doubt", None, (choice, other))
+    T.save(service.layout, TP.with_proposals(current, {1: made}))
+
+
+def test_an_option_chooses_its_own_recording_and_not_the_first_on_its_release(
+    service: Service,
+) -> None:
+    """The page sent the release alone, so pressing one line took another recording."""
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    two_recordings_on_one_release(service, tape)
+    said = picked(app, service, tape, release="r", recording="the-other")
+    assert said.status == 200
+    assert proposal(said.json())["choice"]["recording"] == "the-other"
+    assert proposal(said.json())["choice"]["number"] == 2
+
+
+def test_an_option_no_longer_offered_is_refused_and_settles_nothing(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    two_recordings_on_one_release(service, tape)
+    refused = picked(app, service, tape, release="r", recording="gone")
+    assert refused.status == 409
+    assert "no longer offers" in refused.json()["error"]
+    assert T.read(service.layout, tape).songs[0].settled_by == ""
+
+
+def test_an_id_given_with_no_recording_keeps_its_path(service: Service) -> None:
+    app = build(service)
+    tape = a_tape(app, service, row("A Song"))
+    two_recordings_on_one_release(service, tape)
+    said = picked(app, service, tape, release="r")
+    assert proposal(said.json())["choice"]["recording"] == "the-one"
+
+
 def searched(app, service: Service, tape: str, **body: object):  # type: ignore[no-untyped-def]
     return post(app, f"/api/tapes/{tape}/songs/1/search", service, body)
 

@@ -428,16 +428,27 @@ def add(app: App, service: Service) -> None:
     @settled
     def release(r: H.Request, tape: TP.Tape) -> H.Response:
         """One of the candidates needs no request and no track, since it carries its
-        own; anything else is looked up."""
+        own, and an option names its recording, because one release can be offered with
+        two. An id pasted by hand is looked up, or taken as the candidate it is."""
         song = choosable(tape, r)
         body = r.json()
         given = str(body.get("release", "")).strip()
+        recording = str(body.get("recording") or "")
         confirmed = body.get("confirm") is True
         position = _position(body)
         offered = song.proposal.candidates if song.proposal else ()
         for candidate in offered:
-            if candidate.release == given and candidate.number and position is None:
+            if (
+                candidate.release == given
+                and candidate.number
+                and position is None
+                and recording in ("", candidate.recording)
+            ):
                 return chosen(tape, song, candidate, confirmed)
+        if recording:
+            raise H.HttpError(
+                409, f"{TP.label(song)} no longer offers that option - look again"
+            )
         try:
             found = MB.release_by_id(
                 MB.Paced(service.fetcher, service.pace),
