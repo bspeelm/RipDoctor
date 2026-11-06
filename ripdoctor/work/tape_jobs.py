@@ -9,7 +9,7 @@ from typing import Any
 
 from ripdoctor.audio import ffprobe, split
 from ripdoctor.audio import ingest as G
-from ripdoctor.audio.runner import Runner
+from ripdoctor.audio.runner import Runner, ToolFailed, ToolMissing
 from ripdoctor.core import filing as F
 from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
@@ -281,6 +281,31 @@ def cut(
     return {"cut": made, "kept": kept, "skipped": job.skipped}
 
 
+def lacks_cover(runner: Runner, beets: Beets, library: str, path: str) -> bool:
+    """Only when both were asked and both said none. A library that cannot answer
+    leaves this unsaid, because the art may well be there."""
+    try:
+        if not Path(path).is_file() or TG.has_art(runner, path):
+            return False
+        return not beets.art_of(runner, library, path)
+    except (ImportFailed, ToolMissing, ToolFailed, OSError):
+        return False
+
+
+def covers_known(
+    runner: Runner, beets: Beets, layout: Layout, tape: str, library: str
+) -> None:
+    """Asked again of each song this tape filed, so one filed before this was asked
+    is told too, and one given a cover some other way stops being."""
+    current = T.read(layout, tape)
+    missing = {
+        s.number
+        for s in current.songs
+        if s.filing == F.FILED and lacks_cover(runner, beets, library, s.path)
+    }
+    T.save(layout, F.with_cover_known(current, missing))
+
+
 @dataclass
 class _Filing:
     """One job's filing. Every outcome is saved as it is known, so a restart at any
@@ -413,6 +438,18 @@ class _Filing:
         except OSError as e:  # said on the song, whose outcome stands
             said.append(f"its modes could not be set: {e}")
         self.tell(song, state, path, "; ".join(n for n in said if n))
+        self.covers(song, path)
+
+    def covers(self, song: TP.Song, path: str) -> None:
+        if lacks_cover(self.runner, self.beets, self.library, path):
+            self.tape = replace(
+                self.tape,
+                songs=tuple(
+                    replace(s, no_cover=True) if s.number == song.number else s
+                    for s in self.tape.songs
+                ),
+            )
+            T.save(self.layout, self.tape)
 
     def repaired(self, song: TP.Song, path: str) -> list[str]:
         """What an import can leave out of a file it filed. Any failure, a timed-out

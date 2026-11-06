@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,689, and
-at 3,989 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,814, and
+at 4,114 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2412,6 +2412,15 @@ The document says which songs were handed to beets, so one found in the library 
 a restart is finished the same way. A song the tape merely found already owned is left
 as it was found, modes and all: that album is not this tape's to change.
 
+**A filed album with no cover says so.** beets files a release the art archive has nothing
+for with no art and no complaint. So a song this tape filed is asked about, its file and its
+album row both, and only two answers of none are called no cover: a library that cannot
+answer is not told it has none. One upload goes through the record flow's own install, then
+sets the album row's art, so a later song joining it gets the art too. It takes the album
+row's files and not the folder's, because a folder can hold another edition whose tracks a
+person was promised would not change. The check runs again on a playlist rebuild, for a
+song filed before it was asked.
+
 **A result is recorded as it arrives,** so a retry picks up only what is unfinished. A
 read-back that cannot answer records `unknown`. The mark that a song went to beets
 stays until the library really answers, and while it is set a retry reads back before
@@ -2441,6 +2450,10 @@ each copy that is still the same song through the pre-check rather than importin
 of library management. On the one music server tested it imported in about 10 s, kept
 its order and non-ASCII paths, and followed edits. Deleting the file left the host's
 playlist behind, so removing a file does not remove a playlist.
+
+**Written is all the page can say.** The file reaching a music server is that server's
+doing: it imports within about a minute on the one tested, and imported playlists may need an
+admin there to make them public. So the step says the file is written and names it.
 
 **What is known about it** sits in `playlist.json` beside the tape's document, since a
 rebuild touches it long after the tape's own work. Its filename is a slug of the name

@@ -10,6 +10,7 @@ from ripdoctor.core import filing as TF
 from ripdoctor.core import match as TM
 from ripdoctor.core import playlist as PL
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import artwork as ART
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.store import incoming as IN
@@ -18,6 +19,7 @@ from ripdoctor.store import tapes as T
 from ripdoctor.store.safety import contains
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
+from ripdoctor.web.routes import art as RA
 from ripdoctor.web.routes.records import slug_of
 from ripdoctor.web.service import Service
 from ripdoctor.work import tape_finish as TX
@@ -498,6 +500,44 @@ def add(app: App, service: Service) -> None:
             )
         return kept(TF.person_owns(tape, song.number))
 
+    @app.route("POST", r"/api/tapes/([^/]+)/songs/(\d+)/cover")
+    @settled
+    def cover(r: H.Request, tape: TP.Tape) -> H.Response:
+        """The body is the image. It goes through the record flow's own install, for
+        this song's album row, so one upload answers for all of that album's songs."""
+        song = song_of(tape, r)
+        if song.filing not in TF.FINISHED or not song.path:
+            raise H.HttpError(409, f"{TP.label(song)} is not filed yet")
+        if not r.body:
+            raise H.HttpError(400, "no image was sent")
+        importer = beets_for("a filed song's cover is set through beets")
+        library = service.settings.library
+        try:
+            album, files = importer.album_files(service.runner, library, song.path)
+            already = importer.art_of(service.runner, library, song.path)
+        except IMP.ImportFailed as e:
+            raise H.HttpError(503, str(e)) from e
+        if already:
+            return H.ok(
+                {**view_saved(TF.cover_given(tape, files)), "cover": {"already": True}}
+            )
+        folder = Path(song.path).parent
+        mine = set(files)
+        shared = any(
+            p.suffix.lower() == ".flac" and str(p) not in mine for p in folder.iterdir()
+        )
+        name = f"cover-{album}.jpg" if shared else ART.COVER
+        done = RA.installed(service, folder, r.body, only=files, cover_name=name)
+        if not done.embedded:
+            raise H.HttpError(502, f"the cover did not embed: {'; '.join(done.failed)}")
+        why = importer.set_art(service.runner, album, str(done.cover))
+        said = {**done.as_dict(), "note": why}
+        return H.ok({**view_saved(TF.cover_given(tape, files)), "cover": said})
+
+    def view_saved(changed: TP.Tape) -> dict[str, Any]:
+        T.save(layout, changed)
+        return view(changed)
+
     def served(where: Path | None, what: str) -> H.Response:
         if where is None or not where.is_file():
             raise H.HttpError(404, f"{what} has not been built")
@@ -607,6 +647,9 @@ def add(app: App, service: Service) -> None:
         def work(job: Job) -> dict[str, Any]:
             job.step(tape.name, "asking the library about every song")
             state = TX.rebuild(_place(service), importer, tape.id, service.now())
+            job.step(tape.name, "asking which albums have a cover")
+            library = service.settings.library
+            TJ.covers_known(service.runner, importer, layout, tape.id, library)
             return state.to_dict()
 
         return started(tape.id, "playlist", work)

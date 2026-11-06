@@ -644,3 +644,22 @@ def test_a_tape_shown_after_an_archived_one_gets_its_controls_back() -> None:
     shown = re.search(r"function showTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     on = shown.index('querySelectorAll("input, button")) c.disabled = false')
     assert on < shown.index("showRail(t);") < shown.index("archivedControls()")
+
+
+def test_a_filed_song_with_no_cover_offers_the_one_action() -> None:
+    js = (STATIC / "app.js").read_text()
+    filed = re.search(r"function filedBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (o.no_cover) box.append(noCoverView(song))" in filed
+    body = re.search(r"function noCoverView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"No cover found."' in body and '"Upload an image"' in body
+    upload = re.search(r"async function uploadCover\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "/songs/${number}/cover`" in upload
+
+
+def test_the_playlist_step_claims_the_file_and_not_the_music_server() -> None:
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"File written"' in step and "p.path.split" in step
+    assert "imports it within about a minute" in step
+    assert "may need to make imported playlists public" in step
+    assert '"Written"' not in step and "visible" not in step

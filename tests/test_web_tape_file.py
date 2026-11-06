@@ -18,11 +18,12 @@ from ripdoctor.core import match as M
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.store import tapes as T
+from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.service import Service
 from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Job
-from tests.test_web_routes import a_service, get, post
+from tests.test_web_routes import a_service, get, post, signed_in
 from tests.test_web_tape_cut import (
     TWO,
     Cutting,
@@ -101,7 +102,15 @@ class Beet:
     def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
         args = tuple(str(a) for a in argv)
         answer = self.inner.run(argv, stdin=stdin, timeout=timeout)
+        if args[0] == "ffprobe" and stdin is not None:
+            image = b'{"streams": [{"width": 1000, "height": 1000}]}'
+            return Result(args, 0, image, b"")
+        if args[0] == "ffmpeg" and args[-1].endswith(".jpg"):
+            Path(args[-1]).write_bytes(b"\xff\xd8\xff" + b"\x00" * 4000)
+            return Result(args, 0, b"", b"")
         if args[0] == "metaflac":
+            if any(a.startswith("--import-picture-from=") for a in args):
+                self.pictured.add(args[-1])
             if "--list" in args and args[-1] in self.pictured:
                 return Result(args, 0, b"METADATA block #2\n", b"")
             if "--show-tag=REPLAYGAIN_TRACK_GAIN" in args and args[-1] in self.gained:
@@ -116,6 +125,19 @@ class Beet:
             return Result(args, 0, f"plugins: {self.loaded}\n".encode(), b"")
         if "$artpath" in args:
             return Result(args, 0, f"{self.art or 'None'}\n".encode(), b"")
+        if "$album_id" in args:
+            row = next(r for r in self.rows if f"path:{r['path']}" == args[-1])
+            return Result(args, 0, f"{self.album_ids(row)}\n".encode(), b"")
+        if args[-1].startswith("album_id:"):
+            same = [
+                r["path"]
+                for r in self.rows
+                if self.album_ids(r) == int(args[-1].removeprefix("album_id:"))
+            ]
+            return Result(args, 0, "\n".join(same).encode(), b"")
+        if "modify" in args:
+            self.art = args[-1].removeprefix("artpath=")
+            return Result(args, 0, b"", b"")
         if "embedart" in args:
             return self._embed(args)
         if "replaygain" in args:
@@ -127,6 +149,10 @@ class Beet:
         if "remove" in args:
             return self._remove(args)
         return answer
+
+    def album_ids(self, row: dict[str, str]) -> int:
+        names = list(dict.fromkeys(r["album"] for r in self.rows))
+        return names.index(row["album"]) + 1
 
     def _row(self, copy: Path, where: Path, key: str) -> dict[str, str]:
         told = self.tags[str(copy)]
@@ -1958,3 +1984,136 @@ def test_the_advice_on_a_filed_song_s_boundary_can_be_followed_to_a_new_cut_of_i
     one = songs(service, again)[0]
     assert one.filing == F.ALREADY, "the copy nobody removed is not filed twice"
     assert len(beet.imports) == imports + 1
+
+
+# ------------------------------------------------------------------- a missing cover
+
+
+def test_a_filed_song_with_no_cover_says_so_and_one_with_a_cover_does_not(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    said = get(app, f"/api/tapes/{tape}", service).json()["filing"]
+    assert all(o["no_cover"] for o in said)
+
+    other = build(service)
+    beet_of(service).rows.clear()
+    beet_of(service).art = "/lib/rel-1/cover.jpg"
+    tape = pinned(other, service, one="rel-1", two="rel-1")
+    assert not file_it(other, tape, service)["error"]
+    assert not any(s.no_cover for s in songs(service, tape))
+
+
+def test_a_library_that_cannot_say_is_not_told_there_is_no_cover(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    original = beet_of(service).run
+
+    def locked(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if "$artpath" in argv:
+            return Result(tuple(argv), 1, b"", b"database is locked\n")
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    beet_of(service).run = locked  # type: ignore[method-assign]
+    assert not file_it(app, tape, service)["error"]
+    assert not any(s.no_cover for s in songs(service, tape))
+
+
+def covered(service: Service, tape: str, number: int = 1, body: bytes = b"an image"):  # type: ignore[no-untyped-def]
+    app = build(service)
+    url = f"/api/tapes/{tape}/songs/{number}/cover"
+    return post_raw(app, url, service, body)
+
+
+def post_raw(app, url: str, service: Service, body: bytes):  # type: ignore[no-untyped-def]
+    return app.dispatch(
+        H.Request.of("POST", url, headers=signed_in(service), body=body)
+    )
+
+
+def test_one_upload_embeds_and_sets_the_album_s_art_for_all_its_songs(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    one, two = songs(service, tape)
+    answer = covered(service, tape)
+    assert answer.status == 200, answer.text
+    assert answer.json()["cover"]["embedded"] == 2
+    folder = Path(one.path).parent
+    assert (folder / "cover.jpg").is_file()
+    assert {one.path, two.path} <= beet_of(service).pictured
+    assert beet_of(service).art == str(folder / "cover.jpg")
+    asked = next(c for c in beet_of(service).calls if "modify" in c)
+    assert "-M" in asked and "-W" in asked and "-a" in asked
+    assert not any(s.no_cover for s in songs(service, tape))
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == service.settings.file_mode
+
+
+def test_a_cover_for_a_shared_folder_leaves_the_other_album_alone(
+    service: Service,
+) -> None:
+    """A song added beside an album held was promised those tracks do not change."""
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-2")
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    folder = Path(one.path).parent
+    neighbour = folder / "99 Neighbour.flac"
+    neighbour.write_bytes(b"theirs")
+    existing = folder / "cover.jpg"
+    existing.write_bytes(b"their cover")
+    answer = covered(service, tape)
+    assert answer.status == 200, answer.text
+    assert str(neighbour) not in beet_of(service).pictured
+    assert existing.read_bytes() == b"their cover"
+    assert beet_of(service).art.startswith(str(folder / "cover-"))
+
+
+def test_an_image_that_is_not_one_is_refused_and_the_song_still_says_no_cover(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    original = beet_of(service).run
+
+    def no_image(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if argv[0] == "ffprobe":
+            return Result(tuple(argv), 1, b"", b"")
+        return original(argv, stdin=stdin, timeout=timeout)
+
+    beet_of(service).run = no_image  # type: ignore[method-assign]
+    assert covered(service, tape).status == 400
+    assert all(s.no_cover for s in songs(service, tape))
+    assert not beet_of(service).art
+
+
+def test_a_song_not_filed_cannot_take_a_cover(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert covered(service, tape).status == 409
+
+
+def test_writing_the_playlist_again_tells_a_song_filed_before_covers_were_asked_about(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    saved = T.read(service.layout, tape)
+    T.save(service.layout, F.with_cover_known(saved, ()))
+    assert not any(s.no_cover for s in songs(service, tape))
+    assert post(app, f"/api/tapes/{tape}/playlist", service).status == 202
+    assert all(s.no_cover for s in songs(service, tape))
+
+
+def test_an_old_document_with_no_word_on_covers_loads() -> None:
+    song = TP.Song(number=1, title="A", artist="B", album="C", length=1.0).to_dict()
+    del song["no_cover"]
+    assert TP.Song.from_dict(song).no_cover is False

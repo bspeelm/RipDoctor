@@ -1325,6 +1325,8 @@ function archivedControls() {
     $(id).disabled = true;
   for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
   for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = !tpEd.side;
+  // The album it was filed under is not the tape, and can still take a cover.
+  for (const c of $("#tapepane").querySelectorAll("[data-cover]")) c.disabled = false;
 }
 
 // What a new tape still needs, said where the waveform will be.
@@ -1377,7 +1379,7 @@ function stepRecording(t) {
   const partial = !!t.upload && t.upload.have < t.upload.total;
   const failed = !!tapePicked && !tapeWatching && partial;
   const here = t.audio || (t.upload && !partial);
-  tpAction("#tp-file-pick", !here, !partial, false);
+  tpAction("#tp-file-pick", !here && !t.playlist.done, !partial, false);
   $("#tp-file-pick").textContent = partial ? "Choose the same file…" : "Choose a file…";
   tpAction("#tp-go", failed, true);
   tpAction("#tp-cancel", !!t.upload);
@@ -1472,7 +1474,11 @@ function stepFile(t) {
   const refused = !!t.file_refusal;
   tpAction("#tp-file-songs", !t.playlist.done && !t.all_filed, !refused, refused);
   $("#tp-file-songs").textContent = failed.length ? "File again" : "File";
-  if (t.all_filed) return tpStep("file", "done", "Filed", "Every song is in the library.");
+  const coverless = t.filing.filter((o) => o.no_cover).map((o) => o.number).sort((a, b) => a - b);
+  if (t.all_filed) {
+    return tpStep("file", "done", "Filed", `Every song is in the library.${coverless.length
+      ? ` ${songsNamed(coverless)} found no cover.` : ""}`);
+  }
   if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
   const albums = t.songs.filter((s) => !s.skip && !s.settled_by).length;
   if (albums) return tpStep("file", "wait", "Waiting", `Waiting on ${t.all_cut ? "" : "the cut and "}${counted(albums, "album to choose", "albums to choose")}.`);
@@ -1499,9 +1505,14 @@ function stepPlaylist(t) {
     ...p.left_out.map((g) => `Song ${g.number} (${named(g.number)}): ${g.why}`),
   ].filter(Boolean).join("\n");
   if (!p.outcome) return tpStep("playlist", started ? "ready" : "wait", started ? "Ready" : "Waiting", started ? "No playlist written yet." : "Waiting on File.", why);
-  if (p.left_out.length || p.outcome === "failed" || p.outcome === "unknown")
-    return tpStep("playlist", "todo", `${p.songs} of ${t.songs.length}`, `${counted(p.left_out.length, "song", "songs")} left out.`, why);
-  return tpStep("playlist", "done", "Written", `${counted(p.songs, "song", "songs")} in order.`, why);
+  if (p.outcome !== "written" && p.outcome !== "unchanged")
+    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`, why);
+  // The file is all this knows about: whether the server shows it is the server's to say.
+  const server = "The music server imports it within about a minute, and an admin there may need to make imported playlists public.";
+  const name = p.path.split("/").pop();
+  if (p.left_out.length)
+    return tpStep("playlist", "todo", "File written", `${name}, ${p.songs} of ${t.songs.length} songs. ${counted(p.left_out.length, "song", "songs")} left out. ${server}`, why);
+  return tpStep("playlist", "done", "File written", `${name}. ${server}`, why);
 }
 
 function stepArchive(t) {
@@ -1569,7 +1580,7 @@ function boundaryWord(song, row) {
 function releaseWord(song, rel) {
   if (song.skip) return ["—", "mute"];
   if (song.import_begun || song.filing === "unknown") return ["Not confirmed", "warn"];
-  if (song.filing === "filed") return ["Filed", "good"];
+  if (song.filing === "filed") return ["Filed", "good", song.no_cover ? "warn" : null];
   if (song.filing === "already") return ["In your library", "good"];
   if (song.filing === "failed") return ["Filing failed", "bad"];
   if (song.proposal?.status === "owned") return ["In your library", "good"];
@@ -2017,6 +2028,34 @@ function useCopyButton(o) {
   }, "tiny");
 }
 
+let tpCoverFor = null;                // the song an image being chosen is for
+
+function noCoverView(song) {
+  const upload = smallButton("Upload an image", "embedded in the album's songs, and set as its art", () => {
+    tpCoverFor = song.number;
+    $("#tp-cover-file").click();
+  });
+  upload.dataset.cover = "";
+  return noteBox("No cover found.", upload);
+}
+
+async function uploadCover(number, file) {
+  $("#tp-err").textContent = "";
+  waveSay(`Sending ${file.name}…`);
+  try {
+    const after = await pushChunk(`/api/tapes/${tape.id}/songs/${number}/cover`, file);
+    showTape(after);
+    const c = after.cover;
+    waveSay(c.already ? "That album has a cover now, so this image was not used."
+      : [`Cover set: ${c.size}, in ${c.embedded} of ${c.tracks} of the album's songs.`,
+         c.failed?.length ? `Not embedded: ${c.failed.join("; ")}.` : "",
+         c.note ? `beets did not record it as the album's art: ${c.note}.` : ""].filter(Boolean).join(" "));
+  } catch (e) {
+    waveSay("");
+    $("#tp-err").textContent = e.message;
+  }
+}
+
 const FILED_WORDS = {
   filed: "Filed at", already: "In your library at", failed: "Filing failed", unknown: "Not confirmed",
 };
@@ -2029,6 +2068,7 @@ function filedBlock(song, t) {
   const where = o.unconfirmed ? "" : o.path;
   box.append(el("p", looks ? "tp-warn" : "tp-owned", `${FILED_WORDS[o.state] ?? o.state}${where ? ` ${where}` : ""}`));
   if (o.note) box.append(el("p", looks ? "tp-warn" : "dim", o.note));
+  if (o.no_cover) box.append(noCoverView(song));
   return box;
 }
 
@@ -3768,6 +3808,11 @@ function wire() {
   const pickFile = () => $("#tp-file").click();
   $("#tp-file-pick").onclick = pickFile;
   $("#tp-start-file").onclick = pickFile;
+  $("#tp-cover-file").onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (file && tpCoverFor != null) uploadCover(tpCoverFor, file);
+  };
   $("#tp-file").onchange = (e) => {
     tapePicked = e.target.files[0] || null;
     e.target.value = "";

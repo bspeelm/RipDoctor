@@ -595,6 +595,27 @@ def recorded(
     return replace(tape, songs=tuple(told(s) for s in tape.songs))
 
 
+def with_cover_known(tape: Tape, missing: Collection[int]) -> Tape:
+    """Which of its filed songs were looked at and found to have no cover."""
+    return replace(
+        tape,
+        songs=tuple(
+            replace(s, no_cover=s.number in missing) if s.filing == FILED else s
+            for s in tape.songs
+        ),
+    )
+
+
+def cover_given(tape: Tape, files: Collection[str]) -> Tape:
+    """One cover answers for every song of this tape on that album."""
+    return replace(
+        tape,
+        songs=tuple(
+            replace(s, no_cover=False) if s.path in files else s for s in tape.songs
+        ),
+    )
+
+
 def person_owns(tape: Tape, number: int) -> Tape:
     """A person heard the row the pre-check could not vouch for, and says it is this
     song. A finished song is never run again, so no later job can move this."""
@@ -689,6 +710,7 @@ def outcomes(tape: Tape) -> list[dict[str, Any]]:
             "note": s.filing_note,
             "unconfirmed": s.unconfirmed,
             "settled_by": s.settled_by,
+            "no_cover": s.no_cover,
         }
         for s in ordered
     ]

@@ -601,6 +601,34 @@ class Beets:
         said = _plain(result.text).strip()
         return "" if said in ("", "None") else str(_rooted(root, said))
 
+    def album_files(
+        self, runner: Runner, root: str, path: str
+    ) -> tuple[str, tuple[str, ...]]:
+        """The album row this file is on, and every file on it."""
+        result = runner.run(
+            self._argv(["ls", "-f", "$album_id", _one_file(path)]), timeout=300
+        )
+        album = _plain(result.text).strip()
+        if not result.ok or not album.isdigit():
+            raise ImportFailed(f"beets has no album for {path}")
+        rows = runner.run(
+            self._argv(["ls", "-f", "$path", f"album_id:{album}"]), timeout=300
+        )
+        if not rows.ok:
+            why = TapeRun(rows.returncode, rows.err).why()
+            raise ImportFailed(f"beets could not list that album: {why}")
+        files = [line for line in _plain(rows.text).split("\n") if line.strip()]
+        return album, tuple(str(_rooted(root, line)) for line in files)
+
+    def set_art(self, runner: Runner, album: str, art: str) -> str:
+        """The album row's own art, so a song joining it later is given the same.
+        Nothing is moved or rewritten by this, which is what `-M -W` say."""
+        return self._complaint(
+            runner,
+            ["modify", "-a", "-y", "-M", "-W", f"id:{album}", f"artpath={art}"],
+            120,
+        )
+
     def embed_art(self, runner: Runner, path: str, art: str) -> str:
         """Into this one file: `-f` takes items, where the form without it rewrites
         every track of a whole album."""

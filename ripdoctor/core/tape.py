@@ -124,6 +124,7 @@ class Song:
     import_begun: bool = False
     owes_ear: bool = False
     unconfirmed: str = ""
+    no_cover: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -136,6 +136,12 @@ one line per option, and a choice more than 3 s from the list asks first, in tha
 (`test_an_option_is_one_line_of_columns_with_no_edition_jargon`,
 `test_a_release_far_from_the_list_is_asked_about_and_sent_again`).
 
+A filed song with no cover says so, and one uploaded image is embedded and set as its
+album's art (`test_a_filed_song_with_no_cover_says_so_and_one_with_a_cover_does_not`,
+`test_one_upload_embeds_and_sets_the_album_s_art_for_all_its_songs`). The Playlist step says
+the file is written and no more, because whether a music server shows it is that server's
+to say (`test_the_playlist_step_claims_the_file_and_not_the_music_server`).
+
 The list is a CSV with one playlist per file
 (`test_two_playlists_in_one_file_are_told_to_split`), or is built by hand on the
 tape's page, and both produce the same document
