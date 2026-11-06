@@ -548,8 +548,14 @@ def add(app: App, service: Service) -> None:
         """The body is the image. It goes through the record flow's own install, for
         this song's album row, so one upload answers for all of that album's songs."""
         song = song_of(tape, r)
-        if song.filing not in TF.FINISHED or not song.path:
-            raise H.HttpError(409, f"{TP.label(song)} is not filed yet")
+        if song.filing != TF.FILED or not song.path:
+            raise H.HttpError(
+                409,
+                f"{TP.label(song)} was not filed by this tape, so its album's cover is "
+                "not this tape's to change",
+            )
+        if not song.no_cover:
+            raise H.HttpError(409, f"{TP.label(song)} is not missing a cover")
         if not r.body:
             raise H.HttpError(400, "no image was sent")
         importer = beets_for("a filed song's cover is set through beets")
@@ -572,6 +578,13 @@ def add(app: App, service: Service) -> None:
     ) -> H.Response:
         library = service.settings.library
         album, files = importer.album_files(service.runner, library, song.path)
+        outside = [f for f in files if not contains(library, f)]
+        if outside:
+            raise H.HttpError(
+                409,
+                f"beets lists {outside[0]} on this album, outside the library at "
+                f"{library}, so no cover was set - move it in with beet move",
+            )
         already = importer.art_of(service.runner, library, song.path)
         if already:
             return H.ok(

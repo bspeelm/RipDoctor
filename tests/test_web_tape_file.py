@@ -2328,6 +2328,51 @@ def test_an_image_that_is_not_one_is_refused_and_the_song_still_says_no_cover(
     assert not beet_of(service).art
 
 
+def test_a_song_this_tape_only_found_could_take_a_cover_and_is_refused(
+    service: Service,
+) -> None:
+    """Its album is the person's own, and the tape has no business rewriting it."""
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    found = replace(current.songs[0], filing=F.ALREADY)
+    T.save(service.layout, replace(current, songs=(found, current.songs[1])))
+    answer = covered(service, tape)
+    assert answer.status == 409
+    assert "not filed by this tape" in answer.json()["error"]
+    assert not beet_of(service).art
+
+
+def test_a_song_with_a_cover_could_be_given_another_and_is_refused(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    T.save(service.layout, F.with_cover_known(T.read(service.layout, tape), ()))
+    answer = covered(service, tape)
+    assert answer.status == 409
+    assert "not missing a cover" in answer.json()["error"]
+
+
+def test_a_file_beets_lists_outside_the_library_could_be_rewritten_and_is_refused(
+    service: Service, tmp_path: Path
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, one="rel-1", two="rel-1")
+    assert not file_it(app, tape, service)["error"]
+    away = tmp_path / "elsewhere" / "other.flac"
+    away.parent.mkdir()
+    away.write_bytes(b"not the library's")
+    row = beet_of(service).rows[1]
+    row["path"] = str(away)
+    answer = covered(service, tape)
+    assert answer.status == 409
+    assert "outside the library" in answer.json()["error"]
+    assert str(away) not in beet_of(service).pictured
+
+
 def test_a_song_not_filed_cannot_take_a_cover(service: Service) -> None:
     app = build(service)
     tape = pinned(app, service)
