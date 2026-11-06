@@ -2074,8 +2074,8 @@ and the import stage that already existed.
 
 **Status:** proposed, awaiting the author's acceptance.
 
-**The argument against, first, is cost.** The ceiling moves 7700 → 11,812, and
-at 4,112 lines it is the largest move yet, for one feature. ADR-036 said the next
+**The argument against, first, is cost.** The ceiling moves 7700 → 11,832, and
+at 4,132 lines it is the largest move yet, for one feature. ADR-036 said the next
 move should be smaller and retire something, and ADR-062 repeated that while
 falling short of it. This breaks it again, by more, and retires nothing. The trim
 ADR-036 promised is still owed. Per-song filing and resume are also more moving
@@ -2361,6 +2361,11 @@ merging would rematch what is filed, numbered by its place
 among its album's songs on this tape, with no date, which a list does not carry. One
 with no album fails rather than being given one. A second album row is said on the
 song's outcome, not refused.
+
+**One import at a time.** What a pinned run answers rests on what the library held when it
+was read, so a process-wide lock is held from that read to the end of the import, shared
+with a record's imports. A held lock waits and says so; after two hours it gives up with a
+plain reason and nothing imported.
 
 **A tape's filing cannot delete filed audio.** Replace is never sent, because ADR-060 makes it
 delete the filed audio. A `duplicate_action` in a person's beets configuration answers

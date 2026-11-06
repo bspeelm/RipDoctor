@@ -20,7 +20,7 @@ from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains
-from ripdoctor.work.jobs import Job
+from ripdoctor.work.jobs import Job, one_import
 
 AUDIO, BOUNDARIES, ALBUMS = "audio", "boundaries", "albums"
 
@@ -512,21 +512,23 @@ class _Filing:
             TG.write_tags(self.runner, str(copy), _tags(run, track))
             copies[song.number] = copy
 
-        doubled, how = "", F.BESIDE
-        if run.release:
-            how = F.joining(
-                run, self.beets.album_rows(self.runner, self.library, run.album)
-            )
-            doubled = F.beside_note(run) if how == F.BESIDE else ""
-        else:
-            query = [F.term("albumartist", run.artist), F.term("album", run.album)]
-            doubled = F.second_row(run, self.rows(query))
-        self.tape = F.begun(self.tape, copies)
-        T.save(self.layout, self.tape)
         self.job.step(run.album, "importing with beets")
-        took = self.beets.file_tape_run(
-            self.runner, str(where), run.release, self.library, how=how
-        )
+        with one_import(self.job):
+            doubled, how = "", F.BESIDE
+            if run.release:
+                how = F.joining(
+                    run, self.beets.album_rows(self.runner, self.library, run.album)
+                )
+                doubled = F.beside_note(run) if how == F.BESIDE else ""
+            else:
+                query = [F.term("albumartist", run.artist), F.term("album", run.album)]
+                doubled = F.second_row(run, self.rows(query))
+            self.tape = F.begun(self.tape, copies)
+            T.save(self.layout, self.tape)
+            self.job.step(run.album, "importing with beets")
+            took = self.beets.file_tape_run(
+                self.runner, str(where), run.release, self.library, how=how
+            )
 
         cleared, unclear = set(), ""
         try:

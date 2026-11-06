@@ -30,9 +30,34 @@ from typing import Any
 # table does not grow for the life of the process.
 KEEP = 30 * 60.0
 
+# Long enough for the longest import to finish and another to follow it. A wait this
+# long is a beets that has stopped, which is worth saying rather than waiting on.
+IMPORT_WAIT = 2 * 3600.0
+_IMPORTS = threading.Lock()
+
 
 class Busy(Exception):
     """Something is already running for this record."""
+
+
+@contextmanager
+def one_import(job: Job | None = None) -> Iterator[None]:
+    """One import into the library at a time, across tapes and records alike. What an
+    import is answered with rests on what the library held when it was read, so nothing
+    else may file between the two. This waits rather than refuses: the job is already
+    off the request thread, and its turn will come."""
+    if not _IMPORTS.acquire(blocking=False):
+        if job is not None:
+            job.step(job.current, "waiting for another import to finish")
+        if not _IMPORTS.acquire(timeout=IMPORT_WAIT):
+            raise ValueError(
+                f"another import has held the library for {IMPORT_WAIT / 60:.0f} "
+                "minutes, so nothing was imported - try again once it has finished"
+            )
+    try:
+        yield
+    finally:
+        _IMPORTS.release()
 
 
 @dataclass
