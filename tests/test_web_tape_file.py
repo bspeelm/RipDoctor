@@ -745,7 +745,7 @@ def test_from_list_songs_of_one_album_go_in_one_lookup_off_run_with_full_tags(
     assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
 
 
-def test_a_from_list_album_already_there_says_it_made_a_second_row(
+def test_a_from_list_album_already_there_says_one_more_entry_and_never_counts_them(
     service: Service,
 ) -> None:
     app = build(service)
@@ -754,7 +754,9 @@ def test_a_from_list_album_already_there_says_it_made_a_second_row(
         "Another", album="A Record", albumartist="A Band", length="9:00"
     )
     assert not file_it(app, tape, service)["error"]
-    assert all("two album rows" in s.filing_note for s in songs(service, tape))
+    notes = [s.filing_note for s in songs(service, tape)]
+    assert all("one more album entry" in note for note in notes)
+    assert not any("two" in note or "second" in note for note in notes)
 
 
 def test_a_from_list_album_not_there_says_nothing_of_a_second_row(

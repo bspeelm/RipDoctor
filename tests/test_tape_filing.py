@@ -373,7 +373,7 @@ def test_a_second_album_row_is_said_when_the_album_is_there_already() -> None:
     run = F.Run("", "A Band", "A Record", ())
     assert F.second_row(run, []) == ""
     assert F.second_row(run, [a_row(album="A Record Revisited")]) == ""
-    assert "two album rows" in F.second_row(run, [a_row(album="a record")])
+    assert "one more album entry" in F.second_row(run, [a_row(album="a record")])
 
 
 # ---------------------------------------------------------------- the song's state

@@ -584,10 +584,14 @@ def recovered(
 
 
 def second_row(run: Run, rows: Sequence[Row]) -> str:
-    """A lookup-off run never joins an album, so anything already under this one
-    means two album rows."""
+    """A lookup-off run never joins an album, so anything already under this one means
+    another album row. Not counted, because these rows are tracks and there may be many
+    album rows behind them."""
     if any(fold(r.album) == fold(run.album) for r in rows):
-        return f"beets already held {run.album}, so it now has two album rows for it"
+        return (
+            f"beets already held {run.album}, so this is one more album entry for it, "
+            "and the tracks already there did not change"
+        )
     return ""
 
 
