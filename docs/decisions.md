@@ -2138,13 +2138,18 @@ to resolve and flags every song on the tape. Nothing is ever reordered silently.
 
 ### Checking by ear
 
-**Flagged** means a song's own doubt verdict, or any song on a tape whose mismatch
-stands, since a length that happens to fit proves nothing on a list that disagrees
-with its audio. The document keeps that flag against each song, and only that song's
-own acceptance, setting or skip answers it, because setting its neighbours can end the
-mismatch and says nothing about a song nobody heard. A new list clears it. That can
-ask for every song to be judged, which is heavy on a long list and is accepted: the
-gate is the point of the flow.
+**Flagged** means a song's own doubt verdict, or a song in a stretch whose audio and
+list disagree, since a length that happens to fit proves nothing there. A stretch is
+the run of songs between boundaries a person set, and on a tape nobody has touched it is
+the whole list. It disagrees when it does not fit or when more than one grouping fits as
+well. When most of the list is far from its lengths, the whole list is flagged. The
+document keeps that flag against each song, and only that song's own acceptance, setting
+or skip answers it, because setting its neighbours can end the disagreement and says
+nothing about a song nobody heard. For the same reason a doubt that a neighbour's move
+happens to lay somewhere it agrees stays owed. A new list clears it. That can ask for
+every song to be judged, which is heavy on a long list and is accepted: the gate is the
+point of the flow. A song the library holds or may hold was judged before it got there,
+and is never flagged again.
 
 **The waveform is a rip's editor,** the same `Editor` and `Player` on a canvas of the
 tape's page, with the tape's own envelope and its uncut FLAC served directly. A
@@ -2159,8 +2164,11 @@ though the file has no seek table.
 
 **What a long timeline asks of it.** At 25 s to a pixel, nearly every pixel is within
 reach of a marker, and a boundary set by a slip of the hand is never moved again. So
-past 2 s to a pixel no marker can be grabbed, and a press has to travel 3 pixels
-before it is a move. Neither applies to a record's editor, which stays as it was.
+past 2 s to a pixel no marker can be grabbed, a press has to travel 3 pixels before it
+is a move, and the marker keeps its distance from the pointer, so a wobble moves it by
+the wobble. An arrow key moves only a marker a person pressed, and leaves a key held with
+Alt, Ctrl or Meta to the browser. None of this, and neither the coarser grid nor the
+hours in it, applies to a record's editor, which stays as it was.
 
 **A person's judgement.** A boundary a person set is never moved. Moving either edge
 sets the song's two edges as theirs, and lays every song not set by ear around them
@@ -2172,13 +2180,25 @@ and a new list clears it along with the boundaries. Skip survives a new list tha
 the song, is excused from both the ear and the release, and is named wherever the tape
 is reported.
 
-**What the page refuses.** A move from the page may not pass the edge of the song
-beside it, whoever set that edge. That never strands a boundary: the edge moving away
-from its partner can go first, and a found partner follows. It may not move a song the
-library holds or may hold, whether that is the song dragged or one laid around it. The
-marker goes back and the reason is shown. The route takes a move on a filed song from
-anything that does not ask for this guard, and the rule below on a filed song then
-holds.
+**What a move may not do.** One rule, in `set_edges`, whoever asks. No edge passes the
+edge of the song beside it, whoever set that edge. That never strands a boundary: the
+edge moving away from its partner can go first, and a found partner follows. Nothing the
+library holds or may hold moves, whether that is the song moved or one laid around it,
+and that includes a song sent to beets with no answer yet. Filing again answers that one,
+because it finds the copy or imports the song. The marker goes back and the reason is
+shown.
+
+**A move says what it saw.** Moving one edge re-sends the other, so a page left open
+could put back an edge moved since. The edges route requires the two edges the sender
+last saw, refuses with a plain reason if they are not the song's, and the page then asks
+again so its markers show the truth.
+
+**The way back from a filed song.** Remove that copy with beets, then load the list
+again. A new list is refused once any boundary on the tape is a person's, and then the
+only way is to remove the tape and start it over. A failed song beside a filed one can
+keep its edge in the silence between them; if it belongs anywhere else, laying the filed
+song around it is refused, so the choices are to skip it or start over. There is no third
+way, and this record does not add one.
 
 ### Matching
 
@@ -2308,10 +2328,9 @@ a crash on any other missing path names it.
 the routes refuse another and the view disables the choice, because the library's copy
 was filed as that release and later jobs find it by that. A song not confirmed keeps
 its release too, until a read-back answers: the library may hold a copy, and another
-choice would look for another recording, find no row and import a second one. A song
-whose filing failed can still be changed. A boundary moved after a song is filed needs a recut before the
-tape can be filed again, and does not re-file that song: the library's copy stands
-until a person replaces it. Skipping a filed song takes it out of the playlist and
+choice would look for another recording, find no row and import a second one. So does a
+song sent to beets with no answer yet, which filing again answers. A song whose filing
+failed can still be changed. Skipping a filed song takes it out of the playlist and
 leaves its copy alone. A new list clears every song's filing, and filing again finds
 each copy that is still the same song through the pre-check rather than importing it.
 
