@@ -274,7 +274,8 @@ def cut(
         job.finished += 1
     if failed:
         raise ValueError(
-            f"{len(failed)} of {len(active)} songs did not cut, and the rest did - "
+            f"{len(failed)} of {len(active)} songs did not cut"
+            f"{', and the rest did' if len(failed) < len(active) else ''} - "
             f"{'; '.join(failed)}. Cut again to retry them, or skip them."
         )
     return {"cut": made, "kept": kept, "skipped": job.skipped}
@@ -640,7 +641,8 @@ def file_songs(
     failed = [TP.label(s) for s in done.songs if F.status(s) in (F.FAILED, F.UNKNOWN)]
     if failed:
         raise ValueError(
-            f"{len(failed)} of {len(active)} songs did not file, and the rest did - "
+            f"{len(failed)} of {len(active)} songs did not file"
+            f"{', and the rest did' if len(failed) < len(active) else ''} - "
             f"{', '.join(failed)}. File again to retry them, or skip them."
         )
     return {"outcomes": F.outcomes(done)}
