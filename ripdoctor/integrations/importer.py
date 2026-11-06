@@ -155,7 +155,14 @@ class Importer(Protocol):
     ) -> Outcome: ...
 
     def locate(
-        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+        self,
+        runner: Runner,
+        library: str,
+        artist: str,
+        album: str,
+        *,
+        mbid: str = "",
+        unreleased: bool = False,
     ) -> tuple[Path | None, int]: ...
 
     def filed(
@@ -210,7 +217,14 @@ class Tagger:
         return Outcome(tracks=len(moved), where=where)
 
     def locate(
-        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+        self,
+        runner: Runner,
+        library: str,
+        artist: str,
+        album: str,
+        *,
+        mbid: str = "",
+        unreleased: bool = False,
     ) -> tuple[Path | None, int]:
         return T.locate(library, artist, album)
 
@@ -892,7 +906,14 @@ class Beets:
         return self._complaint(runner, ["replaygain", "-f", _one_file(path)], 3600)
 
     def locate(
-        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
+        self,
+        runner: Runner,
+        library: str,
+        artist: str,
+        album: str,
+        *,
+        mbid: str = "",
+        unreleased: bool = False,
     ) -> tuple[Path | None, int]:
         """Ask beets where it put things, rather than guessing a path.
 
@@ -901,6 +922,8 @@ class Beets:
         configured beets differently, which is all of them.
         """
         rows = self._quietly_filed(runner, library, artist, album, mbid)
+        if unreleased:
+            rows = tuple(r for r in rows if not r.release)
         return (Path(rows[0].path).parent, len(rows)) if rows else (None, 0)
 
     def filed(

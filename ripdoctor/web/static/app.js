@@ -1333,6 +1333,9 @@ async function runImport() {
   if (!confirm(`Tag and place ${tracks} tracks as "${S.meta.artist} \u2014 `
              + `${S.meta.album}"?\n\nThey are ${how}.`
              + `\nThe files move out of review/.`)) return;
+  // The gate finds a filed record by the release the plan names, so what is filed
+  // under must be what it names, a pasted id as much as a picked one.
+  if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }
   if (S.dirty) await save();      // the importer reads the plan from disk
   $("#imp-err").textContent = "";
   $("#imp-out").textContent = "tagging and placing\u2026";

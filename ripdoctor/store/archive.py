@@ -79,10 +79,14 @@ def survey(
     # a gate that checked the path this project would have chosen would be
     # checking the wrong directory on every install that configured it.
     # By its release first: beets may keep the artist under another name than the
-    # plan's. A record filed with no release has only its names to be found by.
+    # plan's. A record filed with no release has only its names to be found by, and a
+    # row that does name a release is another edition, which proves nothing about this.
     where, count = importer.locate(runner, library, artist, album, mbid=mbid)
+    editions = 0
     if where is None and mbid:
-        where, count = importer.locate(runner, library, artist, album)
+        where, count = importer.locate(runner, library, artist, album, unreleased=True)
+        if where is None:
+            editions = importer.locate(runner, library, artist, album)[1]
     source = layout.raw / slug
     sides = []
     if source.is_dir():
@@ -94,6 +98,11 @@ def survey(
     why = ""
     if not sides:
         why = f"no sides in raw for {slug}"
+    elif editions:
+        why = (
+            f"the library has {editions} tracks called {artist} - {album}, but of "
+            "another release than this record names. Import this one, or pin that one."
+        )
     elif where is None:
         why = "the record is not in the library yet"
     elif count < expected:

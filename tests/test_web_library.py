@@ -27,6 +27,8 @@ from ripdoctor.web.service import Service
 from tests.pool import a_layout, a_runner, quiet_then_loud
 from tests.test_web_routes import a_service, get, post
 
+STATIC_JS = Path(__file__).resolve().parent.parent / "ripdoctor/web/static/app.js"
+
 
 class Catalogue:
     """Answers from a script, and records what was asked."""
@@ -853,6 +855,63 @@ def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
 
 def test_saying_nothing_never_sends_beets_own_replace(tmp_path: Path) -> None:
     assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nK\n"
+
+
+def filed_as(service: Service, tmp_path: Path, *releases: str) -> None:
+    """One row of this record's names in the library, for each release given."""
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    rows = [
+        I_SEP.join(
+            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", rel, "A Band")
+        )
+        for rel in releases
+    ]
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout="\n".join(rows).encode()
+    )
+    service.settings = replace(service.settings, importer="beets")
+
+
+def test_another_edition_of_the_same_name_does_not_open_the_archive_gate(
+    tmp_path: Path,
+) -> None:
+    """Falling back on the names counted another release's rows, so a record never
+    filed could read as in the library and have its raw side cleared."""
+    service, _library = with_library(tmp_path)
+    pinned(service, "this-one")
+    filed_as(service, tmp_path, "another-one")
+    raw = service.layout.raw / "album"
+    (raw / "side-a.flac").write_bytes(b"x")
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "another release" in body["why"]
+    assert body["library_tracks"] == 0
+    r = post(build(service), "/api/archive/album", service, {})
+    assert r.status == 409 and (raw / "side-a.flac").is_file()
+
+
+def test_a_record_filed_with_no_release_still_opens_the_gate_by_its_names(
+    tmp_path: Path,
+) -> None:
+    """From the plan, the rows carry no release even when the spec names one."""
+    service, _library = with_library(tmp_path)
+    pinned(service, "this-one")
+    filed_as(service, tmp_path, "")
+    raw = service.layout.raw / "album"
+    (raw / "side-a.flac").write_bytes(b"x")
+    assert get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_an_import_under_a_pasted_release_makes_it_the_one_the_plan_names() -> None:
+    """A pasted id reached the import and not the plan, so the gate then looked for a
+    release nothing was filed under and read another edition's rows."""
+    js = (STATIC_JS).read_text()
+    run = js[js.index("async function runImport()") :]
+    run = run[: run.index("\n}\n")]
+    assert (
+        "if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }" in run
+    )
+    assert run.index("S.meta.mbid = mbid") < run.index("if (S.dirty) await save()")
 
 
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
