@@ -2833,3 +2833,107 @@ def test_a_release_held_alone_is_merged_and_not_joined_by_hand(
     assert not file_it(app, tape, service)["error"]
     assert fed_to_import(service)[0] == b"A\nM\nA\n"
     assert not beet_calls(service, "modify")
+
+
+# ---------------------------------- what a kill keeps from the rest of an album
+
+
+def test_a_song_recovered_after_a_kill_once_left_its_siblings_album_gain_stale(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, "rel-1", "rel-2")
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    runner.dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED and "gain" not in one.filing_note
+    row = next(r for r in runner.rows if r["path"] == one.path)
+    assert runner.album_gained == [f"id:{runner.album_ids(row)}"]
+    assert stat.S_IMODE(Path(one.path).stat().st_mode) == service.settings.file_mode
+
+
+def test_songs_recovered_from_one_album_compute_its_gain_once(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service, "rel-1", "rel-1")
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    runner.dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+    assert len(runner.album_gained) == 1
+
+
+def test_a_recovered_song_says_when_its_album_gain_could_not_be_refreshed(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    runner.dies.clear()
+    runner.gain_fails = True
+    file_it(app, tape, service)
+    one = songs(service, tape)[0]
+    assert one.filing == F.FILED
+    assert "album's gain was not refreshed" in one.filing_note
+
+
+def test_a_song_filed_without_a_kill_leaves_album_gain_to_beets(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    assert beet_of(service).album_gained == []
+
+
+def test_a_recovered_song_with_no_release_has_no_album_gain_to_refresh(
+    service: Service,
+) -> None:
+    """A lookup-off run writes none, killed or not."""
+    app = build(service)
+    tape = cut_tape(app, service)
+    runner = beet_of(service)
+    runner.dies.add(runner.LIST)
+    killed_midway(service, tape)
+    runner.dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert runner.album_gained == []
+
+
+def test_without_the_plugin_a_recovered_song_asks_for_no_album_gain(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    runner.dies.clear()
+    runner.loaded = "embedart"
+    assert not file_it(app, tape, service)["error"]
+    assert runner.album_gained == []
+
+
+def test_a_kill_before_a_song_joined_its_row_is_joined_by_the_retry(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    held_beside(service)
+    runner = beet_of(service)
+    runner.dies.add("rel-1")
+    killed_midway(service, tape)
+    assert runner.album_removed == []
+    runner.dies.clear()
+    assert not file_it(app, tape, service)["error"]
+    assert runner.album_removed == ["id:3"]
+    assert runner.album_gained == ["id:2"]
+    assert "id:1" not in runner.album_gained

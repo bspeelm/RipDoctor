@@ -361,6 +361,7 @@ class _Filing:
     dir_mode: int
     unanswered: set[int] = field(default_factory=set)
     plugins: tuple[str, ...] | None = None
+    regained: set[str] = field(default_factory=set)
 
     def rows(self, query: list[str]) -> tuple[F.Row, ...]:
         return self.beets.library_rows(self.runner, self.library, query)
@@ -418,7 +419,7 @@ class _Filing:
         rows = self.read_back(run, song)
         paths = F.recovered(song, rows, taken=taken, track=track.number)
         if len(paths) == 1:
-            self.complete(song, F.FILED, paths[0])
+            self.complete(song, F.FILED, paths[0], self.after_a_kill(run, paths[0]))
             return True
         if paths:
             self.tell(song, F.UNKNOWN, note=_which(paths))
@@ -449,7 +450,8 @@ class _Filing:
             elif said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY and song.import_begun:
-                self.complete(song, F.FILED, said.path, said.note)
+                note = self.after_a_kill(run, said.path)
+                self.complete(song, F.FILED, said.path, said.note, note)
             else:
                 self.tell(
                     song,
@@ -459,6 +461,23 @@ class _Filing:
                     unconfirmed=said.unconfirmed,
                 )
         return waiting
+
+    def after_a_kill(self, run: F.Run, path: str) -> str:
+        """A song an interrupted import left in the library has what beets does after
+        moving it still to do: joining its release's row, and the album gain of all that
+        is on that row, once whichever of its songs comes back first. A run with no
+        release writes no album gain, killed or not."""
+        if not run.release:
+            return ""
+        said = self.gathered(run)
+        try:
+            album, _ = self.beets.album_files(self.runner, self.library, path)
+            if album in self.regained:
+                return said
+            gained = self.album_refreshed(album)
+        except (ImportFailed, ToolMissing, ToolFailed, TimedOut) as e:
+            gained = f"its album's gain was not refreshed: {e}"
+        return "; ".join(n for n in (said, gained) if n)
 
     def lost_copy(self, song: TP.Song) -> None:
         """A copy a lookup found and File did not. A library off its mount has lost
@@ -620,6 +639,7 @@ class _Filing:
     def album_refreshed(self, album: str) -> str:
         """A song arriving changes its album's gain. That rewrites the files of this row
         alone, at the writer's umask, so theirs and only theirs come back. ADR-056."""
+        self.regained.add(album)
         if "replaygain" not in self.loaded():
             return ""
         why = self.beets.album_gain(self.runner, album)

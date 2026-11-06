@@ -2449,7 +2449,8 @@ that release are named, and `remove -a` forgets whatever is on the row, so a row
 once it is asked and found empty. A row of the release in another folder is left apart and said,
 and with paths that could part them, the import goes beside as any other edition does. A kill
 between the two steps leaves an empty row, which `beet ls -a -f '$path'` crashes on until the next
-filing of that release clears it. A row that will not join leaves the song filed, and says so. Earlier separate rows of the release
+filing of that release clears it, and a kill before them leaves a separate row a retry joins.
+A row that will not join leaves the song filed, and says so. Earlier separate rows of the release
 join at that point too, since they are that release.
 
 The other way to make beets' own merge do this does not work. Stamping the row with an `album_id`
@@ -2543,7 +2544,13 @@ file and its album row's cover alone. A folder it joined may hold what is not th
 change, so it only gains what it lacks of the directory mode, and keeps its setgid; a record's
 import still sets the whole folder, because the whole folder is that record.
 The document says which songs were handed to beets, so one found in the library after
-a restart is finished the same way. A song the tape merely found already owned is left
+a restart is finished the same way, and more. An import killed once it has moved a song in has
+not reached album gain, which measured left a merged album's siblings at their old gain, 23.95
+dB where a merge that finished gave 8.68. So a recovered song of a release also has that
+release's rows joined, and album gain computed for the album row it is on, the way a merge would,
+once for the row whichever of its songs comes back first. That rewrites only that row's files, and
+their modes come back. A failure is said on the song. A from-list run writes no album gain in the
+first place, so it has none to refresh. The ceiling moves 12,620 → 12,635 for this. A song the tape merely found already owned is left
 as it was found, modes and all: that album is not this tape's to change.
 
 **A filed album with no cover says so.** beets files a release the art archive has nothing
