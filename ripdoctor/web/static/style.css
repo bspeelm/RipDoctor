@@ -341,6 +341,7 @@ button.tp-choice.on b::after{content:" \2713";color:var(--start)}
 .tp-search button{font-weight:500}
 .tp-search-said{flex-basis:100%;font-size:12.5px}
 .tp-rel-quiet{display:flex;flex-wrap:wrap;gap:.25rem .75rem}
+.tp-rel-quiet button.tp-quiet{color:var(--dim)}
 button.tp-quiet:hover{color:var(--fg)}
 button.tp-danger.tp-quiet:hover{color:var(--end)}
 .tp-opts > button.tp-quiet{align-self:flex-start;color:var(--dim)}

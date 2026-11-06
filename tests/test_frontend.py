@@ -1082,3 +1082,8 @@ def test_text_waiting_on_a_job_was_also_called_unchanged_in_red() -> None:
     field = re.search(r"async function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     held = field.split("if (!saved && tpHeldBack)")[1].split("return;")[0]
     assert '$("#tp-err").textContent = "";' in held
+
+
+def test_a_row_s_other_ways_forward_are_quiet_and_still_readable() -> None:
+    css = (STATIC / "style.css").read_text()
+    assert ".tp-rel-quiet button.tp-quiet{color:var(--dim)}" in css
