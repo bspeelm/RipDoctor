@@ -368,8 +368,11 @@ def test_a_new_list_kept_the_reason_to_use_a_copy_and_lost_the_button_for_it() -
     one = TP.Song(1, "One", "A Band", "", 180.0, proposal=asked, unconfirmed="/lib/a")
     two = TP.Song(2, "Two", "A Band", "", 180.0)
     tape = TP.Tape(id="mix", name="Mix", songs=(one, two))
-    moved = TP.relist(tape, (replace(two, number=1), replace(one, number=2)))
-    kept = moved.songs[1]
+    sent = (
+        TP.Song(1, "Two", "A Band", "", 180.0),
+        TP.Song(2, "One", "A Band", "", 180.0),
+    )
+    kept = TP.relist(tape, sent).songs[1]
     assert kept.title == "One"
     assert kept.proposal == asked
     assert kept.unconfirmed == "/lib/a"
