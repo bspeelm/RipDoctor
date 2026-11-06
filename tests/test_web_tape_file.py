@@ -2210,25 +2210,13 @@ def test_a_library_that_cannot_say_is_not_told_there_is_no_cover(
     assert not any(s.no_cover for s in songs(service, tape))
 
 
-def slow_at(service: Service, word: str) -> None:
-    """Beets taking longer than it is given to answer anything with `word` in it."""
-    original = beet_of(service).run
-
-    def timing_out(argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
-        if word in argv:
-            raise subprocess.TimeoutExpired(argv, timeout or 0)
-        return original(argv, stdin=stdin, timeout=timeout)
-
-    beet_of(service).run = timing_out  # type: ignore[method-assign]
-
-
 def test_a_cover_question_that_timed_out_is_left_unsaid_and_stops_no_job(
     service: Service,
 ) -> None:
     app = build(service)
     tape = pinned(app, service)
     assert not file_it(app, tape, service)["error"]
-    slow_at(service, "$artpath")
+    timing_out(service, "$artpath")
     beets = IMP.Beets.with_override(service.state_dir)
     library = service.settings.library
     TJ.covers_known(service.runner, beets, service.layout, tape, library)
@@ -2242,7 +2230,7 @@ def test_a_cover_upload_that_timed_out_is_a_plain_reason_and_not_a_500(
     app = build(service)
     tape = pinned(app, service, one="rel-1", two="rel-1")
     assert not file_it(app, tape, service)["error"]
-    slow_at(service, word)
+    timing_out(service, word)
     answer = covered(service, tape)
     assert answer.status == 503
     assert "did not answer in time" in answer.json()["error"]
