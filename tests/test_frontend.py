@@ -677,3 +677,8 @@ def test_a_note_choice_said_twice_still_sends_its_recording() -> None:
     """The second sending named the release alone, which takes the first recording."""
     js = (STATIC / "app.js").read_text()
     assert "{ release: asked.release, recording: asked.recording, ...extra" in js
+
+
+def test_find_again_is_not_offered_while_it_would_be_refused() -> None:
+    source = (STATIC / "app.js").read_text()
+    assert "!canFind || !!t.place_refusal" in source

@@ -1402,7 +1402,8 @@ function stepBoundaries(t) {
   const placed = t.songs.some((s) => s.start != null);
   const doubts = t.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
   const canFind = t.songs.length > 0 && (t.audio || (t.upload && t.upload.have === t.upload.total));
-  tpAction("#tp-process", canFind || placed, !placed, !canFind);
+  tpAction("#tp-process", canFind || placed, !placed, !canFind || !!t.place_refusal);
+  $("#tp-process").title = t.place_refusal;
   $("#tp-process").textContent = placed ? "Find again" : "Find boundaries";
   tpAction("#tp-review-next", doubts.length > 0, true);
   if (!canFind && !placed) return tpStep("boundaries", "wait", "Waiting", "Needs the recording and the song list.");

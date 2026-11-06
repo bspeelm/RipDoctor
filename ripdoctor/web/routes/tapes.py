@@ -174,6 +174,7 @@ def add(app: App, service: Service) -> None:
             "chunk": CHUNK,
             "all_settled": TP.all_settled(tape),
             "prepare_needed": wanted_ready(tape),
+            "place_refusal": TP.place_refusal(tape),
             "ear": ear_rows(tape),
             "cut_refusal": TP.cut_refusal(tape),
             "all_cut": TP.all_cut(tape, cuts),
@@ -370,6 +371,9 @@ def add(app: App, service: Service) -> None:
     def process(r: H.Request) -> H.Response:
         """Make the audio a tape's, measure it, and lay the list over it."""
         tape = ready(r)
+        refused = TP.place_refusal(tape)
+        if refused:
+            raise H.HttpError(409, refused)
 
         def work(job: Job) -> dict[str, Any]:
             found = TJ.find_boundaries(service.runner, layout, tape.id, job)

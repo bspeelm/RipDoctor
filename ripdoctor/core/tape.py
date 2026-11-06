@@ -866,6 +866,18 @@ def place(tape: Tape, music: Music) -> Tape:
     )
 
 
+def place_refusal(tape: Tape) -> str:
+    """Why boundaries may not be found again, naming every song, or nothing. Finding
+    them lays every song not set by ear, a song in the library among them."""
+    held = [s for s in tape.songs if edges_held(s)]
+    if not held:
+        return ""
+    return (
+        f"{', '.join(label(s) for s in held)}: in the library, or may be, and finding "
+        "boundaries again would move them - nothing was changed"
+    )
+
+
 def wanted(song: Song) -> Wanted:
     return Wanted(song.title, song.artist, song.album, song.length)
 
@@ -897,9 +909,8 @@ def wants_preparing(tape: Tape, audio: bool) -> bool:
     """With a list and audio both in, whether boundaries or a first lookup are owed."""
     if not tape.songs or not audio:
         return False
-    return not is_placed(tape) or any(
-        s.proposal is None and not s.settled_by for s in tape.songs
-    )
+    unplaced = not is_placed(tape) and not place_refusal(tape)
+    return unplaced or any(s.proposal is None and not s.settled_by for s in tape.songs)
 
 
 def with_proposals(

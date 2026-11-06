@@ -321,6 +321,42 @@ def a_job() -> Job:
     return Job(slug="x", op="file", started=0.0)
 
 
+# ----------------------------------------------------------------- finding them again
+
+
+def test_find_again_on_a_filed_song_used_to_move_it_and_is_refused(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    before = [(s.start, s.end) for s in songs(service, tape)]
+    said = post(app, f"/api/tapes/{tape}/process", service)
+    assert said.status == 409
+    assert "song 1 (One)" in said.json()["error"]
+    assert "would move them" in said.json()["error"]
+    with pytest.raises(ValueError, match="would move them"):
+        TJ.find_boundaries(service.runner, service.layout, tape, a_job())
+    assert [(s.start, s.end) for s in songs(service, tape)] == before
+    assert get(app, f"/api/tapes/{tape}", service).json()["place_refusal"]
+
+
+def test_a_tape_with_a_held_song_and_a_lost_boundary_stops_asking_to_prepare(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    assert not file_it(app, tape, service)["error"]
+    current = T.read(service.layout, tape)
+    gaps = (replace(current.songs[0], start=None), current.songs[1])
+    T.save(service.layout, replace(current, songs=gaps))
+    assert get(app, f"/api/tapes/{tape}", service).json()["prepare_needed"] is False
+    assert post(app, f"/api/tapes/{tape}/prepare", service).status == 202
+    job = job_of(app, tape, service)
+    assert "would move them" in job["error"]
+    assert "would move them" in job["result"]["boundaries"]
+
+
 # ---------------------------------------------------------------- one run an album
 
 

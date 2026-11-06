@@ -65,6 +65,9 @@ def find_boundaries(runner: Runner, layout: Layout, tape_id: str, job: Job) -> T
     current = T.read(layout, tape_id)
     if not current.songs:
         raise ValueError("this tape has no song list yet - add one first")
+    refused = TP.place_refusal(current)
+    if refused:
+        raise ValueError(refused)
     came = arrived(layout, current)
     if not T.audio_file(layout, tape_id).is_file() and came is not None:
         _take_in(runner, layout, tape_id, job, came.name)
