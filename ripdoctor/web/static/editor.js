@@ -14,6 +14,9 @@ const DRAG_FROM = 3;           // pixels a pointer must travel before a press is
 const COARSE = 2;              // seconds per pixel beyond which no marker can be grabbed
 const TOUCH_REACH = 20;        // how near a finger has to land to grab a marker
 const TIE_PX = 1;              // pixels within which two markers count as one spot
+const NAME_ROOM = 40;          // pixels a song needs before its name is worth drawing
+// Neighbours differ wherever there are two songs, and the waveform stays readable over them.
+const SONG_HUES = ["#2c5d80", "#2f6f5e", "#5d4f86", "#7a4a5e", "#6b6336", "#3f5a6e"];
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const fmt = (t) => {
@@ -47,7 +50,9 @@ export class Editor {
     this.onDrop = opts.onDrop;
     this.long = !!opts.long;
     this.onView = opts.onView;        // () -> void, the view moved or changed scale
+    this.onSong = opts.onSong;        // (track) -> void, a press in a song and on no marker
     this.frozen = false;              // drawn and played, but no marker can be moved
+    this.inDoubt = opts.doubt ?? ((t) => t.flag);   // (track) -> whether it is to be listened to
     this._bind();
   }
 
@@ -125,6 +130,7 @@ export class Editor {
     this._grid(c, L);
     this._ghosts(c, L);
     this._markers(c, L);
+    this._names(c, L);
     this._timeLabels(c, L);
     this._playhead(c, L);
     this._overview(c, L.over);
@@ -150,12 +156,12 @@ export class Editor {
   _flagged(c, L) {
     c.fillStyle = "rgba(232,196,104,0.14)";
     for (const t of this.tracks) {
-      if (!t.flag) continue;
+      if (!this.inDoubt(t)) continue;
       const x0 = this.xOf(t.start), x1 = this.xOf(t.end);
       if (x1 < 0 || x0 > L.w) continue;
       c.fillRect(x0, 0, Math.max(2, x1 - x0), L.over.top);
     }
-    const chosen = this.long && this.sel && this.tracks.find((t) => t.number === this.sel.track);
+    const chosen = this.sel && this.tracks.find((t) => t.number === this.sel.track);
     if (chosen) {
       c.fillStyle = "rgba(90,169,230,0.10)";
       c.fillRect(this.xOf(chosen.start), 0, this.xOf(chosen.end) - this.xOf(chosen.start), L.over.top);
@@ -292,7 +298,6 @@ export class Editor {
       const tw = c.measureText(`${t.number}▶${t.mark ?? ""}`).width;
       if (!on && (edge === "start" ? x + 1 : x - tw - 5) < clear) continue;
       clear = this._tag(c, L, t, edge, x, on);
-      if (edge === "start") this._title(c, L, t, x);
     }
     if (coarse) {
       const say = "zoom in to move a boundary";
@@ -324,22 +329,39 @@ export class Editor {
     return lx + tw + 2;
   }
 
-  // Under its tag, and only as much as fits in the stretch it names.
-  _title(c, L, t, x) {
-    const room = this.xOf(t.end) - x - 8;
-    if (room < 40 || !t.title) return;
+  // Under the tags, in what is in view of the song, so its name stays on screen when
+  // zoomed inside it. Only as much as fits; a song too narrow for a name can still have
+  // its doubt seen.
+  _names(c, L) {
     c.font = "11px ui-sans-serif,system-ui";
-    let text = t.title;
-    while (text.length > 1 && c.measureText(text).width > room) text = text.slice(0, -1);
-    if (text !== t.title) text = `${text.slice(0, -1)}…`;
-    c.fillStyle = "#e6e8ea";
-    c.fillText(text, x + 3, L.wave.top + 30);
-    if (t.flag) {
-      c.fillStyle = "#e8c468";
-      c.beginPath();
-      c.arc(x + 3 + Math.min(c.measureText(text).width + 8, room), L.wave.top + 26, 3, 0, 2 * Math.PI);
-      c.fill();
+    const y = L.wave.top + 30;
+    for (const t of this.tracks) {
+      const left = Math.max(this.xOf(t.start), 0), right = Math.min(this.xOf(t.end), L.w);
+      const room = right - left - 8;
+      if (room <= 0) continue;
+      const doubt = this.inDoubt(t);
+      const name = room < NAME_ROOM ? "" : this._fitted(c, t.title, room - (doubt ? 12 : 0));
+      const tw = name ? c.measureText(name).width : 0;
+      if (name) {
+        c.fillStyle = "rgba(15,17,20,0.72)";
+        c.fillRect(left + 1, y - 11, tw + (doubt ? 16 : 4), 14);
+        c.fillStyle = "#e6e8ea";
+        c.fillText(name, left + 3, y);
+      }
+      if (doubt && room >= 8) {
+        c.fillStyle = "#e8c468";
+        c.beginPath();
+        c.arc(left + (name ? tw + 10 : 6), y - 4, 3, 0, 2 * Math.PI);
+        c.fill();
+      }
     }
+  }
+
+  _fitted(c, title, room) {
+    if (!title || c.measureText(title).width <= room) return title || "";
+    let text = title;
+    while (text.length > 1 && c.measureText(`${text}…`).width > room) text = text.slice(0, -1);
+    return `${text}…`;
   }
 
   _playhead(c, L) {
@@ -350,9 +372,16 @@ export class Editor {
   }
 
   _overview(c, lane) {
-    const { peak } = this.side, w = this.cv.clientWidth;
+    const { peak } = this.side, w = this.cv.clientWidth, d = this.side.duration;
     const mid = lane.top + lane.h / 2;
-    c.strokeStyle = "#2f3a44"; c.lineWidth = 1; c.beginPath();
+    this.tracks.forEach((t, i) => {
+      const chosen = this.sel?.track === t.number;
+      c.globalAlpha = chosen ? 1 : 0.6;
+      c.fillStyle = SONG_HUES[i % SONG_HUES.length];
+      c.fillRect(t.start / d * w, lane.top, Math.max(1, (t.end - t.start) / d * w), lane.h);
+    });
+    c.globalAlpha = 1;
+    c.strokeStyle = "rgba(230,232,234,0.32)"; c.lineWidth = 1; c.beginPath();
     for (let x = 0; x < w; x++) {
       const a = Math.floor(x / w * peak.length), b = Math.floor((x + 1) / w * peak.length);
       let m = -200;
@@ -361,9 +390,12 @@ export class Editor {
       c.moveTo(x + 0.5, mid - f * lane.h / 2); c.lineTo(x + 0.5, mid + f * lane.h / 2);
     }
     c.stroke();
-    const d = this.side.duration;
     c.fillStyle = "#e8c468";
-    for (const t of this.tracks) if (t.flag) c.fillRect(t.start / d * w, lane.top, 2, lane.h);
+    for (const t of this.tracks) {
+      if (!this.inDoubt(t)) continue;
+      c.fillRect(t.start / d * w, lane.top, Math.max(2, (t.end - t.start) / d * w), 3);
+      c.fillRect(t.start / d * w, lane.top, 2, lane.h);
+    }
     const x0 = this.t0 / d * w, x1 = this.t1 / d * w;
     c.strokeStyle = "#5aa9e6"; c.lineWidth = 1;
     c.strokeRect(x0 + 0.5, lane.top + 0.5, Math.max(2, x1 - x0), lane.h - 1);
@@ -507,9 +539,12 @@ export class Editor {
     const up = (e) => {
       if (this.drag && this.drag.mode === "pan" && !this.drag.moved) {
         const r = cv.getBoundingClientRect();
+        // A press on no marker chooses the song it landed in, and no edge of it: a
+        // nudge moves only a marker somebody chose.
         this.playhead = this.tOf(e.clientX - r.left);
-        this.sel = null;
-        this.onSelect?.(null, null);
+        const song = this.tracks.find((t) => t.start <= this.playhead && this.playhead < t.end);
+        this.sel = song ? { track: song.number, edge: "start" } : null;
+        if (song) this.onSong?.(song.number); else this.onSelect?.(null, null);
         // Without this the click looks like it does nothing: during playback the
         // player's own callback overwrites `playhead` on the next frame, so the
         // marker you just set is erased within ~16 ms.

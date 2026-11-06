@@ -874,6 +874,36 @@ def test_two_markers_on_one_spot_could_not_be_told_apart_by_a_long_timeline() ->
     assert 'x > n.at ? "start" : "end"' in broken
 
 
+def test_song_names_and_doubts_are_drawn_on_both_pages_at_any_zoom_they_fit() -> None:
+    js = (STATIC / "editor.js").read_text()
+    names = re.search(r"\n  _names\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "room < NAME_ROOM" in names and "this.inDoubt(t)" in names
+    assert "Math.max(this.xOf(t.start), 0)" in names, "lost when zoomed inside a song"
+    assert "this.long" not in names
+    render = re.search(r"\n  render\(\).*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "this._names(c, L);" in render
+    page = (STATIC / "app.js").read_text()
+    assert "doubt: canCheck" in page
+
+
+def test_the_overview_is_coloured_by_song_and_marks_each_doubt() -> None:
+    js = (STATIC / "editor.js").read_text()
+    over = re.search(r"\n  _overview\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "SONG_HUES[i % SONG_HUES.length]" in over and "this.inDoubt(t)" in over
+
+
+def test_a_press_off_any_marker_chooses_its_song_and_arms_no_edge() -> None:
+    """A marker wins: `hit` is asked at the press, and this is only a press that found
+    nothing and did not pan."""
+    js = (STATIC / "editor.js").read_text()
+    assert "t.start <= this.playhead && this.playhead < t.end" in js
+    assert "if (song) this.onSong?.(song.number);" in js
+    assert js.index("const h = this.long &&") < js.index('mode: "pan"')
+    page = (STATIC / "app.js").read_text()
+    assert 'onSong: (num) => select(num, "start")' in page
+    assert 'onSong: (num) => tapeSelect(num, "start", false)' in page
+
+
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]

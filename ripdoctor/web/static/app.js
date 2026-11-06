@@ -3277,7 +3277,7 @@ function wireTapeWave() {
     },
     (num, edge) => tapeSelect(num, edge, false, true),
     (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
-    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView });
+    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView, onSong: (num) => tapeSelect(num, "start", false) });
   tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
   for (const change of ["play", "pause", "ended"]) tpPlayer.el.addEventListener(change, showTapeTools);
   // The rail coming and going changes the canvas's width with no window resize.
@@ -4604,7 +4604,8 @@ function wire() {
       markDirty(); ed.render(); updateReadout(); renderTracks();
     },
     (num, edge) => { select(num, edge, true); },
-    (t) => { if (player.playing) player.seek(t); });
+    (t) => { if (player.playing) player.seek(t); },
+    { doubt: canCheck, onSong: (num) => select(num, "start") });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
   new ResizeObserver(() => ed.render()).observe($("#cv"));
