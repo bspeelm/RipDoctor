@@ -2592,3 +2592,62 @@ def test_an_old_document_with_no_word_on_covers_loads() -> None:
     song = TP.Song(number=1, title="A", artist="B", album="C", length=1.0).to_dict()
     del song["no_cover"]
     assert TP.Song.from_dict(song).no_cover is False
+
+
+# ------------------------------------------------- a library gone from under its mount
+
+
+def off_its_mount(service: Service) -> Path:
+    """Rows beets still holds, and a root with nothing in it. Hand back where the
+    library went."""
+    root = Path(service.settings.library)
+    beet_of(service).owns("Another", album="Elsewhere", length="9:00")
+    aside = root.with_name("lib-aside")
+    root.rename(aside)
+    root.mkdir()
+    return aside
+
+
+def test_filing_onto_an_empty_mount_point_once_said_filed_and_wrote_a_playlist(
+    service: Service,
+) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    aside = off_its_mount(service)
+    job = file_it(app, tape, service)
+    assert "did not file" in job["error"]
+    assert imports_of(service) == []
+    assert [s.filing for s in songs(service, tape)] == [F.FAILED, F.FAILED]
+    assert all("off its mount" in s.filing_note for s in songs(service, tape))
+    assert not any(Path(service.settings.library).iterdir())
+
+    Path(service.settings.library).rmdir()
+    aside.rename(service.settings.library)
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]
+
+
+def test_a_song_whose_import_began_stays_unanswered_when_the_mount_has_gone(
+    service: Service,
+) -> None:
+    """Its row may be there once the mount is back, so the mark that keeps a retry from
+    importing it twice has to outlast this."""
+    app = build(service)
+    tape = pinned(app, service)
+    T.save(service.layout, F.begun(T.read(service.layout, tape), {1}))
+    off_its_mount(service)
+    file_it(app, tape, service)
+    one, two = songs(service, tape)
+    assert one.import_begun and one.filing == F.UNKNOWN
+    assert "off its mount" in one.filing_note
+    assert two.filing == F.FAILED and not imports_of(service)
+
+
+def test_a_truly_empty_library_files_its_first_album(service: Service) -> None:
+    app = build(service)
+    tape = pinned(app, service)
+    Path(service.settings.library).mkdir(exist_ok=True)
+    assert not any(Path(service.settings.library).iterdir())
+    assert not beet_of(service).rows
+    assert not file_it(app, tape, service)["error"]
+    assert [s.filing for s in songs(service, tape)] == [F.FILED, F.FILED]

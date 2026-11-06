@@ -2464,6 +2464,18 @@ the question before stdin is read, and `remove` deletes the filed album, on beet
 and 2.14.0 alike, so the override forces `duplicate_action: ask` for tape imports and
 album imports both.
 
+**A library gone from under its mount files nothing.** A systemd mount requirement holds
+at service start only, so a mount that drops later leaves the root an empty directory that
+beets files into without complaint: the song said Filed, a playlist was written, and the file
+vanished when the mount came back. On a record it was worse, measured on 2.1.0: replacing asked
+beets to forget rows it could not see, and 14 rows became 2. So before any import, on a tape,
+a record and an album that arrived cut alike, a root with nothing in it is checked against
+beets' rows under it. Rows there mean off its mount, and nothing runs; none means a library
+filing its first album. Only a root with nothing in it pays for listing the rows. A song already
+sent to beets keeps that mark, since its row may be there when the mount returns. A root holding
+anything at all passes, so a stray file on a bare mount point defeats this, and a mount dropping
+after the check is not caught. A Tagger install has no rows to ask.
+
 **An owned song is not imported.** This check is required, not an optimisation: one
 experiment reported a merged copy of an owned song silently filed as another track,
 and that report has not been repeated. A song with a recording id is owned only by a

@@ -735,6 +735,7 @@ def test_taking_it_pins_the_release_that_was_shown(tmp_path: Path) -> None:
         .expect(lambda argv: argv[0] == "beet" and "import" in argv, stdout=b"added")
         .expect("ls", stdout=b"")
     )
+    (tmp_path / "A Band").mkdir()
     I.Beets().take(fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",))
 
     argv = fake.argv_for("import")
@@ -833,6 +834,7 @@ def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) ->
     assert I.answers("replace", matching=True) == b"A\nR\n"
     assert I.answers("replace", matching=False) == b"R\n"
     runner = FakeRunner()
+    (tmp_path / "A Band").mkdir()
     _beets().apply(runner, a_plan(), str(tmp_path), str(tmp_path), mbid="rel-1")
     assert runner.calls[0] == (
         "beet",
@@ -1005,3 +1007,76 @@ def test_whether_album_rows_get_folders_of_their_own_is_read_from_the_default_pa
 ) -> None:
     runner = FakeRunner().expect("config", stdout=said.encode())
     assert _beets().folders_apart(runner) is apart
+
+
+# ------------------------------------------------- a library gone from under its mount
+
+
+def rows_at(library: Path, *names: str) -> bytes:
+    """What `beet ls` says of tracks it holds under this root."""
+    return "\n".join(
+        SEP.join(
+            ("A Song", "A Band", "A Record", "3:00", str(library / n), "", "1", "")
+        )
+        for n in names
+    ).encode()
+
+
+def test_a_record_is_refused_where_the_library_is_empty_and_beets_says_otherwise(
+    tmp_path: Path,
+) -> None:
+    """The mount had dropped: it filed onto the mount point, and replacing first asked
+    beets to forget every row of the album it could not see."""
+    library = tmp_path / "lib"
+    library.mkdir()
+    review = Path(a_review(tmp_path))
+    fake = FakeRunner().expect("ls", stdout=rows_at(library, "A Band/One.flac"))
+    with pytest.raises(I.ImportFailed, match="off its mount"):
+        I.Beets().apply(
+            fake, a_plan(), str(review), str(library), mbid="x", replacing=True
+        )
+    assert not [c for c in fake.calls if "import" in c or "remove" in c]
+    assert list(review.glob("*.flac"))
+
+
+def test_an_album_that_arrived_cut_is_refused_the_same_way(tmp_path: Path) -> None:
+    library = tmp_path / "lib"
+    library.mkdir()
+    fake = FakeRunner().expect("ls", stdout=rows_at(library, "A Band/One.flac"))
+    with pytest.raises(I.ImportFailed, match="off its mount"):
+        I.Beets().take(fake, str(tmp_path), str(library), mbid="x", tracks=("a.flac",))
+    assert not [c for c in fake.calls if "import" in c]
+
+
+def test_a_library_with_nothing_in_it_and_no_rows_is_new_and_not_gone(
+    tmp_path: Path,
+) -> None:
+    fake = FakeRunner()
+    assert I.Beets().off_its_mount(fake, str(tmp_path / "lib")) == ""
+    assert not [c for c in fake.calls if "import" in c]
+
+
+def test_rows_under_some_other_root_say_nothing_about_this_one(tmp_path: Path) -> None:
+    library = tmp_path / "lib"
+    library.mkdir()
+    fake = FakeRunner().expect("ls", stdout=rows_at(tmp_path / "old", "One.flac"))
+    assert I.Beets().off_its_mount(fake, str(library)) == ""
+
+
+def test_a_library_with_anything_in_it_never_has_beets_list_every_row(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "A Band").mkdir()
+    fake = FakeRunner()
+    assert I.Beets().off_its_mount(fake, str(tmp_path / "lib")) == ""
+    assert not fake.calls
+
+
+def test_an_empty_library_beets_cannot_answer_for_is_not_called_fresh(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "lib").mkdir()
+    fake = FakeRunner().expect("ls", returncode=1, stderr=b"database is locked")
+    with pytest.raises(I.ImportFailed, match="locked"):
+        I.Beets().off_its_mount(fake, str(tmp_path / "lib"))

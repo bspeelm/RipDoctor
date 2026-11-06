@@ -425,6 +425,7 @@ class Beets:
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
+        self._refuse_off_its_mount(runner, library)
         cleared = 0
         # Only with the acknowledgement: "replace" alone is a default, not a
         # licence to delete. ADR-060.
@@ -507,6 +508,7 @@ class Beets:
     ) -> Outcome:
         """Import an album that arrived already cut, pinned to the agreed
         release so the run that commits cannot choose a different one."""
+        self._refuse_off_its_mount(runner, library)
         result = runner.run(
             self._argv(["import", "--search-id", mbid, directory]),
             stdin=answers(duplicates, matching=True),
@@ -612,6 +614,30 @@ class Beets:
         if not result.ok or self.library_rows(runner, root, query):
             why = TapeRun(result.returncode, result.err).why()
             raise ImportFailed(f"beets could not clear its row for {path}: {why}")
+
+    def off_its_mount(self, runner: Runner, root: str) -> str:
+        """Why filing now would land on a bare mount point, or nothing. A root with
+        nothing in it is either new or gone, and only beets' rows can tell which, so
+        only then is every row asked for. A library this cannot ask about raises. A
+        Tagger install keeps no rows and so cannot be told this. ADR-063."""
+        if not holds_nothing(root):
+            return ""
+        rows = [
+            r for r in self._held(runner, root, [], 300.0) if contains(root, r.path)
+        ]
+        if not rows:
+            return ""
+        s = "" if len(rows) == 1 else "s"
+        return (
+            f"the library at {root} has nothing in it and beets holds {len(rows)} "
+            f"row{s} there, so it may be off its mount. Nothing was filed - put that "
+            "right and file again"
+        )
+
+    def _refuse_off_its_mount(self, runner: Runner, root: str) -> None:
+        why = self.off_its_mount(runner, root)
+        if why:
+            raise ImportFailed(why)
 
     def _complaint(self, runner: Runner, args: list[str], timeout: float) -> str:
         """What beets said, when it did not exit clean."""
@@ -824,6 +850,13 @@ class Beets:
             for fields in _fields(result.text)
             if len(fields) == _HELD.count(_SEP) + 1
         )
+
+
+def holds_nothing(library: str) -> bool:
+    try:
+        return not any(Path(library).iterdir())
+    except OSError:  # not there at all, or not to be read: neither holds a song
+        return True
 
 
 def _apart_by(album_path: str) -> bool | None:

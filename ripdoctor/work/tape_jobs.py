@@ -15,7 +15,7 @@ from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as TG
-from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun
+from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun, holds_nothing
 from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
@@ -463,7 +463,7 @@ class _Filing:
     def lost_copy(self, song: TP.Song) -> None:
         """A copy a lookup found and File did not. A library off its mount has lost
         all of them and nothing has really gone, so nobody chooses albums again."""
-        if not _reachable(self.library):
+        if holds_nothing(self.library):
             self.tell(
                 song,
                 F.FAILED,
@@ -657,6 +657,9 @@ class _Filing:
             # From the pre-check to the import: two jobs filing one recording would
             # otherwise both find nothing, and both import it.
             with one_import(self.job):
+                why = self.beets.off_its_mount(self.runner, self.library)
+                if why:
+                    raise ImportFailed(why)
                 self.clear_leftovers()
                 waiting = self.checked(run)
                 if not waiting:
@@ -671,13 +674,6 @@ class _Filing:
                     self.tell(track.song, F.UNKNOWN, note=_unconfirmed(e))
                 elif number in self.unanswered:
                     self.tell(track.song, F.FAILED, note=str(e))
-
-
-def _reachable(library: str) -> bool:
-    try:
-        return any(Path(library).iterdir())
-    except OSError:  # not there at all, or not to be read: neither holds a song
-        return False
 
 
 def _unconfirmed(why: Exception) -> str:
