@@ -1075,3 +1075,10 @@ def test_the_header_s_button_went_on_offering_what_a_job_just_started_refuses() 
     assert '$("#tp-next-act").hidden = true;' in body
     nxt = re.search(r"function showNext\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "tapeWatching && !cutWouldWait(tape)" in nxt
+
+
+def test_text_waiting_on_a_job_was_also_called_unchanged_in_red() -> None:
+    js = (STATIC / "app.js").read_text()
+    field = re.search(r"async function editField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    held = field.split("if (!saved && tpHeldBack)")[1].split("return;")[0]
+    assert '$("#tp-err").textContent = "";' in held

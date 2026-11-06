@@ -1861,7 +1861,12 @@ async function editField(key, input) {
     if (row) row[name] = value;
     return songs;
   });
-  if (!saved && tpHeldBack) { showSongs(tape); return; }
+  if (!saved && tpHeldBack) {
+    // The row says it is waiting, and that is true of a job a person is watching run.
+    $("#tp-err").textContent = "";
+    showSongs(tape);
+    return;
+  }
   tpUnsent.delete(held);
   if (!saved) showSongs(tape);
 }
