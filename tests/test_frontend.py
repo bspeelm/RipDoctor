@@ -8,6 +8,7 @@ time surfacing as a TypeError on null in front of somebody using it.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -208,9 +209,11 @@ def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None
     assert "#captureview{flex-direction:column" in narrow.group(1)
     assert ".ripform{width:100%}" in narrow.group(1)
     assert css.index(".ripform{width:30rem") < narrow.start(), "the wide rule wins"
-    scroll = re.search(r"\.tp-scroll\{([^}]*)\}", css)
-    assert scroll and "flex:none" in scroll.group(1)
-    assert "white-space:normal" in re.search(r"table\.ear td\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "#tapeview{display:block;overflow-y:auto;overflow-x:hidden}" in narrow.group(
+        1
+    )
+    assert "#tp-table{display:block;min-width:0}" in narrow.group(1)
+    assert "#tp-rows tr[data-song]{display:grid" in narrow.group(1)
     assert "position:fixed" in re.search(
         r"#tp-err:not\(:empty\)\{([^}]*)\}", css
     ).group(1)  # type: ignore[union-attr]
@@ -230,8 +233,11 @@ def test_a_reload_on_a_tape_comes_back_to_that_tape() -> None:
 def test_a_refusal_is_said_once_where_it_can_be_acted_on() -> None:
     """The File and Archive blocks repeated the cut's whole refusal, song by song."""
     js = (STATIC / "app.js").read_text()
-    assert '"waits for the cut, above"' in js
-    assert '"waits until the songs are filed"' in js
+    assert '"Waiting on the cut."' in js
+    assert '"Waits until the songs are filed."' in js
+    file_step = re.search(r"function stepFile\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "cut_refusal" not in file_step
+    assert 'tpStep("file", "wait", "Waiting", "Waiting on the cut.")' in file_step
 
 
 def test_a_job_lost_to_a_restart_is_said_plainly_and_a_blip_is_waited_out() -> None:
@@ -252,7 +258,7 @@ def test_a_pasted_release_keeps_its_place_in_the_edition_picker() -> None:
 def test_an_archived_tape_offers_nothing_that_would_change_it() -> None:
     """Find boundaries on one said to upload audio, and every other control refused."""
     js = (STATIC / "app.js").read_text()
-    assert "if (has && t.playlist.done) archivedControls()" in js
+    assert "if (t.playlist.done) archivedControls()" in js
     body = re.search(r"function archivedControls\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "#tp-process" in body and '$("#tapepane").querySelectorAll' in body
 
@@ -262,7 +268,7 @@ def test_a_song_in_the_library_or_not_confirmed_offers_no_other_release() -> Non
     js = (STATIC / "app.js").read_text()
     held = re.search(r"const CHOICE_HELD = \{.*?\n\};", js, re.S).group(0)  # type: ignore[union-attr]
     assert all(f"{state}:" in held for state in ("filed", "already", "unknown"))
-    body = re.search(r"function reviewRow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    body = re.search(r"function releaseOptions\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     rest = body.split('CHOICE_HELD[song.import_begun ? "unknown" : song.filing]', 1)[1]
     assert 'change.querySelectorAll("input, select, button")' in rest
     assert "c.disabled = true" in rest
@@ -343,13 +349,16 @@ def test_a_key_with_a_modifier_is_the_browser_s_and_alt_left_is_not_a_nudge() ->
     js = (STATIC / "app.js").read_text()
     body = re.search(r"function tapeKey\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     first = body.index("if (e.altKey || e.ctrlKey || e.metaKey) return;")
-    assert first < body.index("nudgeTapeEdge(")
+    assert first < body.index("nudgeChosen(")
 
 
-def test_only_a_marker_a_person_pressed_can_be_nudged() -> None:
+def test_only_an_edge_a_person_chose_can_be_nudged() -> None:
     """A row selects a song, and an arrow key then set its start for good."""
     js = (STATIC / "app.js").read_text()
-    body = re.search(r"function tapeKey\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    keys = re.search(r"function tapeKey\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "nudgeTapeEdge(" not in keys
+    assert js.count("nudgeTapeEdge(") == 2, "one definition and the one guarded call"
+    body = re.search(r"function nudgeChosen\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     guard = body.index("tpPicked?.track !== sel.track")
     assert guard < body.index("nudgeTapeEdge(")
     assert "(num, edge) => tapeSelect(num, edge, false, true)" in js
@@ -392,3 +401,110 @@ def test_what_needs_a_waveform_waits_for_one_rather_than_throwing() -> None:
         assert guard in body
     body = re.search(r"function showTapeTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert '["#tp-in", "#tp-out", "#tp-whole"]) $(id).disabled = !wave' in body
+
+
+def tape_markup() -> str:
+    page = markup()
+    start = page.index('<div id="tapeview"')
+    return page[start : page.index('<div id="captureview"', start)]
+
+
+def test_a_tape_s_songs_are_in_one_table() -> None:
+    """The same songs in three tables, each with every control on every row."""
+    tape = tape_markup()
+    assert tape.count("<table") == 1
+    head = re.search(r"<thead>(.*?)</thead>", tape, re.S).group(1)  # type: ignore[union-attr]
+    assert re.findall(r"<th>(.*?)</th>", head) == [
+        "#",
+        "Song",
+        "Album",
+        "Span",
+        "Length",
+        "Boundary",
+        "Release",
+    ]
+    for gone in ("tp-ear", "tp-review", "tp-filing", "tapeform"):
+        assert f'id="{gone}"' not in markup()
+
+
+def test_the_pipeline_rail_runs_in_order_with_archive_last() -> None:
+    steps = re.findall(r'id="tp-st-(\w+)"', tape_markup())
+    assert steps == [
+        "recording",
+        "list",
+        "boundaries",
+        "albums",
+        "cut",
+        "file",
+        "playlist",
+        "archive",
+    ]
+    js = (STATIC / "app.js").read_text()
+    assert f"const TP_STEPS = {json.dumps(steps).replace(', ', ', ')};" in js
+
+
+def test_the_toolbar_names_the_key_each_button_answers_to() -> None:
+    tape = tape_markup()
+    for button, key in (
+        ("tp-prev", "K"),
+        ("tp-next", "J"),
+        ("tp-doubt", "N"),
+        ("tp-edge-start", "E"),
+        ("tp-edge-end", "E"),
+        ("tp-minus", ","),
+        ("tp-plus", "."),
+        ("tp-play", "Space"),
+        ("tp-hear", "H"),
+        ("tp-accept", "A"),
+        ("tp-skip", "S"),
+        ("tp-song", "Z"),
+        ("tp-whole", "Z"),
+    ):
+        found = re.search(rf'id="{button}"[^>]*>.*?<kbd>(.*?)</kbd>', tape)
+        assert found and found.group(1) == key, button
+    js = (STATIC / "app.js").read_text()
+    keys = re.search(r"const TAPE_KEYS = \{.*?\};", js, re.S).group(0)  # type: ignore[union-attr]
+    for pair in ('k: "#tp-prev"', 'j: "#tp-next"', 'h: "#tp-hear"', 'a: "#tp-accept"'):
+        assert pair in keys
+
+
+def test_the_tape_page_keeps_its_looks_in_the_stylesheet() -> None:
+    assert "style=" not in tape_markup()
+    js = (STATIC / "app.js").read_text()
+    start = js.index("// ---- the rail")
+    section = js[start : js.index("// ---- the waveform", start)]
+    assert ".style." not in section
+
+
+def test_a_row_s_words_go_through_the_list_route_with_what_it_warns() -> None:
+    """Nothing unsaved is held on the page, so a job can no longer save a list on the
+    way past."""
+    js = (STATIC / "app.js").read_text()
+    assert "tapeEdited" not in js
+    body = re.search(r"async function sendList\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "await flushNudge();" in body
+    assert "A new list clears the boundaries" in body
+    assert "`/api/tapes/${tape.id}/songs`, { songs }" in body
+    assert '$("#tp-err").textContent = e.message' in body
+
+
+def test_a_row_says_where_a_filed_song_went_and_the_column_says_what_became_of_it() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    word = re.search(r"function releaseWord\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for state in ("filed", "already", "failed"):
+        assert f'song.filing === "{state}"' in word
+    filed = re.search(r"function filedBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "o.path || o.unconfirmed" in filed
+    assert "useCopyButton(o)" in filed
+
+
+def test_a_running_job_is_shown_on_its_own_step() -> None:
+    js = (STATIC / "app.js").read_text()
+    jobs = re.search(r"const JOB_STEP = \{.*?\};", js).group(0)  # type: ignore[union-attr]
+    for op in ("tape", "match", "cut", "file", "playlist", "archive"):
+        assert f"{op}:" in jobs
+    body = re.search(r"async function watchTape\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "stepBusy(tpJobStep)" in body
+    assert "status(doing, true)" in body

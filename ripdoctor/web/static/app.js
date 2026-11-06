@@ -1186,13 +1186,23 @@ function recalled(key) {
   try { return sessionStorage.getItem(key); } catch { return null; }
 }
 
-// A tape is not a record: it has its own store and never reaches the picker in
-// the header, so it is chosen here. ADR-063.
-let tape = null, tapePicked = null, tapeEdited = false, tapeWatching = false;
+// A tape is not a record: it has its own store and never reaches the record picker,
+// so it has its own beside the tabs. ADR-063.
+let tape = null, tapePicked = null, tapeWatching = false;
+let tpOpen = null;                    // the song whose row is open
+let tpDraft = null;                   // a song being added, not yet on the list
+let tpNaming = false;                 // the New tape form is showing
+let tpJobStep = null;                 // the rail's step a running job belongs to
 
 const mss = (seconds) => {
   const whole = Math.round(seconds);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+const clock = (seconds) => {
+  const whole = Math.round(seconds);
+  if (whole < 3600) return mss(whole);
+  const minutes = Math.floor(whole / 60) % 60;
+  return `${Math.floor(whole / 3600)}:${String(minutes).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
 };
 const signed = (n) => `${n > 0 ? "+" : ""}${n.toFixed(1)} s`;
 
@@ -1218,6 +1228,7 @@ async function loadTapes(keep) {
 async function openTape(id) {
   try {
     await flushNudge();
+    if (tape?.id !== id) { tpOpen = null; tpDraft = null; }
     showTape(await api(`/api/tapes/${id}`));
     if (tape.job && !tape.job.done) watchTape();
     else if (tape.job?.error && !$("#tp-err").textContent) $("#tp-err").textContent = tape.job.error;
@@ -1229,106 +1240,280 @@ async function createTape() {
   try {
     const made = await postJSON("/api/tapes", { name: $("#tp-name").value });
     $("#tp-name").value = "";
+    tpNaming = false;
     await loadTapes(made.id);
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
 
+function showNaming(on) {
+  tpNaming = on;
+  showTape(tape);
+  if (on) $("#tp-name").focus();
+}
+
 function showTape(t) {
-  tape = t; tapeEdited = false;
+  tape = t;
   if (t) remember("rd-tape", t.id);
-  const has = !!t;
-  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-remove", "#tp-match", "#tp-rematch"])
-    $(id).disabled = !has;
-  $("#tp-what").textContent = has ? t.name : "No tape chosen";
-  $("#tp-mismatch").textContent = has ? t.mismatch : "";
-  $("#tp-mismatch").hidden = !has || !t.mismatch;
-  $("#tp-file-pick").disabled = !has || t.audio || t.playlist.done;
-  $("#tp-cancel").hidden = !has || !t.upload;
-  $("#tp-go").disabled = !tapePicked || !has || t.audio;
-  $("#tp-go").textContent = has && t.upload && t.upload.have < t.upload.total ? "Resume" : "Upload";
-  setBar(has && t.upload && t.upload.total ? t.upload.have / t.upload.total : 0, "#tp-bar");
-  $("#tp-audio").textContent = !has ? ""
-    : t.playlist.done ? `archived: ${t.playlist.archived.file}`
-    : t.audio ? `audio here${t.source ? `: ${t.source}` : ""}${t.duration ? `, ${mss(t.duration)}` : ""}`
-    : t.upload && t.upload.have === t.upload.total ? `${t.upload.name}: all ${mb(t.upload.total)} here, not yet read`
-    : t.upload ? `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)} here. Pick the same file to carry on.`
-    : "no audio yet";
-  $("#tp-rows").replaceChildren(...(has ? t.songs.map(songRow) : []));
-  renumberSongs();
-  $("#tp-inside").replaceChildren(...(has ? t.inside.map((g) =>
-    el("li", null, `song ${g.song}: the silence at ${fmtLong(g.lo)} to ${fmtLong(g.hi)} stayed inside it`)) : []));
-  $("#tp-inside-title").hidden = !has || !t.inside.length;
-  const doubts = has ? t.songs.filter((s) => s.reason && !s.heard && !s.skip) : [];
-  $("#tp-reasons").replaceChildren(...doubts.map((s) => el("li", null, `song ${s.number}: ${s.reason}`)));
-  $("#tp-reasons-title").hidden = !doubts.length;
-  showReview(t);
+  const naming = !t || tpNaming;
+  $("#tp-new-form").hidden = !naming;
+  $("#tp-new-cancel").hidden = !t;
+  $("#tp-main-body").hidden = naming;
+  $("#tp-rail").hidden = naming;
+  $("#tapeview").classList.toggle("no-rail", naming);
+  if (!t) {
+    tpPlayer.stop();
+    tpDrawn = tpAudio = null;
+    tpEd.clear();
+    return;
+  }
+  if (tpOpen != null && !songOf(tpOpen)) tpOpen = null;
+  $("#tp-what").textContent = t.name;
+  const said = [t.source, t.duration ? clock(t.duration) : "",
+    `${t.songs.length} song${t.songs.length === 1 ? "" : "s"}`].filter(Boolean);
+  $("#tp-meta").textContent = said.join(" · ");
+  showStart(t);
   showEar(t);
-  showFiling(t);
-  showPlaylist(t);
+  showRail(t);
+  showSongs(t);
   // Opening the tape again during a job would otherwise offer what it would refuse.
   if (tapeWatching) for (const b of TAPE_JOB_BUTTONS) $(b).disabled = true;
-  if (has && t.playlist.done) archivedControls();
+  if (t.playlist.done) archivedControls();
 }
 
 // An archived tape stays as it is, so nothing here may offer to change it. Its
 // waveform can still be looked around, and its playlist can still be asked about.
 function archivedControls() {
-  for (const id of ["#tp-csv-pick", "#tp-add", "#tp-save", "#tp-process", "#tp-match", "#tp-rematch"])
+  for (const id of ["#tp-file-pick", "#tp-csv-pick", "#tp-list-add", "#tp-process", "#tp-match", "#tp-rematch"])
     $(id).disabled = true;
   for (const c of $("#tapepane").querySelectorAll("input, select, button")) c.disabled = true;
   for (const c of $("#tapepane").querySelectorAll("[data-nav]")) c.disabled = !tpEd.side;
 }
 
-// Doubts first, then what nobody has asked about, then what is already settled.
-function reviewRank(song) {
-  if (song.settled_by) return song.settled_by === "person" ? 5 : 4;
-  return { failed: 0, review: 1, none: 2 }[song.proposal?.status] ?? 3;
+// What a new tape still needs, said where the waveform will be.
+function showStart(t) {
+  const hasAudio = t.audio || !!t.upload;
+  const placed = t.songs.some((s) => s.start != null);
+  $("#tp-start").hidden = placed || t.playlist.done;
+  $("#tp-need-file").hidden = hasAudio;
+  $("#tp-need-list").hidden = t.songs.length > 0 || !!tpDraft;
+  $("#tp-need-find").hidden = !(t.audio || (t.upload && t.upload.have === t.upload.total)) || !t.songs.length;
 }
 
-function showReview(t) {
-  const asked = !!t && t.songs.some((s) => s.proposal);
-  $("#tp-review-wrap").hidden = !asked;
-  if (!asked) { $("#tp-review").replaceChildren(); return; }
-  const done = t.songs.filter((s) => s.settled_by).length;
-  const failed = t.songs.filter((s) => s.proposal?.status === "failed").length;
-  $("#tp-settled").textContent = (t.all_settled ? "every song is settled"
-    : `${done} of ${t.songs.length} settled`)
-    + (failed ? `; ${failed} could not be looked up - press Look again` : "");
-  const ordered = [...t.songs].sort((a, b) => reviewRank(a) - reviewRank(b) || a.number - b.number);
-  $("#tp-review").replaceChildren(...ordered.map(reviewRow));
+// ---- the rail
+
+const TP_STEPS = ["recording", "list", "boundaries", "albums", "cut", "file", "playlist", "archive"];
+const JOB_STEP = { tape: "boundaries", match: "albums", cut: "cut", file: "file", playlist: "playlist", archive: "archive" };
+
+const songsNamed = (numbers) => {
+  const first = numbers.slice(0, 6).join(", ");
+  const more = numbers.length > 6 ? ` and ${numbers.length - 6} more` : "";
+  return `${numbers.length === 1 ? "Song" : "Songs"} ${first}${more}`;
+};
+
+const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+const stepBox = (id) => document.getElementById(`tp-st-${id}`);
+
+// `why` is what will not fit in a line, kept one press away.
+function tpStep(id, kind, state, detail, why = "") {
+  const box = stepBox(id);
+  box.dataset.kind = kind;
+  box.querySelector(".tp-state").textContent = state;
+  box.querySelector(".tp-detail").textContent = detail;
+  const more = box.querySelector(".tp-why");
+  more.hidden = !why;
+  more.querySelector("p").textContent = why;
 }
 
-const editionText = (c) => `${c.release_title}, ${c.album_artist} (${c.date || "no date"})`
-  + `${c.note ? ` ${c.note}` : ""}${c.status ? ` ${c.status}` : ""}`;
-const trackText = (c) => c.number
-  ? `${c.disc}-${c.number} ${c.track_title}${c.length ? ` ${mss(c.length)}` : ", no length"}`
-  : "no track like this title";
+// Only what this step can do, and the blue one is the next thing to press.
+function tpAction(id, show, primary = false, disabled = false) {
+  const b = $(id);
+  b.hidden = !show;
+  b.disabled = disabled;
+  b.classList.toggle("ghost", !primary);
+}
 
-function proposedCell(song) {
-  const td = el("td");
-  const choice = song.proposal?.choice;
-  if (choice) {
-    td.append(el("div", null, editionText(choice)), el("div", "dim", trackText(choice)));
-  } else {
-    td.append(el("div", null, song.album || "no album"),
-              el("div", "dim", song.proposal ? "from your list, no release" : "not asked yet"));
+function stepRecording(t) {
+  const partial = !!t.upload && t.upload.have < t.upload.total;
+  const failed = !!tapePicked && !tapeWatching && partial;
+  const here = t.audio || (t.upload && !partial);
+  tpAction("#tp-file-pick", !here, !partial, false);
+  $("#tp-file-pick").textContent = partial ? "Choose the same file…" : "Choose a file…";
+  tpAction("#tp-go", failed, true);
+  tpAction("#tp-cancel", !!t.upload);
+  if (t.playlist.done) return tpStep("recording", "done", "Archived", t.playlist.archived.file);
+  if (t.audio) return tpStep("recording", "done", "Uploaded", [t.source, t.duration ? clock(t.duration) : ""].filter(Boolean).join(" · "));
+  if (t.upload && !partial) return tpStep("recording", "done", "Here", `${t.upload.name}, ${mb(t.upload.total)}. Find boundaries reads it.`);
+  if (partial) return tpStep("recording", "todo", "Part-way", `${t.upload.name}: ${mb(t.upload.have)} of ${mb(t.upload.total)}. Choose the same file to carry on.`);
+  return tpStep("recording", "todo", "No file", "The one uncut recording of the whole tape.");
+}
+
+function stepList(t) {
+  const has = t.songs.length > 0;
+  tpAction("#tp-csv-pick", true, !has);
+  tpAction("#tp-list-add", !has && !tpDraft);
+  if (has) return tpStep("list", "done", counted(t.songs.length, "song", "songs"), "Edit any song by opening its row.");
+  return tpStep("list", "todo", "Empty", "Load a CSV, or add the songs by hand.");
+}
+
+function stepBoundaries(t) {
+  const placed = t.songs.some((s) => s.start != null);
+  const doubts = t.ear.filter((r) => r.doubtful).map((r) => r.number).sort((a, b) => a - b);
+  const canFind = t.songs.length > 0 && (t.audio || (t.upload && t.upload.have === t.upload.total));
+  tpAction("#tp-process", canFind || placed, !placed, !canFind);
+  $("#tp-process").textContent = placed ? "Find again" : "Find boundaries";
+  tpAction("#tp-review-next", doubts.length > 0, true);
+  if (!canFind && !placed) return tpStep("boundaries", "wait", "Waiting", "Needs the recording and the song list.");
+  if (!placed) return tpStep("boundaries", "ready", "Not run", "Find where each song begins and ends.");
+  if (doubts.length) {
+    const lead = t.mismatch ? "The list and the audio disagree. " : "";
+    return tpStep("boundaries", "todo", `${doubts.length} to check`,
+      `${lead}${songsNamed(doubts)} ${doubts.length === 1 ? "needs" : "need"} listening to.`, t.mismatch);
   }
-  return td;
+  return tpStep("boundaries", "done", "All checked", "Every boundary is set, accepted or skipped.");
 }
 
-function whyText(song) {
-  const by = { catalogue: "accepted from the catalogue", person: "your choice" }[song.settled_by];
-  return by || song.proposal?.reason || "";
+function stepAlbums(t) {
+  const live = t.songs.filter((s) => !s.skip);
+  const unasked = live.filter((s) => !s.proposal && !s.settled_by).length;
+  const open = live.filter((s) => !s.settled_by).map((s) => s.number);
+  const failed = live.filter((s) => !s.settled_by && s.proposal?.status === "failed").length;
+  tpAction("#tp-match", t.songs.length > 0 && unasked > 0, true);
+  tpAction("#tp-rematch", t.songs.length > 0 && !unasked && open.length > 0);
+  tpAction("#tp-next-album", open.length > 0 && !unasked, true);
+  if (!t.songs.length) return tpStep("albums", "wait", "Waiting", "Needs the song list.");
+  if (unasked === live.length && live.length) return tpStep("albums", "ready", "Not run", "Find the album each song belongs to.");
+  if (unasked) return tpStep("albums", "ready", `${unasked} not looked up`, `${songsNamed(open)} still ${open.length === 1 ? "needs" : "need"} an album.`);
+  if (failed) return tpStep("albums", "fail", `${failed} failed`, `${counted(failed, "lookup", "lookups")} could not finish. Look again to retry.`);
+  if (open.length) return tpStep("albums", "todo", `${open.length} to choose`, `${songsNamed(open)} ${open.length === 1 ? "needs" : "need"} an album chosen.`);
+  return tpStep("albums", "done", "All chosen", "Every song knows its album.");
 }
 
-// Answers replace the page's rows, which would lose list edits nobody saved, and
-// a save can renumber the song an answer is for.
-async function settleSong(send) {
-  $("#tp-err").textContent = "";
-  if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
-  await flushNudge();
-  try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
+// The cut's own refusal names every song; a rail line counts what it is waiting on.
+function cutWaits(t) {
+  const live = t.songs.filter((s) => !s.skip);
+  const unplaced = live.filter((s) => s.start == null || s.end == null).length;
+  const noRoom = live.filter((s) => s.start != null && s.end != null && s.end <= s.start).length;
+  const doubts = t.ear.filter((r) => r.doubtful).length;
+  const albums = live.filter((s) => !s.settled_by).length;
+  return [
+    unplaced ? "the boundaries" : "",
+    noRoom ? counted(noRoom, "song with no room between its boundaries", "songs with no room between their boundaries") : "",
+    doubts ? counted(doubts, "boundary to check", "boundaries to check") : "",
+    albums ? counted(albums, "album to choose", "albums to choose") : "",
+  ].filter(Boolean);
 }
+
+function stepCut(t) {
+  const failed = t.ear.filter((r) => r.cut === "failed").map((r) => r.number);
+  const stale = t.ear.filter((r) => r.cut === "out of date").length;
+  const live = t.songs.filter((s) => !s.skip).length;
+  const skipped = t.songs.filter((s) => s.skip).map((s) => s.number);
+  const left = skipped.length ? ` ${songsNamed(skipped)} left out, by your choice.` : "";
+  const refused = !!t.cut_refusal || !t.audio;
+  tpAction("#tp-cut", !t.playlist.done, !refused && !t.all_cut, refused || t.all_cut);
+  $("#tp-cut").textContent = failed.length || stale ? "Cut again" : "Cut";
+  if (t.playlist.done) return tpStep("cut", "done", "Cleared", "The cuts were cleared once the songs were proved filed.");
+  if (t.all_cut && !t.cut_refusal) return tpStep("cut", "done", "Cut", `${counted(live, "file", "files")} written.${left}`);
+  if (t.cut_refusal) {
+    const waits = cutWaits(t);
+    return tpStep("cut", "wait", "Waiting", waits.length ? `Waiting on ${waits.join(" and ")}.` : t.cut_refusal);
+  }
+  if (!t.audio) return tpStep("cut", "wait", "Waiting", "Needs the recording.");
+  if (failed.length) return tpStep("cut", "fail", `${failed.length} failed`, `${songsNamed(failed)} could not be cut. Open the row to see why.`);
+  if (stale) return tpStep("cut", "ready", `${stale} out of date`, `${counted(stale, "boundary has", "boundaries have")} moved since the cut.`);
+  return tpStep("cut", "ready", "Ready", `${counted(live, "song", "songs")} will be cut.${left}`);
+}
+
+const FILING_WORDS = {
+  failed: "failed", pending: "not filed yet", filed: "filed",
+  already: "already there", skipped: "skipped", unknown: "not confirmed",
+};
+
+const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
+
+function stepFile(t) {
+  const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
+  const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).map((o) => o.number).sort((a, b) => a - b) : [];
+  const refused = !!t.file_refusal;
+  tpAction("#tp-file-songs", !t.playlist.done, !refused && !t.all_filed, refused || t.all_filed);
+  $("#tp-file-songs").textContent = failed.length ? "File again" : "File";
+  if (t.all_filed) return tpStep("file", "done", "Filed", "Every song is in the library.");
+  if (failed.length) return tpStep("file", "fail", `${failed.length} need a look`, `${songsNamed(failed)} did not finish. File again retries only those.`);
+  if (refused) return tpStep("file", "wait", "Waiting", "Waiting on the cut.");
+  return tpStep("file", "ready", "Ready", "Each album gets its own run through beets.");
+}
+
+const PLAYLIST_WORDS = {
+  written: "file rewritten", unchanged: "file unchanged, so left untouched",
+  unknown: "the library could not be asked", nothing: "nothing written",
+  failed: "the file could not be written",
+};
+
+function stepPlaylist(t) {
+  const p = t.playlist;
+  const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
+  tpAction("#tp-playlist", true, started && !p.outcome, !started);
+  $("#tp-playlist").textContent = p.outcome ? "Write again" : "Write playlist";
+  const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
+  const told = t.job?.result?.notes ?? [];
+  const why = [
+    p.outcome ? `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.` : "",
+    p.path, p.note, ...told,
+    ...p.left_out.map((g) => `Song ${g.number} (${named(g.number)}): ${g.why}`),
+  ].filter(Boolean).join("\n");
+  if (!p.outcome) return tpStep("playlist", started ? "ready" : "wait", started ? "Ready" : "Waiting", started ? "No playlist written yet." : "Waiting on File.", why);
+  if (p.left_out.length || p.outcome === "failed" || p.outcome === "unknown")
+    return tpStep("playlist", "todo", `${p.songs} of ${t.songs.length}`, `${counted(p.left_out.length, "song", "songs")} left out.`, why);
+  return tpStep("playlist", "done", "Written", `${counted(p.songs, "song", "songs")} in order.`, why);
+}
+
+function stepArchive(t) {
+  const p = t.playlist;
+  const unfiled = t.filing.every((o) => o.state === "pending" || o.state === "skipped");
+  tpAction("#tp-archive", !p.done, !p.archive_refusal, !!p.archive_refusal);
+  if (p.done) return tpStep("archive", "done", "Archived", p.archived.file);
+  if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
+  if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
+  return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
+}
+
+function showRail(t) {
+  stepRecording(t);
+  stepList(t);
+  stepBoundaries(t);
+  stepAlbums(t);
+  stepCut(t);
+  stepFile(t);
+  stepPlaylist(t);
+  stepArchive(t);
+  if (tpJobStep) stepBusy(tpJobStep);
+  showLeft();
+}
+
+function showLeft() {
+  const kinds = TP_STEPS.map((id) => stepBox(id).dataset.kind);
+  const left = kinds.filter((k) => k !== "done").length;
+  const pill = $("#tp-left");
+  pill.querySelector("span").textContent = left ? counted(left, "step left", "steps left") : "Done";
+  pill.dataset.kind = !left ? "done" : kinds.includes("fail") ? "fail" : kinds.includes("todo") ? "todo" : "ready";
+}
+
+function stepBusy(id) {
+  const box = stepBox(id);
+  box.dataset.kind = "run";
+  box.querySelector(".tp-state").textContent = "Working";
+  box.append($("#tp-progress"));
+  $("#tp-progress").hidden = false;
+}
+
+function stepIdle() {
+  $("#tp-progress").hidden = true;
+  $("#tp-state").textContent = "";
+  setBar(0, "#tp-bar");
+}
+
+// ---- the table
 
 const CHOICE_HELD = {
   filed: "in the library, so this stays as it was filed",
@@ -1336,40 +1521,187 @@ const CHOICE_HELD = {
   unknown: "not confirmed, so this waits until File again gets an answer",
 };
 
-function reviewRow(song) {
-  const row = el("tr", song.settled_by ? null : "doubt");
+const editionText = (c) => `${c.release_title}, ${c.album_artist} (${c.date || "no date"})`
+  + `${c.note ? ` ${c.note}` : ""}${c.status ? ` ${c.status}` : ""}`;
+const trackText = (c) => c.number
+  ? `${c.disc}-${c.number} ${c.track_title}${c.length ? ` ${mss(c.length)}` : ", no length"}`
+  : "no track like this title";
+
+function boundaryWord(song, row) {
+  if (song.skip) return ["Skipped", "bad"];
+  if (song.start == null) return ["Not placed", "mute"];
+  if (song.set_by === "ear") return ["Set by you", "good"];
+  if (song.heard) return ["Accepted", "good"];
+  if (row?.doubtful) return ["Check", "warn"];
+  return ["Agrees", "good"];
+}
+
+function releaseWord(song) {
+  if (song.skip) return ["—", "mute"];
+  if (song.import_begun || song.filing === "unknown") return ["Not confirmed", "warn"];
+  if (song.filing === "filed") return ["Filed", "good"];
+  if (song.filing === "already") return ["In your library", "good"];
+  if (song.filing === "failed") return ["Filing failed", "bad"];
+  if (song.settled_by === "catalogue") return ["Matched", "good"];
+  if (song.settled_by) return [song.proposal?.choice ? "Your choice" : "From your list", "good"];
+  const p = song.proposal;
+  if (!p) return ["Not looked up", "mute"];
+  if (p.status === "failed") return ["Lookup failed", "bad"];
+  if (p.candidates.length > 1) return [`${p.candidates.length} to choose`, "warn"];
+  return [p.candidates.length ? "To confirm" : "No match", "warn"];
+}
+
+function statusCell(word) {
+  const td = el("td", "tp-col-status");
+  const box = el("span", `tp-status is-${word[1]}`);
+  box.append(el("i"), el("span", null, word[0]));
+  td.append(box);
+  return td;
+}
+
+function songRowView(song, row) {
+  const tr = el("tr", [tpOpen === song.number ? "sel" : "", song.skip ? "skipped" : ""].join(" ").trim());
+  tr.dataset.song = song.number;
+  tr.onclick = () => {
+    const closing = tpOpen === song.number;
+    tapeSelect(song.number, "start", true);
+    if (closing) { tpOpen = null; showSongs(tape); return; }
+    // Stacked on a phone, the waveform is not beside the row that was pressed.
+    if (matchMedia("(max-width:48rem)").matches && !$("#tp-wave-wrap").hidden)
+      $("#tp-wave-wrap").scrollIntoView({ block: "start" });
+  };
+  const choice = song.proposal?.choice;
+  const album = (song.settled_by && choice?.release_title) || song.album || "no album";
+  const who = el("td", "tp-col-song");
+  const line = el("div", "tp-who");
+  line.append(el("span", "tp-title", song.title), el("span", "tp-artist", song.artist));
+  who.append(line);
+  who.title = `${song.title}, ${song.artist}`;
+  const albumCell = el("td", "tp-col-album", album);
+  albumCell.title = album;
+  const span = el("td", "tp-col-span mono",
+    song.start != null && song.end != null ? `${clock(song.start)}–${clock(song.end)}` : "");
+  const length = el("td", "tp-col-len mono");
+  length.append(el("span", null, mss(song.length)));
+  if (song.delta != null)
+    length.append(el("span", Math.abs(song.delta) > 3 ? "tp-off warned" : "tp-off", signed(song.delta)));
+  tr.append(el("td", "num tp-col-num", song.number), who, albumCell, span, length,
+            statusCell(boundaryWord(song, row)), statusCell(releaseWord(song)));
+  return tr;
+}
+
+function fieldInput(label, name, value, wide) {
+  const box = el("label", wide ? "wide" : null, label);
+  const input = el("input");
+  input.dataset.field = name;
+  input.value = value;
+  input.autocomplete = "off";
+  box.append(input);
+  return [box, input];
+}
+
+// Edits are the whole list by hand, to the route that takes it, so what the route
+// says about a list holds for each edit and the page never holds unsaved text.
+const listNow = () => tape.songs.map((s) => ({ title: s.title, artist: s.artist, album: s.album, length: s.length }));
+
+async function sendList(songs, openAfter) {
+  $("#tp-err").textContent = "";
+  await flushNudge();
+  if (tape.songs.some((s) => s.start != null) && !tape.songs.some((s) => s.set_by === "ear")
+      && !confirm("A new list clears the boundaries found for this one, and what you marked heard. Save it?")) {
+    showSongs(tape);
+    return false;
+  }
+  try {
+    const after = await postJSON(`/api/tapes/${tape.id}/songs`, { songs });
+    tpOpen = openAfter;
+    showTape(after);
+    await loadTapes(tape.id);
+    return true;
+  } catch (e) {
+    $("#tp-err").textContent = e.message;
+    showSongs(tape);
+    return false;
+  }
+}
+
+function editField(song, input) {
+  const songs = listNow();
+  const name = input.dataset.field;
+  songs[song.number - 1][name] = input.value;
+  sendList(songs, song.number);
+}
+
+function moveSong(song, by) {
+  const songs = listNow(), to = song.number - 1 + by;
+  if (to < 0 || to >= songs.length) return;
+  songs.splice(to, 0, songs.splice(song.number - 1, 1)[0]);
+  sendList(songs, to + 1);
+}
+
+function removeSong(song) {
+  const songs = listNow();
+  songs.splice(song.number - 1, 1);
+  sendList(songs, null);
+}
+
+function edgesFromRow(song, box) {
+  const edge = (name) => box.querySelector(`input[data-edge=${name}]`).value.trim();
+  if (!edge("start") || !edge("end")) {
+    $("#tp-err").textContent = `song ${song.number}: both edges need a number of seconds - a blank one is not 0`;
+    return;
+  }
+  const [start, end] = [Number(edge("start")), Number(edge("end"))];
+  saveTapeEdges(song.number, start, end);
+}
+
+function edgeInput(song, name, label, box) {
+  const wrap = el("label", null, label);
+  const input = el("input");
+  input.type = "number"; input.step = "0.01"; input.min = "0";
+  input.dataset.edge = name;
+  input.dataset.field = name;
+  input.value = song[name];
+  input.onchange = () => edgesFromRow(song, box);
+  wrap.append(input);
+  return wrap;
+}
+
+const MISMATCH_SAYS = "the list and the audio disagreed across this tape, and this song has not been judged";
+
+function smallButton(text, title, act, cls = "ghost tiny") {
+  const b = el("button", cls, text);
+  b.type = "button"; b.title = title;
+  b.onclick = (e) => { e.stopPropagation(); act(); };
+  return b;
+}
+
+// Answers replace the page's rows, and a pending nudge belongs to the row it left.
+async function settleSong(send) {
+  $("#tp-err").textContent = "";
+  await flushNudge();
+  try { showTape(await send()); } catch (e) { $("#tp-err").textContent = e.message; }
+}
+
+function releaseOptions(song) {
+  const change = el("div", "tp-release");
   const release = `/api/tapes/${tape.id}/songs/${song.number}/release`;
   const fromList = `/api/tapes/${tape.id}/songs/${song.number}/from-list`;
-  row.append(el("td", "num", song.number));
-  const listed = el("td");
-  listed.append(el("div", null, `${song.title}, ${song.artist}`),
-                el("div", "dim", `${song.album || "no album"}, ${mss(song.length)}`));
-  row.append(listed, proposedCell(song), el("td", "mark", whyText(song)));
-
-  const change = el("td");
-  // A pasted release is on no list of candidates, and a select left without its
-  // own value shows blank.
   const current = song.proposal?.choice;
   const others = song.proposal?.candidates ?? [];
+  // A release given by hand is on no list of candidates, and is still the current one.
   const offered = current?.release && !others.some((c) => c.release === current.release)
     ? [current, ...others] : others;
   if (offered.length) {
-    const pick = el("div", "pick");
-    const editions = el("select");
-    editions.setAttribute("aria-label", "edition");
-    editions.append(...offered.map((c) => {
-      const o = el("option", null, `${editionText(c)}: ${trackText(c)}`);
-      o.value = c.release;
-      return o;
-    }));
-    if (song.proposal.choice) editions.value = song.proposal.choice.release;
-    const use = el("button", "ghost tiny", "Use");
-    use.type = "button";
-    use.onclick = () => settleSong(() => postJSON(release, { release: editions.value }));
-    pick.append(editions, use);
+    const pick = el("div", "tp-cands");
+    for (const c of offered) {
+      const on = song.settled_by && c.release === current?.release;
+      pick.append(smallButton(`${editionText(c)}: ${trackText(c)}`, "file this song under this album",
+        () => settleSong(() => postJSON(release, { release: c.release })), on ? "tp-cand on" : "tp-cand"));
+    }
     change.append(pick);
   }
-  const paste = el("div", "pick");
+  const by = el("div", "tp-by-id");
   const id = el("input");
   id.placeholder = "release id or link";
   id.setAttribute("aria-label", "release id or link");
@@ -1377,14 +1709,12 @@ function reviewRow(song) {
   track.dataset.field = "track";
   track.placeholder = "track";
   track.setAttribute("aria-label", "track number, if the title is not found");
-  const set = el("button", "ghost tiny", "Set");
-  set.type = "button";
-  set.onclick = () => settleSong(() => postJSON(release, { release: id.value, track: track.value }));
-  paste.append(id, track, set);
-  const listButton = el("button", "ghost tiny", "File from my list");
-  listButton.type = "button";
-  listButton.onclick = () => settleSong(() => postJSON(fromList, {}));
-  change.append(paste, listButton);
+  by.append(id, track,
+    smallButton("Use this release", "look this release up and file the song under it",
+      () => settleSong(() => postJSON(release, { release: id.value, track: track.value }))),
+    smallButton("File from my list", "tag this song from the list, with no release",
+      () => settleSong(() => postJSON(fromList, {}))));
+  change.append(by);
   // What the library holds, or may hold, was filed as this choice, and the route
   // refuses another.
   const held = CHOICE_HELD[song.import_begun ? "unknown" : song.filing];
@@ -1392,14 +1722,156 @@ function reviewRow(song) {
     for (const c of change.querySelectorAll("input, select, button")) c.disabled = true;
     change.append(el("div", "dim", held));
   }
-  row.append(change);
-  return row;
+  return change;
 }
 
-// The waveform is the same editor a rip's Cut screen has, on its own canvas, and a
-// song's edges reach the server only when a marker is let go.
+function releaseBlock(song) {
+  const settled = !!song.settled_by;
+  const choice = song.proposal?.choice;
+  const said = settled
+    ? choice ? `${editionText(choice)}: ${trackText(choice)}` : "Filed from your list, with no release."
+    : song.proposal?.reason || (song.proposal ? "" : "Not looked up yet.");
+  const block = el("details", "tp-more");
+  block.open = !settled && !!song.proposal;
+  const summary = el("summary", null, settled ? "Change the album" : "Choose the album");
+  block.append(summary, el("p", settled ? "dim" : "tp-warn", said), releaseOptions(song));
+  return block;
+}
+
+// The playlist is written from what filing recorded, so it is told straight away.
+function useCopyButton(o) {
+  return smallButton("Use the copy in my library", "this is the song, and it needs no filing", async () => {
+    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${o.number}/use-copy`, { path: o.unconfirmed }));
+    if (!$("#tp-err").textContent) writePlaylist();
+  });
+}
+
+function filedBlock(song, t) {
+  const o = t.filing.find((f) => f.number === song.number);
+  if (!o || o.state === "pending" || o.state === "skipped") return null;
+  const looks = FILING_NEEDS_A_LOOK.includes(o.state);
+  const box = el("div", "tp-filed");
+  box.append(el("p", looks ? "tp-warn" : "dim", `${FILING_WORDS[o.state] ?? o.state}${o.path || o.unconfirmed ? `: ${o.path || o.unconfirmed}` : ""}`));
+  if (o.note) box.append(el("p", looks ? "tp-warn" : "dim", o.note));
+  if (o.unconfirmed) box.append(useCopyButton(o));
+  return box;
+}
+
+function songOpenView(song, row, t) {
+  const tr = el("tr", "tp-open");
+  const td = el("td");
+  td.colSpan = 7;
+  const box = el("div", "tp-open-box");
+  const fields = el("div", "tp-fields");
+  const edit = (label, name, value, wide) => {
+    const [wrap, input] = fieldInput(label, name, value, wide);
+    input.onchange = () => editField(song, input);
+    fields.append(wrap);
+  };
+  edit("Title", "title", song.title, true);
+  edit("Artist", "artist", song.artist, true);
+  edit("Album", "album", song.album, true);
+  edit("List length", "length", mss(song.length));
+  if (song.start != null && song.end != null) {
+    fields.append(edgeInput(song, "start", "Start (s)", box), edgeInput(song, "end", "End (s)", box));
+  }
+  const moves = el("div", "tp-moves");
+  moves.append(smallButton("↑", "move up", () => moveSong(song, -1)),
+               smallButton("↓", "move down", () => moveSong(song, 1)),
+               smallButton("Remove", "take off the list", () => removeSong(song), "ghost tiny tp-danger"));
+  fields.append(moves);
+  box.append(fields);
+
+  const said = song.reason || (row?.doubtful ? MISMATCH_SAYS : "");
+  if (said) box.append(el("p", row?.doubtful ? "tp-warn" : "dim", said));
+  const inside = t.inside.filter((i) => i.song === song.number);
+  if (inside.length) {
+    const hears = el("div", "tp-hears");
+    for (const g of inside) {
+      const seek = smallButton(`Hear the silence at ${fmtLong(g.lo)} to ${fmtLong(g.hi)}`,
+        "play from just before this silence", () => tapeHearSilence(g.lo, g.hi));
+      seek.disabled = !t.audio;
+      hears.append(seek);
+    }
+    box.append(hears);
+  }
+  // Archiving clears the cuts of songs already proved to be in the library.
+  const cutSaid = !row || song.skip ? "" : t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
+  if (cutSaid && cutSaid !== "not cut") {
+    box.append(el("p", cutSaid === "failed" || cutSaid === "out of date" ? "tp-warn" : "dim",
+      `Cut: ${cutSaid}${cutSaid === "failed" && song.cut?.why ? `: ${song.cut.why}` : ""}`));
+  }
+  const filed = filedBlock(song, t);
+  if (filed) box.append(filed);
+  if (!song.skip) box.append(releaseBlock(song));
+  td.append(box);
+  tr.append(td);
+  return tr;
+}
+
+function draftRowView() {
+  const tr = el("tr", "tp-open");
+  const td = el("td");
+  td.colSpan = 7;
+  const box = el("div", "tp-open-box");
+  const fields = el("div", "tp-fields");
+  const add = (label, name, wide, hint) => {
+    const [wrap, input] = fieldInput(label, name, tpDraft[name], wide);
+    if (hint) input.placeholder = hint;
+    input.oninput = () => { tpDraft[name] = input.value; };
+    fields.append(wrap);
+  };
+  add("Title", "title", true);
+  add("Artist", "artist", true);
+  add("Album", "album", true);
+  add("List length", "length", false, "m:ss");
+  const moves = el("div", "tp-moves");
+  moves.append(smallButton("Add", "put this song at the end of the list", addDraft, "tiny"),
+               smallButton("Cancel", "forget this song", () => { tpDraft = null; showTape(tape); }));
+  fields.append(moves);
+  box.append(fields);
+  td.append(box);
+  tr.append(td);
+  return tr;
+}
+
+function startDraft() {
+  tpDraft = tpDraft ?? { title: "", artist: "", album: "", length: "" };
+  showTape(tape);
+  $("#tp-rows").querySelector('[data-field="title"]')?.focus();
+}
+
+async function addDraft() {
+  const number = tape.songs.length + 1;
+  const draft = tpDraft;
+  tpDraft = null;
+  if (!await sendList([...listNow(), draft], number)) { tpDraft = draft; showTape(tape); }
+}
+
+function showSongs(t) {
+  const has = t.songs.length > 0 || !!tpDraft;
+  $("#tp-table-wrap").hidden = !has;
+  if (!has) { $("#tp-rows").replaceChildren(); return; }
+  const focused = document.activeElement?.closest?.("#tp-rows") && document.activeElement.dataset.field;
+  const rows = [];
+  for (const song of t.songs) {
+    const row = t.ear.find((r) => r.number === song.number);
+    rows.push(songRowView(song, row));
+    if (tpOpen === song.number) rows.push(songOpenView(song, row, t));
+  }
+  if (tpDraft) rows.push(draftRowView());
+  $("#tp-rows").replaceChildren(...rows);
+  $("#tp-add").hidden = !!tpDraft;
+  if (focused) $("#tp-rows").querySelector(`[data-field="${focused}"]`)?.focus();
+  if (t.playlist.done) archivedControls();
+}
+
+// ---- the waveform
+
+// It is the same editor a rip's Cut screen has, on its own canvas, and a song's edges
+// reach the server only when a marker is let go.
 let tpDrawn = null, tpAudio = null;
-let tpPicked = null;                  // the marker a person pressed, which arrows may move
+let tpPicked = null;                  // the edge a person chose, which − + and arrows may move
 let tpNudge = null;                   // {tape, song, seen, start, end, timer}, not yet saved
 
 const songOf = (n) => tape?.songs.find((s) => s.number === n);
@@ -1411,7 +1883,7 @@ const STANDING = (song) => (song.skip ? "–" : song.set_by === "ear" ? "•" : 
 function tapeTracks(t) {
   return t.songs.filter((s) => s.start != null && s.end != null).map((s) => ({
     number: s.number, title: s.title, start: s.start, end: s.end, cat: s.length,
-    flag: !!t.ear.find((r) => r.number === s.number)?.doubtful, mark: STANDING(s),
+    flag: !!earOf(s.number)?.doubtful, mark: STANDING(s),
   }));
 }
 
@@ -1425,7 +1897,7 @@ const tapeGaps = (t) => t.gaps.map(([lo, hi], i) => {
 function waveSay(text, warn) {
   const say = $("#tp-wave-say");
   say.textContent = text || "";
-  say.className = warn ? "warn" : "dim";
+  say.className = warn ? "tp-warn" : "dim";
 }
 
 // The window comes from the real length, which is the grid boundaries were placed
@@ -1463,33 +1935,68 @@ function showTapeWave(t) {
   showTapeTools();
 }
 
+function showEar(t) {
+  const placed = t.songs.some((s) => s.start != null);
+  $("#tp-wave-wrap").hidden = !placed;
+  if (!placed) {
+    tpPlayer.stop();
+    tpDrawn = tpAudio = null;
+    tpEd.clear();
+    return;
+  }
+  showTapeWave(t);
+}
+
+const toolLabel = (id, text) => { $(id).querySelector("span").textContent = text; };
+const tapeWhole = () => !!tpEd.side && tpEd.t1 - tpEd.t0 >= tpEd.side.duration - 0.01;
+
+function showTapeView() {
+  const whole = tapeWhole();
+  $("#tp-whole").classList.toggle("on", whole);
+  $("#tp-song").classList.toggle("on", !!tpEd.side && !whole);
+}
+
 function showTapeTools() {
   const done = !!tape?.playlist.done, wave = !!tpEd.side;
   const song = wave ? songOf(tpEd.sel?.track) : null;
   const doubts = tape?.ear.filter((r) => r.doubtful).length ?? 0;
-  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = !doubts || !wave || done;
-  $("#tp-next").textContent = doubts ? `Doubt → (${doubts})` : "No doubts";
+  const none = !tape?.songs.length;
+  for (const id of ["#tp-prev", "#tp-next"]) $(id).disabled = none;
+  $("#tp-doubt").disabled = !doubts || !wave || done;
+  toolLabel("#tp-doubt", doubts ? `Next doubt (${doubts})` : "No doubts");
+  const picked = !!song && tpPicked?.track === song.number;
+  const moves = !!song && !tpEd.frozen;
+  for (const edge of ["start", "end"]) {
+    const b = $(`#tp-edge-${edge}`);
+    b.disabled = !moves;
+    b.classList.toggle("on", picked && tpPicked.edge === edge);
+  }
+  for (const id of ["#tp-minus", "#tp-plus"]) $(id).disabled = !moves || !picked;
   $("#tp-play").disabled = !tape?.audio;
+  toolLabel("#tp-play", tpPlayer.playing ? "Stop" : song ? "Play song" : "Play");
   $("#tp-hear").disabled = !tape?.audio || !song;
   $("#tp-accept").disabled = done || !song || song.set_by === "ear";
-  $("#tp-accept").textContent = song?.heard ? "Take back" : "Accept";
+  toolLabel("#tp-accept", song?.heard ? "Take back" : "Accept");
+  $("#tp-accept").classList.toggle("primary", !!song && !!earOf(song.number)?.doubtful);
   $("#tp-skip").disabled = done || !song;
-  $("#tp-skip").textContent = song?.skip ? "Keep" : "Skip";
+  toolLabel("#tp-skip", song?.skip ? "Unskip" : "Skip");
   $("#tp-song").disabled = done || !song;
   for (const id of ["#tp-in", "#tp-out", "#tp-whole"]) $(id).disabled = !wave;
+  showTapeView();
 }
 
 function tapeReadout() {
   const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
   if (!t) {
     $("#tp-ro-time").textContent = fmtLong(tpEd.playhead);
-    $("#tp-ro-song").textContent = ""; $("#tp-ro-gap").textContent = ""; $("#tp-ro-gap").className = "";
+    $("#tp-ro-song").textContent = ""; $("#tp-ro-len").textContent = "";
+    $("#tp-ro-gap").textContent = ""; $("#tp-ro-gap").className = "";
     return;
   }
   const v = t[sel.edge], len = t.end - t.start, d = len - t.cat;
   $("#tp-ro-time").textContent = `${fmtLong(v)}  ${v.toFixed(2)}s`;
-  $("#tp-ro-song").textContent = `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s`
-    + ` (list ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`;
+  $("#tp-ro-song").textContent = `${sel.edge} of ${t.number} “${t.title}”`;
+  $("#tp-ro-len").textContent = `${len.toFixed(2)}s (list ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`;
   sayGap($("#tp-ro-gap"), v, tpEd.side?.gaps.band.gaps ?? []);
 }
 
@@ -1499,12 +2006,22 @@ function tapeSelect(num, edge, fit, picked = false) {
   tpPicked = picked && num != null ? { track: num, edge } : null;
   const t = tpEd.tracks.find((x) => x.number === num);
   if (fit && t) tpEd.fitRange(t.start, t.end); else tpEd.render();
-  for (const row of $("#tp-ear").children) row.classList.toggle("sel", Number(row.dataset.song) === num);
   tapeReadout();
   showTapeTools();
-  const song = songOf(num);
-  const why = song && (song.reason || (earOf(num)?.doubtful ? MISMATCH_SAYS : ""));
-  waveSay(why ? `song ${num}: ${why}` : "");
+  if (num == null) return;
+  const opening = tpOpen !== num;
+  tpOpen = num;
+  waveSay("");
+  if (opening) showSongs(tape);
+  document.querySelector(`#tp-rows tr[data-song="${num}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
+// Whole stays whole, so stepping along a long tape does not lose the view of it.
+function stepSong(by) {
+  if (!tape?.songs.length) return;
+  const here = tpEd.sel?.track ?? tpOpen ?? (by > 0 ? 0 : tape.songs.length + 1);
+  const next = Math.max(1, Math.min(tape.songs.length, here + by));
+  tapeSelect(next, "start", !tapeWhole());
 }
 
 function stepDoubt(by) {
@@ -1515,7 +2032,13 @@ function stepDoubt(by) {
   const next = by > 0 ? doubts.find((n) => n > here) ?? doubts[0]
     : doubts.findLast((n) => n < here) ?? doubts.at(-1);
   tapeSelect(next, "start", true);
-  document.querySelector(`#tp-ear tr[data-song="${next}"]`)?.scrollIntoView({ block: "center" });
+}
+
+function stepAlbum() {
+  const open = tape.songs.filter((s) => !s.skip && !s.settled_by).map((s) => s.number);
+  if (!open.length) return;
+  const next = open.find((n) => n > (tpOpen ?? 0)) ?? open[0];
+  tapeSelect(next, "start", true);
 }
 
 // Asked for only when something is to be played: a long tape's file is gigabytes,
@@ -1527,10 +2050,14 @@ function tapeAudioReady() {
   return true;
 }
 
+// A paused song carries on from the playhead; from anywhere else it plays from its top.
 function tapePlay() {
   if (!tapeAudioReady()) return;
+  if (tpPlayer.playing) { tpPlayer.toggle(null); return; }
   const t = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
-  tpPlayer.toggle(tpPlayer.playing ? null : (t ? Math.max(0, t[tpEd.sel.edge] - 3) : tpEd.playhead));
+  const at = tpEd.playhead;
+  tpPlayer.toggle(t && (at < t.start || at >= t.end) ? t.start : at);
+  if (t) tpPlayer.stopAt = t.end;
 }
 
 function tapeHear(at) {
@@ -1569,11 +2096,6 @@ async function saveTapeEdges(num, start, end) {
   const before = tape;
   if (tpNudge?.tape === tape.id && tpNudge.song === num) dropNudge();
   else await flushNudge();
-  if (tapeEdited) {
-    tpEd.setTracks(tapeTracks(tape));
-    waveSay("save the song list first", true);
-    return;
-  }
   tpEd.frozen = true;
   try {
     const seen = songOf(num);
@@ -1641,6 +2163,32 @@ function nudgeTapeEdge(t, edge, by) {
   waveSay(`Song ${t.number} becomes yours when this saves, and nothing will move it after that.`);
 }
 
+// A nudge sets a boundary for good, so a song chosen from its row is not enough: the
+// edge has to have been asked for, by its marker or by Start, End or E.
+function nudgeChosen(by) {
+  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
+  if (!t) return false;
+  if (tpPicked?.track !== sel.track || tpPicked.edge !== sel.edge) {
+    waveSay("Choose Start or End first (E), or press a marker, and then this moves it.");
+    return false;
+  }
+  nudgeTapeEdge(t, sel.edge, by);
+  return true;
+}
+
+function tapeChooseEdge(edge) {
+  const num = tpEd.sel?.track;
+  if (num != null) tapeSelect(num, edge, false, true);
+}
+
+// The first press chooses the edge the readout is showing, and the next ones swap it.
+function tapeSwapEdge() {
+  const sel = tpEd.sel;
+  if (!sel) return;
+  const chosen = tpPicked?.track === sel.track;
+  tapeChooseEdge(chosen ? (sel.edge === "start" ? "end" : "start") : sel.edge);
+}
+
 function tapeJudge(send) {
   return settleSong(async () => {
     const after = await send();
@@ -1660,34 +2208,43 @@ function tapeZoom(by) {
   tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
 }
 
+function tapeShowSong() {
+  const t = tpEd.tracks.find((x) => x.number === tpEd.sel?.track);
+  if (t) tpEd.fitRange(t.start, t.end);
+}
+
+// Every key but the two nudges presses its button, so a key does what the button
+// would and a disabled button refuses it.
+const TAPE_KEYS = {
+  k: "#tp-prev", j: "#tp-next", h: "#tp-hear", a: "#tp-accept", s: "#tp-skip",
+};
+const NUDGE_KEYS = { ",": -1, "<": -1, ".": 1, ">": 1, ArrowLeft: -1, ArrowRight: 1 };
+
 function tapeKey(e) {
   // Alt-left is the browser going back. Shift is this page's own larger step.
   if (e.altKey || e.ctrlKey || e.metaKey) return;
-  const sel = tpEd.sel, t = sel && tpEd.tracks.find((x) => x.number === sel.track);
-  if (e.code === "Space") {
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (NUDGE_KEYS[e.key]) {
+    if (nudgeChosen(NUDGE_KEYS[e.key] * (e.shiftKey ? 0.5 : 0.05))) e.preventDefault();
+  } else if (e.code === "Space") {
     e.preventDefault();
     // A button keeps the focus after a press, and would be pressed again by this.
     if (e.target.tagName === "BUTTON") e.target.blur();
     tapePlay();
-  } else if (e.key === "a" || e.key === "A") {
-    if (t) { e.preventDefault(); tapeHear(t[sel.edge]); }
-  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
-    // A nudge sets a boundary for good, so a song chosen from its row is not enough.
-    if (tpPicked?.track !== sel.track || tpPicked.edge !== sel.edge) {
-      waveSay("Press a marker on the waveform first, and the arrow keys will move it.");
-      return;
-    }
-    e.preventDefault();
-    nudgeTapeEdge(t, sel.edge, (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1));
-  } else if (e.key === "n" || e.key === "N") {
+  } else if (TAPE_KEYS[key]) {
+    e.preventDefault(); $(TAPE_KEYS[key]).click();
+  } else if (key === "n") {
     e.preventDefault(); stepDoubt(e.shiftKey ? -1 : 1);
-  } else if (e.key === "f" || e.key === "F" || e.key === "0") {
+  } else if (key === "e") {
+    e.preventDefault(); tapeSwapEdge();
+  } else if (key === "f" || key === "0") {
     e.preventDefault(); tpEd.fit();
-  } else if (e.key === "z" || e.key === "Z") {
-    if (t) { e.preventDefault(); tpEd.fitRange(t.start, t.end); }
-  } else if (e.key === "?") {
+  } else if (key === "z") {
+    e.preventDefault();
+    if (tapeWhole()) tapeShowSong(); else tpEd.fit();
+  } else if (key === "?") {
     e.preventDefault(); $("#helpdlg").showModal();
-  } else if (e.key === "Escape") { tpPlayer.stop(); }
+  } else if (key === "Escape") { tpPlayer.stop(); }
 }
 
 function wireTapeWave() {
@@ -1698,219 +2255,34 @@ function wireTapeWave() {
     },
     (num, edge) => tapeSelect(num, edge, false, true),
     (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
-    { onDrop: tapeEdgeDropped, long: true });
+    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView });
   tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
+  for (const change of ["play", "pause", "ended"]) tpPlayer.el.addEventListener(change, showTapeTools);
+  // The rail coming and going changes the canvas's width with no window resize.
+  new ResizeObserver(() => tpEd.render()).observe($("#tp-cv"));
   $("#tp-vol").oninput = (e) => tpPlayer.setVolume(e.target.value / 100);
   addEventListener("pagehide", flushNudgeOnLeaving);
-  $("#tp-prev").onclick = () => stepDoubt(-1);
-  $("#tp-next").onclick = () => stepDoubt(1);
+  $("#tp-prev").onclick = () => stepSong(-1);
+  $("#tp-next").onclick = () => stepSong(1);
+  $("#tp-doubt").onclick = () => stepDoubt(1);
+  $("#tp-edge-start").onclick = () => tapeChooseEdge("start");
+  $("#tp-edge-end").onclick = () => tapeChooseEdge("end");
+  $("#tp-minus").onclick = () => nudgeChosen(-0.05);
+  $("#tp-plus").onclick = () => nudgeChosen(0.05);
   $("#tp-play").onclick = tapePlay;
   $("#tp-hear").onclick = tapeHearSelected;
   $("#tp-in").onclick = () => tapeZoom(0.5);
   $("#tp-out").onclick = () => tapeZoom(2);
   $("#tp-whole").onclick = () => tpEd.fit();
-  $("#tp-song").onclick = () => {
-    const t = tpEd.tracks.find((x) => x.number === tpEd.sel?.track);
-    if (t) tpEd.fitRange(t.start, t.end);
-  };
+  $("#tp-song").onclick = tapeShowSong;
   $("#tp-accept").onclick = () => tapeAccept(songOf(tpEd.sel?.track));
   $("#tp-skip").onclick = () => tapeSkip(songOf(tpEd.sel?.track));
 }
 
-function showEar(t) {
-  const placed = !!t && t.songs.some((s) => s.start != null);
-  $("#tp-ear-wrap").hidden = !placed;
-  $("#tp-wave-wrap").hidden = !placed;
-  $("#tp-cut").disabled = !t || !t.audio;
-  if (!placed) {
-    $("#tp-ear").replaceChildren();
-    $("#tp-cut-why").hidden = true;
-    tpPlayer.stop();
-    tpDrawn = tpAudio = null;
-    tpEd.clear();
-    return;
-  }
-  $("#tp-cut").disabled = !t.audio || !!t.cut_refusal;
-  const skipped = t.songs.filter((s) => s.skip).map((s) => `song ${s.number} (${s.title})`);
-  const said = [
-    t.cut_refusal,
-    t.all_cut ? "every song is cut" : "",
-    skipped.length ? `not cut, by your choice: ${skipped.join(", ")}` : "",
-  ].filter(Boolean).join(". ");
-  $("#tp-cut-why").textContent = said;
-  $("#tp-cut-why").className = t.cut_refusal ? "warn" : "dim";
-  $("#tp-cut-why").hidden = !said;
-  $("#tp-ear").replaceChildren(...t.ear.map((row) => earRow(row, t)));
-  showTapeWave(t);
-}
+// ---- jobs and arrivals
 
-const FILING_WORDS = {
-  failed: "failed", pending: "not filed yet", filed: "filed",
-  already: "already there", skipped: "skipped", unknown: "not confirmed",
-};
-
-const FILING_NEEDS_A_LOOK = ["failed", "unknown"];
-
-// The playlist is written from what filing recorded, so it is told straight away.
-function useCopyButton(o) {
-  const b = el("button", "ghost tiny", "Use the copy in my library");
-  b.type = "button";
-  b.onclick = async () => {
-    await settleSong(() => postJSON(`/api/tapes/${tape.id}/songs/${o.number}/use-copy`, { path: o.unconfirmed }));
-    if (!$("#tp-err").textContent) writePlaylist();
-  };
-  return b;
-}
-
-function filingRow(o) {
-  const tr = el("tr", FILING_NEEDS_A_LOOK.includes(o.state) ? "doubt" : null);
-  const who = el("td");
-  who.append(el("div", null, o.title), el("div", "dim", o.artist));
-  const where = el("td", FILING_NEEDS_A_LOOK.includes(o.state) ? "mark" : "dim");
-  where.append(el("div", null, o.path || o.unconfirmed));
-  if (o.note) where.append(el("div", "why", o.note));
-  if (o.unconfirmed) where.append(useCopyButton(o));
-  tr.append(el("td", "num", o.number), who,
-            el("td", null, FILING_WORDS[o.state] ?? o.state), where);
-  return tr;
-}
-
-function showFiling(t) {
-  const button = $("#tp-file-songs");
-  const started = !!t && t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
-  const failed = started ? t.filing.filter((o) => FILING_NEEDS_A_LOOK.includes(o.state)).length : 0;
-  button.disabled = !t || !!t.file_refusal || t.all_filed;
-  button.textContent = failed ? "File again" : "File";
-  const why = !t || t.playlist.done ? ""
-    : t.cut_refusal ? "waits for the cut, above"
-    : t.file_refusal || (t.all_filed ? "every song is in the library" : "");
-  $("#tp-file-why").textContent = why;
-  $("#tp-file-why").className = t?.all_filed ? "dim" : "warn";
-  $("#tp-file-why").hidden = !why;
-  $("#tp-filing-wrap").hidden = !started;
-  $("#tp-filing").replaceChildren(...(started ? t.filing.map(filingRow) : []));
-  $("#tp-filing-sum").textContent = failed
-    ? `${failed} of ${t.filing.length} need a look - the reasons are below; File again retries only those`
-    : "";
-}
-
-const PLAYLIST_WORDS = {
-  written: "file rewritten", unchanged: "file unchanged, so left untouched",
-  unknown: "the library could not be asked", nothing: "nothing written",
-  failed: "the file could not be written",
-};
-
-function showPlaylist(t) {
-  const p = t?.playlist;
-  $("#tp-playlist").disabled = !t || !t.songs.length;
-  $("#tp-archive").disabled = !t || !!p.archive_refusal;
-  $("#tp-pl-path").textContent = !t ? "" : p.path || "no playlist written yet";
-  const said = !p?.outcome ? p?.note ?? "" : [
-    `${p.left_out.length ? "Incomplete" : "Complete"}: ${p.songs} of ${t.songs.length} songs in the file.`,
-    `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`,
-    p.note,
-  ].join(" ");
-  const told = t?.job?.result?.notes ?? [];
-  $("#tp-pl-state").textContent = [said, ...told].filter(Boolean).join(" ");
-  const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
-  $("#tp-pl-left").replaceChildren(...(p ? p.left_out.map((g) =>
-    el("li", null, `song ${g.number} (${named(g.number)}): ${g.why}`)) : []));
-  const unfiled = t?.filing.every((o) => o.state === "pending" || o.state === "skipped");
-  const why = p?.done ? "archived, and listed here as done"
-    : unfiled ? "waits until the songs are filed" : p?.archive_refusal ?? "";
-  $("#tp-arch-why").textContent = why;
-  $("#tp-arch-why").className = p?.done ? "dim" : "warn";
-  $("#tp-arch-why").hidden = !why;
-}
-
-function edgeCell(song, edge) {
-  const td = el("td", "edge");
-  const input = el("input");
-  input.type = "number"; input.step = "0.01"; input.min = "0";
-  input.dataset.edge = edge;
-  input.value = song[edge] ?? "";
-  input.setAttribute("aria-label", `song ${song.number} ${edge}, in seconds`);
-  const hear = judgeButton("Hear", "across this boundary, with a tick on it",
-    () => { tapeSelect(song.number, edge, false, true); tapeHear(song[edge]); });
-  hear.disabled = song[edge] == null;
-  td.append(input, hear);
-  return td;
-}
-
-const MISMATCH_SAYS = "the list and the audio disagreed across this tape, and this song has not been judged";
-
-function whyCell(song, row, t) {
-  const td = el("td", "why");
-  const said = song.reason || (row.doubtful ? MISMATCH_SAYS : "");
-  if (said) td.append(el("div", row.doubtful ? "mark" : "dim", said));
-  for (const g of t.inside.filter((i) => i.song === song.number)) {
-    const seek = el("button", "ghost tiny", `hear ${fmtLong(g.lo)} to ${fmtLong(g.hi)}`);
-    seek.type = "button";
-    seek.title = "play from just before this silence";
-    seek.disabled = !t.audio;
-    seek.onclick = () => tapeHearSilence(g.lo, g.hi);
-    td.append(seek);
-  }
-  return td;
-}
-
-function judgeButton(text, title, act) {
-  const b = el("button", "ghost tiny", text);
-  b.type = "button"; b.title = title; b.onclick = act;
-  return b;
-}
-
-function earRow(row, t) {
-  const song = t.songs.find((s) => s.number === row.number);
-  const selected = tpEd.sel?.track === song.number;
-  const tr = el("tr", [row.doubtful ? "doubt" : "", selected ? "sel" : ""].join(" ").trim());
-  tr.dataset.song = song.number;
-  tr.onclick = (e) => {
-    if (e.target.closest("button, input")) return;
-    tapeSelect(song.number, "start", true);
-    // Stacked on a phone, the waveform is not beside the row that was pressed.
-    if (getComputedStyle($("#tp-wave-wrap")).position === "static")
-      $("#tp-wave-wrap").scrollIntoView({ block: "start" });
-  };
-  tr.append(el("td", "num", song.number));
-  const who = el("td");
-  who.append(el("div", null, song.title),
-             el("div", "dim", `${song.artist}, ${mss(song.length)}`
-               + `${song.delta != null ? `, ${signed(song.delta)}` : ""}`));
-  tr.append(who, whyCell(song, row, t), edgeCell(song, "start"), edgeCell(song, "end"));
-
-  const judge = el("td", "moves");
-  judge.append(judgeButton("Set", "keep these two edges as yours", () => {
-    const edge = (name) => tr.querySelector(`input[data-edge=${name}]`).value.trim();
-    if (!edge("start") || !edge("end")) {
-      $("#tp-err").textContent = `song ${song.number}: both edges need a number of seconds - a blank one is not 0`;
-      return;
-    }
-    const [start, end] = [Number(edge("start")), Number(edge("end"))];
-    saveTapeEdges(song.number, start, end);
-  }));
-  if (song.set_by !== "ear") {
-    judge.append(judgeButton(song.heard ? "Take back" : "Accept", "the found edges are right, by ear",
-      () => tapeAccept(song)));
-  }
-  judge.append(judgeButton(song.skip ? "Keep" : "Skip", "a damaged song is not cut, and stays named",
-    () => tapeSkip(song)));
-  judge.append(el("div", "dim", song.set_by === "ear" ? "set by you" : song.heard ? "accepted" : ""));
-  tr.append(judge);
-
-  // Archiving clears the cuts of songs already proved to be in the library.
-  const cutSaid = t.playlist.done && row.cut === "not cut" ? "cleared" : row.cut;
-  const cut = el("td", row.cut === "failed" || row.cut === "out of date" ? "mark" : "dim", cutSaid);
-  if (row.cut === "failed") cut.append(el("div", "why", song.cut.why));
-  tr.append(cut);
-  return tr;
-}
-
-// Saving a list clears boundaries and what was heard, which is never a side effect
-// of asking to hear or cut them.
 async function startTapeJob(path, body) {
   $("#tp-err").textContent = "";
-  if (tapeEdited) { $("#tp-err").textContent = "save the song list first"; return; }
   await flushNudge();
   try {
     await postJSON(path, body);
@@ -1926,70 +2298,6 @@ function archiveTape() {
     startTapeJob(`/api/tapes/${tape.id}/archive`, {});
 }
 
-function songInput(field, value, label) {
-  const input = el("input");
-  input.dataset.field = field;
-  input.value = value;
-  input.setAttribute("aria-label", label);
-  input.oninput = () => { tapeEdited = true; };
-  return input;
-}
-
-function songCell(row, child) {
-  const td = el("td");
-  td.append(child);
-  row.append(td);
-}
-
-function songRow(song = {}) {
-  const row = el("tr", song.verdict === "doubt" && !song.heard && !song.skip ? "doubt" : null);
-  row.append(el("td", "num"));
-  songCell(row, songInput("title", song.title ?? "", "title"));
-  songCell(row, songInput("artist", song.artist ?? "", "artist"));
-  songCell(row, songInput("album", song.album ?? "", "album"));
-  const length = songInput("length", song.length ? mss(song.length) : "", "length, as m:ss");
-  length.placeholder = "m:ss";
-  songCell(row, length);
-  const placed = song.start != null && song.end != null;
-  row.append(el("td", "mono", placed ? `${fmtLong(song.start)} to ${fmtLong(song.end)}` : ""));
-  row.append(el("td", "mono", song.delta != null ? signed(song.delta) : ""));
-  row.append(el("td", "mark", song.skip ? "skip" : song.set_by === "ear" ? "by ear"
-    : song.heard ? "heard" : song.verdict ?? ""));
-  const moves = el("td", "moves");
-  const button = (text, title, act) => {
-    const b = el("button", "ghost tiny", text);
-    b.type = "button"; b.title = title;
-    b.onclick = () => { act(); tapeEdited = true; renumberSongs(); };
-    moves.append(b);
-  };
-  button("↑", "move up", () => { if (row.previousElementSibling) row.after(row.previousElementSibling); });
-  button("↓", "move down", () => { if (row.nextElementSibling) row.before(row.nextElementSibling); });
-  button("×", "take off the list", () => row.remove());
-  row.append(moves);
-  return row;
-}
-
-function renumberSongs() {
-  [...$("#tp-rows").children].forEach((row, i) => { row.firstElementChild.textContent = i + 1; });
-}
-
-async function saveSongs() {
-  const songs = [...$("#tp-rows").children].map((row) => Object.fromEntries(
-    [...row.querySelectorAll("input")].map((i) => [i.dataset.field, i.value])));
-  showTape(await postJSON(`/api/tapes/${tape.id}/songs`, { songs }));
-}
-
-async function saveSongsPressed() {
-  $("#tp-err").textContent = "";
-  if (tape.songs.some((s) => s.start != null)
-      && !confirm("A new list clears the boundaries found for this one, and what you marked heard. Save it?")) return;
-  try {
-    await saveSongs();
-    await loadTapes(tape.id);
-    status("song list saved");
-  } catch (e) { $("#tp-err").textContent = e.message; }
-}
-
 async function sendTapeList(file) {
   $("#tp-err").textContent = "";
   try {
@@ -2001,8 +2309,9 @@ async function sendTapeList(file) {
 
 async function sendTape(file) {
   $("#tp-err").textContent = "";
-  $("#tp-go").disabled = true; $("#tp-cancel").hidden = false;
+  $("#tp-go").hidden = true;
   const id = tape.id;
+  stepBusy("recording");
   try {
     const begun = await postJSON(`/api/tapes/${id}/upload/begin`,
       { name: file.name, size: file.size });
@@ -2023,15 +2332,15 @@ async function sendTape(file) {
       $("#tp-state").textContent = `${mb(at)} of ${mb(file.size)}`;
       status(`uploading ${file.name}: ${mb(at)} of ${mb(file.size)}`, true);
     }
-    $("#tp-state").textContent = "all here. Add the list if it is missing, then find the boundaries.";
     status("");
     tapePicked = null;
-    $("#tp-picked").textContent = "";
+    stepIdle();
     await openTape(id);
   } catch (e) {
+    stepIdle();
     $("#tp-err").textContent = e.message;
-    $("#tp-go").textContent = "Resume";
-    $("#tp-go").disabled = false;
+    status("");
+    try { showTape(await api(`/api/tapes/${id}`)); } catch { /* the reason above is what matters, and the page keeps what it last knew */ }
   }
 }
 
@@ -2039,8 +2348,8 @@ async function cancelTapeUpload() {
   if (!confirm("Drop what has arrived of this upload?")) return;
   try {
     await postJSON(`/api/tapes/${tape.id}/upload/cancel`, {});
-    setBar(0, "#tp-bar");
-    $("#tp-state").textContent = "";
+    tapePicked = null;
+    stepIdle();
     await openTape(tape.id);
   } catch (e) { $("#tp-err").textContent = e.message; }
 }
@@ -2048,7 +2357,6 @@ async function cancelTapeUpload() {
 async function processTape() {
   $("#tp-err").textContent = "";
   try {
-    if (tapeEdited) await saveSongs();
     await postJSON(`/api/tapes/${tape.id}/process`, {});
     watchTape();
   } catch (e) { $("#tp-err").textContent = e.message; }
@@ -2057,7 +2365,6 @@ async function processTape() {
 async function matchTape(again) {
   $("#tp-err").textContent = "";
   try {
-    if (tapeEdited) await saveSongs();
     await postJSON(`/api/tapes/${tape.id}/match`, { again });
     watchTape();
   } catch (e) { $("#tp-err").textContent = e.message; }
@@ -2085,12 +2392,16 @@ async function watchTape() {
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
+      if (JOB_STEP[j.op] && tpJobStep !== JOB_STEP[j.op]) {
+        tpJobStep = JOB_STEP[j.op];
+        stepBusy(tpJobStep);
+        showLeft();
+      }
       if (j.total) setBar(j.finished / j.total, "#tp-bar");
       const doing = j.current ? `${j.current}: ${j.detail}` : j.detail || "starting";
       $("#tp-state").textContent = doing;
       status(doing, true);
       if (j.done) {
-        $("#tp-state").textContent = "";
         status("");
         if (j.error) $("#tp-err").textContent = j.error;
         break;
@@ -2098,15 +2409,14 @@ async function watchTape() {
       await new Promise((r) => setTimeout(r, 800));
     }
   } catch (e) {
-    $("#tp-state").textContent = "";
     status("");
     $("#tp-err").textContent = e.status === 404
       ? "that job is no longer running, so the server has restarted - what it finished is kept, so start it again"
       : e.message;
   } finally {
     tapeWatching = false;
-    setBar(0, "#tp-bar");
-    for (const b of TAPE_JOB_BUTTONS) $(b).disabled = false;
+    tpJobStep = null;
+    stepIdle();
   }
   await loadTapes(id);
 }
@@ -2135,12 +2445,12 @@ function setMode(mode) {
     || mode === "precut" || mode === "tapes";
   const metering = mode === "rip" || mode === "punch";
   $("#cv").hidden = source;
-  $("#captureview").hidden = !source;
+  $("#captureview").hidden = !source || mode === "tapes";
+  $("#tapeview").hidden = mode !== "tapes";
+  $("#tp-head").hidden = mode !== "tapes";
   // A pre-cut album is not a record: it has no sides and nothing to cut, so
   // the record's own fields have no bearing on it. ADR-062.
   $("#sourceform").hidden = mode === "punch" || mode === "precut" || mode === "tapes";
-  $("#tapeform").hidden = mode !== "tapes";
-  $("#tapepane").hidden = mode !== "tapes";
   $("#precutform").hidden = mode !== "precut";
   $("#precutpane").hidden = mode !== "precut";
   $("#punchform").hidden = mode !== "punch";
@@ -2156,7 +2466,7 @@ function setMode(mode) {
   if (mode === "punch") loadPunchTracks();
   if (mode === "upload") loadIncoming();
   if (mode === "precut") loadPrecut();
-  if (mode === "tapes") { player?.stop(); loadTapes(); } else { tpPlayer?.stop(); flushNudge(); }
+  if (mode === "tapes") { player?.stop(); status(""); loadTapes(); } else { tpPlayer?.stop(); flushNudge(); }
   if (!source) ed.render();
 }
 
@@ -3163,32 +3473,37 @@ function wire() {
   $("#imp-art-upload").onclick = () => $("#art-file").click();
   $("#imp-art-skip").onclick = () => { $("#imp-art-wrap").hidden = true; };
   $("#imp-stale-clear").onclick = clearStale;
-  $("#tp-create").onclick = createTape;
+  $("#tp-new-form").onsubmit = (e) => { e.preventDefault(); createTape(); };
+  $("#tp-new").onclick = () => showNaming(true);
+  $("#tp-new-cancel").onclick = () => showNaming(false);
   $("#tp-pick").onchange = (e) => { $("#tp-err").textContent = ""; openTape(e.target.value); };
-  $("#tp-file-pick").onclick = () => $("#tp-file").click();
+  const pickFile = () => $("#tp-file").click();
+  $("#tp-file-pick").onclick = pickFile;
+  $("#tp-start-file").onclick = pickFile;
   $("#tp-file").onchange = (e) => {
     tapePicked = e.target.files[0] || null;
     e.target.value = "";
-    $("#tp-picked").textContent = tapePicked ? `${tapePicked.name}: ${mb(tapePicked.size)}` : "";
-    $("#tp-go").disabled = !tapePicked;
+    if (tapePicked) sendTape(tapePicked);
   };
   $("#tp-go").onclick = () => { if (tapePicked) sendTape(tapePicked); };
   $("#tp-cancel").onclick = cancelTapeUpload;
-  $("#tp-csv-pick").onclick = () => $("#tp-csv").click();
+  const pickList = () => $("#tp-csv").click();
+  $("#tp-csv-pick").onclick = pickList;
+  $("#tp-start-csv").onclick = pickList;
   $("#tp-csv").onchange = (e) => {
     const file = e.target.files[0];
     e.target.value = "";
     if (file) sendTapeList(file);
   };
-  $("#tp-add").onclick = () => {
-    $("#tp-rows").append(songRow());
-    tapeEdited = true;
-    renumberSongs();
-  };
-  $("#tp-save").onclick = saveSongsPressed;
+  $("#tp-add").onclick = startDraft;
+  $("#tp-list-add").onclick = startDraft;
+  $("#tp-start-add").onclick = startDraft;
   $("#tp-process").onclick = processTape;
+  $("#tp-start-find").onclick = processTape;
+  $("#tp-review-next").onclick = () => stepDoubt(1);
   $("#tp-match").onclick = () => matchTape(false);
   $("#tp-rematch").onclick = () => matchTape(true);
+  $("#tp-next-album").onclick = stepAlbum;
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;

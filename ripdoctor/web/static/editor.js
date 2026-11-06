@@ -45,6 +45,7 @@ export class Editor {
     this.drag = null;
     this.onDrop = opts.onDrop;
     this.long = !!opts.long;
+    this.onView = opts.onView;        // () -> void, the view moved or changed scale
     this.frozen = false;              // drawn and played, but no marker can be moved
     this._bind();
   }
@@ -151,6 +152,11 @@ export class Editor {
       const x0 = this.xOf(t.start), x1 = this.xOf(t.end);
       if (x1 < 0 || x0 > L.w) continue;
       c.fillRect(x0, 0, Math.max(2, x1 - x0), L.over.top);
+    }
+    const chosen = this.long && this.sel && this.tracks.find((t) => t.number === this.sel.track);
+    if (chosen) {
+      c.fillStyle = "rgba(90,169,230,0.10)";
+      c.fillRect(this.xOf(chosen.start), 0, this.xOf(chosen.end) - this.xOf(chosen.start), L.over.top);
     }
   }
 
@@ -311,6 +317,12 @@ export class Editor {
     if (text !== t.title) text = `${text.slice(0, -1)}…`;
     c.fillStyle = "#e6e8ea";
     c.fillText(text, x + 3, L.wave.top + 30);
+    if (t.flag) {
+      c.fillStyle = "#e8c468";
+      c.beginPath();
+      c.arc(x + 3 + Math.min(c.measureText(text).width + 8, room), L.wave.top + 26, 3, 0, 2 * Math.PI);
+      c.fill();
+    }
   }
 
   _playhead(c, L) {
@@ -363,6 +375,7 @@ export class Editor {
     t0 = clamp(t0, 0, d - span);
     this.t0 = t0; this.t1 = t0 + span;
     this.render();
+    this.onView?.();
   }
 
   /** Whole side. */

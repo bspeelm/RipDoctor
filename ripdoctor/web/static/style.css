@@ -126,49 +126,166 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 
 /* ---- tapes ---- */
 .warn{color:var(--warn);margin:0}
-/* The whole view scrolls. A table with a height share of its own would scroll
-   inside that, and hide rows behind a scrollbar nobody is looking for. */
-.tp-scroll{overflow-x:auto;flex:none}
-/* A job's error or a refusal has to be read wherever the button pressed was. */
-#tp-err:not(:empty){position:fixed;left:0;right:0;bottom:0;z-index:5;max-height:30vh;
-  overflow:auto;padding:.5rem 1rem;background:var(--panel);border-top:1px solid #ff8080}
-#tapeform p:empty{display:none}
-#tapeform .row.btns button{white-space:normal}
 /* A tape is not a record, so what acts on the record picker has no place here. */
 body[data-mode=tapes] header > button,body[data-mode=tapes] #album-q,
 body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
-table.songs{border-collapse:collapse;width:100%;font-size:12px}
-table.songs th{text-align:left;color:var(--dim);font-weight:500;padding:.2rem .35rem;
-  position:sticky;top:0;background:var(--bg)}
-table.songs td{padding:.15rem .35rem;border-top:1px solid var(--line);white-space:nowrap}
-table.songs input{width:100%;min-width:6rem;padding:.2rem .35rem}
-table.songs input[data-field=length]{min-width:3.5rem;width:3.5rem}
-table.songs .num{color:var(--dim);text-align:right}
-table.songs tr.doubt .mark{color:var(--warn);font-weight:600}
-table.songs tr.doubt td{background:rgba(232,196,104,.08)}
-table.songs .moves button{padding:.1rem .35rem}
-table.review td{white-space:normal;vertical-align:top}
-table.review .pick{display:flex;gap:.3rem;margin-bottom:.2rem}
-table.review td:last-child{min-width:17rem}
-table.ear td{white-space:normal;vertical-align:top}
-table.ear .why{min-width:10rem}
-table.ear .moves{min-width:7.5rem}
-table.ear .edge input{min-width:5.5rem;width:5.5rem;display:block;margin-bottom:.2rem}
-table.songs tr.sel td{background:#20262e}
-table.ear tbody tr{cursor:pointer}
-/* It stays on screen while the rows under it scroll, because a row is how you get
-   about a timeline hours long. */
-#tp-wave-wrap{position:sticky;top:0;z-index:2;display:flex;flex-direction:column;
-  gap:.4rem;flex:none;background:var(--bg);padding:.4rem 0}
-#tp-cv{display:block;width:100%;height:clamp(14rem,38vh,26rem);cursor:crosshair;touch-action:none}
-#tp-readout{flex-wrap:wrap;row-gap:0}
-#tp-tools{flex-wrap:wrap;margin:0}
-#tp-tools button{flex:0 1 auto}
-#tp-tools button:disabled{cursor:default}
-#tp-wave-say{margin:0;min-height:1.5em}
-table.review select{min-width:0;flex:1;max-width:22rem}
-table.review input{min-width:7rem;flex:1}
-table.review input[data-field=track]{flex:none;min-width:0;width:3.5rem}
+#tp-head{display:flex;align-items:center;gap:.6rem;flex:none}
+#tp-head label{flex-direction:row;align-items:center;gap:.5rem}
+#tp-head select{max-width:18rem}
+
+/* The rail and the table scroll on their own, so the waveform stays in view on a list
+   of any length. A table is what a long tape is navigated by. */
+#tapeview{flex:1;min-height:0;display:grid;font-size:14px;
+  grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
+#tapeview.no-rail{grid-template-columns:minmax(0,1fr)}
+#tp-rail{border-right:1px solid var(--line);padding:1.25rem 1rem;overflow-y:auto;
+  display:flex;flex-direction:column;gap:.25rem}
+#tp-rail h2{margin:0 0 .6rem .25rem;font-size:11px;font-weight:500;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim)}
+.tp-step{--c:var(--ghost);display:grid;grid-template-columns:22px minmax(0,1fr);gap:.6rem;
+  padding:.6rem .4rem;border-radius:7px}
+.tp-step[data-kind=done]{--c:var(--start)}
+.tp-step[data-kind=todo]{--c:var(--warn);background:var(--panel)}
+.tp-step[data-kind=ready],.tp-step[data-kind=run]{--c:var(--accent);background:var(--panel)}
+.tp-step[data-kind=fail]{--c:var(--end);background:var(--panel)}
+.tp-mark{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--c);display:flex;
+  align-items:center;justify-content:center;font:600 10px/1 ui-sans-serif,system-ui;
+  color:#0b0d10}
+.tp-step[data-kind=done] .tp-mark{background:var(--c)}
+.tp-step[data-kind=done] .tp-mark::after{content:"\2713"}
+.tp-step[data-kind=fail] .tp-mark::after{content:"!";color:var(--c)}
+.tp-step-body{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.tp-step-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.tp-step-head b{font-weight:500}
+.tp-state{font-size:12px;color:var(--c);white-space:nowrap}
+.tp-detail{margin:0;font-size:12.5px;line-height:1.45;color:var(--dim);overflow-wrap:anywhere}
+.tp-why{font-size:12px;color:var(--dim)}
+.tp-why summary{cursor:pointer}
+.tp-why p{margin:.25rem 0 0;white-space:pre-line;overflow-wrap:anywhere}
+.tp-acts{display:flex;flex-wrap:wrap;gap:.4rem}
+.tp-acts:not(:has(button:not([hidden]))),.tp-step[data-kind=wait] .tp-acts{display:none}
+.tp-acts button{font-size:12.5px;padding:.3rem .65rem}
+#tp-progress{display:flex;flex-direction:column;gap:.25rem;grid-column:2}
+#tp-progress .bar{flex:none}
+#tp-state{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+
+#tp-main{min-width:0;min-height:0;display:flex;flex-direction:column}
+#tp-main-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:.75rem;
+  padding:1.25rem 1.5rem;overflow-y:auto}
+#tp-new-form{align-self:center;width:min(26rem,100%);margin:15vh auto 0;padding:0 1rem;
+  display:flex;flex-direction:column;gap:.75rem}
+#tp-new-form h1,#tp-what{margin:0;font-size:24px;font-weight:600;letter-spacing:-.01em}
+#tp-new-form p{margin:0}
+#tapeview #tp-new-form label{font-size:13px}
+#tp-top{display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap;flex:none}
+#tp-top h1{overflow-wrap:anywhere}
+#tp-meta{margin:.2rem 0 0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+#tp-left{--c:var(--accent);display:flex;align-items:center;gap:.6rem;padding:.3rem .75rem;
+  border:1px solid var(--c);color:var(--c);border-radius:999px;font-size:13px;white-space:nowrap}
+#tp-left[data-kind=done]{--c:var(--start)}
+#tp-left[data-kind=todo]{--c:var(--warn)}
+#tp-left[data-kind=fail]{--c:var(--end)}
+#tp-left i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font-size:12px;
+  padding:.2rem .4rem}
+button.tp-quiet:hover{color:var(--end)}
+#tapepane{flex:1;min-height:0;display:flex;flex-direction:column;gap:.6rem}
+
+#tp-start{display:flex;flex-direction:column;gap:.6rem;flex:none;border:1px dashed var(--line);
+  border-radius:9px;padding:1rem}
+#tp-start > div{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
+#tp-start b{font-weight:500;min-width:7rem}
+
+#tp-wave-wrap{flex:none;display:flex;flex-direction:column;gap:.5rem}
+#tp-wave-box{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0f1114}
+#tp-cv{display:block;width:100%;height:clamp(11rem,26vh,22rem);cursor:crosshair;touch-action:none}
+#tp-readout{display:flex;flex-wrap:wrap;gap:.1rem 1.1rem;align-items:baseline;
+  font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tp-ro-time{color:var(--accent);font-weight:600}
+#tp-ro-len{color:var(--dim)}
+#tp-ro-gap.bad{color:var(--warn)}
+#tp-ro-gap.good{color:var(--start)}
+#tp-tools{display:flex;flex-wrap:wrap;gap:.45rem .55rem;align-items:center}
+.tp-group{display:flex;flex-wrap:wrap;gap:2px;padding:2px;border-radius:7px;
+  background:var(--panel);border:1px solid var(--line)}
+.tp-group button{display:flex;align-items:center;gap:.4rem;padding:.3rem .55rem;background:none;
+  color:var(--fg);border:0;border-radius:5px;font-weight:500;font-size:13px;white-space:nowrap}
+.tp-group button:not(:disabled):hover{background:#20262e}
+.tp-group button.on,.tp-group button.on:hover{background:var(--accent);color:#0b0d10}
+.tp-group button.primary{background:#23384a}
+.tp-group kbd{font:10.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);
+  background:none;border:1px solid var(--line)}
+.tp-group button.on kbd{color:#0b0d10;border-color:rgba(11,13,16,.45)}
+#tp-tools .vol{margin-left:auto}
+#tp-msg{flex:none;min-height:1.4em;font-size:13px}
+#tp-msg p{margin:0}
+#tp-err:empty{display:none}
+.tp-warn{color:var(--warn);margin:0}
+
+#tp-table-wrap{flex:1 1 auto;min-height:11rem;overflow:auto;border:1px solid var(--line);
+  border-radius:9px}
+#tp-table{width:100%;min-width:52rem;table-layout:fixed;border-collapse:collapse}
+#tp-table .c-num{width:2.75rem}
+#tp-table .c-album{width:26%}
+#tp-table .c-span{width:7.5rem}
+#tp-table .c-len{width:7.25rem}
+#tp-table .c-bnd{width:7.5rem}
+#tp-table .c-rel{width:9rem}
+#tp-table th{position:sticky;top:0;z-index:1;background:var(--bg);padding:.55rem .75rem;
+  text-align:left;font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ghost);border-bottom:1px solid var(--line)}
+#tp-table td{padding:.5rem .75rem;border-bottom:1px solid #1f232a;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+#tp-rows tr[data-song]{cursor:pointer}
+#tp-rows tr[data-song]:hover td{background:#1a1e24}
+#tp-rows tr.sel td,#tp-rows tr.tp-open td{background:#20262e}
+#tp-rows tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+#tp-rows tr.skipped{opacity:.55}
+#tp-rows tr.skipped .tp-title{text-decoration:line-through}
+.tp-col-num{color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tp-who{display:flex;gap:.6rem;align-items:baseline;min-width:0}
+.tp-title{flex:0 1 auto;min-width:3rem;overflow:hidden;text-overflow:ellipsis}
+.tp-artist{flex:0 2 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dim);font-size:12.5px}
+.tp-col-album{font-size:13px;color:#b9bec5}
+.tp-col-span,.tp-col-len{color:#b9bec5}
+#tp-table td.mono{font-size:12px}
+.tp-off{margin-left:.4rem;color:var(--ghost)}
+.tp-off.warned{color:var(--warn)}
+.tp-status{--c:var(--ghost);display:inline-flex;align-items:center;gap:.45rem;font-size:12.5px;color:var(--c);
+  max-width:100%}
+.tp-status span{overflow:hidden;text-overflow:ellipsis}
+.tp-status.is-good{--c:var(--start)}
+.tp-status.is-warn{--c:var(--warn)}
+.tp-status.is-bad{--c:var(--end)}
+.tp-status i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c)}
+#tp-rows tr.tp-open td{white-space:normal;padding:.2rem .75rem .9rem 3.5rem}
+.tp-open-box{display:flex;flex-direction:column;gap:.55rem;font-size:13px}
+.tp-open-box p{margin:0}
+.tp-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 5.5rem 7rem 7rem auto;
+  gap:.6rem;align-items:end}
+.tp-fields label{font-size:11.5px;min-width:0}
+.tp-fields input{width:100%;min-width:0;font-size:13px}
+.tp-fields input[data-edge]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tp-moves{display:flex;gap:.25rem;align-items:stretch}
+.tp-moves button{padding:.3rem .55rem;font-weight:500}
+button.tp-danger{color:var(--end)}
+.tp-hears{display:flex;flex-wrap:wrap;gap:.35rem}
+.tp-hears button{font-weight:500;white-space:normal}
+.tp-filed{display:flex;flex-direction:column;gap:.25rem;align-items:flex-start;overflow-wrap:anywhere}
+.tp-more summary{cursor:pointer;color:var(--dim);font-size:12.5px}
+.tp-more[open] summary{margin-bottom:.35rem}
+.tp-release{display:flex;flex-direction:column;gap:.45rem;margin-top:.35rem}
+.tp-cands{display:flex;flex-wrap:wrap;gap:.4rem}
+button.tp-cand{background:rgba(232,196,104,.08);color:#e8dcbc;border:1px solid rgba(232,196,104,.5);
+  font-weight:400;font-size:12.5px;text-align:left;white-space:normal}
+button.tp-cand.on{background:rgba(95,211,141,.1);border-color:var(--start);color:var(--fg)}
+.tp-by-id{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.tp-by-id input{min-width:0;flex:0 1 16rem;font-size:12.5px;padding:.25rem .45rem}
+.tp-by-id input[data-field=track]{flex:0 0 3.75rem}
+.tp-by-id button{font-weight:500}
+#tp-add{display:block;margin:.65rem .75rem;padding:.35rem .75rem;background:none;color:var(--dim);
+  border:1px dashed var(--line);font-weight:400}
+#tp-add:hover{color:var(--fg)}
 
 /* ---- rip view ---- */
 #captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
@@ -348,12 +465,35 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
   .ripform{width:100%}
   .ripmeter{flex:none}
-  table.review thead,table.ear thead{display:none}
-  table.review tr,table.ear tr{display:block;padding:.4rem 0;border-top:1px solid var(--line)}
-  table.review td,table.ear td{display:block;border:0;min-width:0;text-align:left}
-  table.ear td:empty{display:none}
-  table.ear .edge{display:inline-block;width:50%}
-  table.ear .edge input{width:100%}
-  #tp-wave-wrap{position:static}
-  table.review select{max-width:none}
+  #tapeview{display:block;overflow-y:auto;overflow-x:hidden}
+  #tp-head{flex-wrap:wrap}
+  #tp-head select{max-width:60vw}
+  #tp-rail{border-right:0;border-bottom:1px solid var(--line);overflow:visible;padding:1rem}
+  #tp-main-body{padding:1rem;overflow:visible}
+  #tapepane{overflow:visible}
+  #tp-table-wrap{overflow:visible;border:0;border-radius:0;min-height:0}
+  #tp-table{display:block;min-width:0}
+  #tp-table colgroup,#tp-table thead{display:none}
+  #tp-rows{display:block}
+  #tp-rows tr[data-song]{display:grid;grid-template-columns:2rem minmax(0,1fr) auto;
+    gap:.1rem .5rem;padding:.55rem .25rem;border-top:1px solid var(--line)}
+  #tp-table td{display:block;padding:0;border:0;min-width:0;background:none}
+  #tp-rows tr.sel{background:#20262e}
+  .tp-col-num{grid-row:1/4}
+  .tp-col-song{grid-column:2/4}
+  .tp-who{flex-wrap:wrap;gap:0 .5rem}
+  .tp-col-album{grid-column:2/4;overflow:hidden;text-overflow:ellipsis}
+  .tp-col-span{grid-column:2}
+  .tp-col-len{grid-column:3;text-align:right}
+  .tp-col-status{grid-column:2}
+  #tp-rows tr[data-song] .tp-col-status + .tp-col-status{grid-column:3;text-align:right}
+  #tp-rows tr.tp-open{display:block}
+  #tp-rows tr.tp-open td{padding:.5rem .25rem .9rem}
+  .tp-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .tp-fields .wide{grid-column:1/-1}
+  .tp-moves{grid-column:1/-1}
+  #tp-tools .vol{margin-left:0}
+  /* A job's error or a refusal has to be read wherever the button pressed was. */
+  #tp-err:not(:empty){position:fixed;left:0;right:0;bottom:0;z-index:5;max-height:30vh;
+    overflow:auto;padding:.5rem 1rem;background:var(--panel);border-top:1px solid #ff8080}
 }
