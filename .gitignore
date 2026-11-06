@@ -28,3 +28,6 @@ venv/
 # Maps anonymised fixtures back to album names. Never committed.
 tests/fixtures/PRIVATE-mapping.json
 tests/fixtures/PRIVATE-golden-mapping.json
+
+# Agent worktrees, each a whole checkout of its own.
+.claude/worktrees/
