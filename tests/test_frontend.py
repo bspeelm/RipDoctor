@@ -912,6 +912,18 @@ def test_a_short_touch_drag_sends_no_click_to_a_row_scrolled_under_it() -> None:
     assert "if (e.cancelable) e.preventDefault();" in js
 
 
+def test_small_leftovers_after_a_library_returns_say_things_once() -> None:
+    """#51: `not there any more` twice in a row, a save error twice on the rail, and a
+    Playlist step that gave no sign Write again was what would clear it."""
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "const why = [...new Set([" in step
+    assert "started && (!p.outcome || stuck)" in step
+    assert "Write again once the library is there." in step
+    block = re.search(r"function releaseBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "words !== t.filing.find((f) => f.number === song.number)?.note" in block
+
+
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]

@@ -2021,18 +2021,20 @@ const PLAYLIST_WORDS = {
 function stepPlaylist(t) {
   const p = t.playlist;
   const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
-  tpAction("#tp-playlist", true, started && !p.outcome, !started);
+  // A write that could not happen stays unwritten until asked again, so it is what to press.
+  const stuck = !!p.outcome && p.outcome !== "written" && p.outcome !== "unchanged" && t.songs.some((s) => !s.skip);
+  tpAction("#tp-playlist", true, started && (!p.outcome || stuck), !started);
   $("#tp-playlist").textContent = p.outcome ? "Write again" : "Write playlist";
   const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
   const told = t.job?.result?.notes ?? [];
-  const why = [
+  const why = [...new Set([
     p.outcome ? `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.` : "",
     p.path, p.note, ...told,
     ...p.left_out.map((g) => `Song ${g.number} (${named(g.number)}): ${g.why}`),
-  ].filter(Boolean).join("\n");
+  ])].filter(Boolean).join("\n");
   if (!p.outcome) return tpStep("playlist", started ? "ready" : "wait", started ? "Ready" : "Waiting", started ? "No playlist written yet." : "Waiting on File.", why);
   if (p.outcome !== "written" && p.outcome !== "unchanged")
-    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`, why);
+    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.${stuck ? " Write again once the library is there." : ""}`, why);
   // The file is all this knows about: whether the server shows it is the server's to say.
   const server = "The music server imports it within about a minute, and an admin there may need to make imported playlists public.";
   const name = p.path.split("/").pop();
@@ -2629,7 +2631,8 @@ function releaseBlock(song, t) {
   if (rel?.edition_note) box.append(editionNoteView(song, rel.edition_note));
   const nothing = song.proposal?.status === "none" && rel?.options.length;
   const words = rel?.note || (song.settled_by || nothing || rel?.maybe_copy ? "" : song.proposal?.reason) || "";
-  if (words) {
+  // The filing outcome above this says it first when that is what the words are.
+  if (words && words !== t.filing.find((f) => f.number === song.number)?.note) {
     const line = el("p", "dim tp-rel-why", words);
     line.title = words;
     box.append(line);
