@@ -116,24 +116,28 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 #tracks .c-time{width:5rem}
 #tracks .c-len{width:4.25rem}
 #tracks .c-bnd{width:10.75rem}
-#tracks .c-del{width:2.5rem}
 #tracks td{padding:.3rem .5rem;border-bottom:1px solid #1f232a;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 #tracks tbody tr:last-child td{border-bottom:0}
 #tracks tr.sel td{background:#20262e}
 #tracks tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
-#tracks input{width:100%;border:0;background:transparent;padding:.1rem .2rem;font:inherit}
-#tracks input:focus{background:#0f1114;outline:1px solid var(--accent)}
-#tracks input[type=number]{appearance:textfield;color:var(--dim);
-  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks tbody tr:not(.cut-open){cursor:pointer}
+#tracks tbody tr:not(.cut-open):not(.sel):hover td{background:#1a1e24}
+#tracks td.c-num{color:var(--dim)}
+#tracks tr.cut-open td{background:#20262e;white-space:normal;overflow:visible;padding:.15rem .6rem .7rem 3.5rem}
+.cut-fields{display:grid;grid-template-columns:4.5rem minmax(0,2fr) 7rem 7rem auto;gap:.6rem;align-items:end}
+.cut-fields label{font-size:11.5px;min-width:0;color:var(--dim)}
+.cut-fields input{width:100%;min-width:0;font-size:13px}
+.cut-fields input[data-edge]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.cut-moves{display:flex;gap:.25rem;align-items:stretch}
+.cut-moves button{padding:.3rem .55rem;font-weight:500}
+.cut-fields input[type=number]{appearance:textfield}
 #tracks .t{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 #tracks .t-start,#tracks .t-end{cursor:pointer}
 #tracks .t-start{color:var(--start)}
 #tracks .t-end{color:var(--end)}
 #tracks .drift{color:var(--dim);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 #tracks .drift.big{color:var(--warn)}
-#tracks .c-del button{padding:0 .4rem;border:0;color:var(--ghost)}
-#tracks .c-del button:hover{color:var(--end)}
 #album-panel{min-width:0;display:flex;flex-direction:column;gap:.5rem;padding:.65rem .75rem;
   border:1px solid var(--line);border-radius:9px}
 #album-panel h3,#cut-table-head h3{margin:0;font-size:11px;font-weight:500;letter-spacing:.08em;
@@ -577,9 +581,13 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
     gap:.1rem .5rem;padding:.45rem .5rem;border-top:1px solid var(--line)}
   #tracks tr.sel{background:#20262e}
   #tracks td{display:block;width:auto;padding:0;border:0;background:none !important;box-shadow:none !important}
-  #tracks td.c-title{grid-column:span 4}
-  #tracks td.c-del{grid-column:6;grid-row:1;text-align:right}
-  #tracks .c-del button{min-height:40px;min-width:40px}
+  #tracks td.c-title{grid-column:span 5;min-height:32px;line-height:32px}
+  #tracks tr.cut-open{display:block}
+  #tracks tr.cut-open td{padding:.25rem 0 .5rem}
+  .cut-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .cut-fields label.wide,.cut-moves{grid-column:1/-1}
+  .cut-fields input{min-height:40px;font-size:16px}
+  .cut-moves button{min-height:40px;flex:1 1 0}
   #tracks td.t{grid-column:span 2;min-height:32px;line-height:32px}
   #tracks td.drift{grid-column:span 2}
   #tracks td.c-bnd-cell{grid-column:span 4}

@@ -515,6 +515,7 @@ async function openSide(letter) {
     return;
   }
   player?.stop();          // otherwise the old side keeps playing under the new one
+  cutOpen = null;
   if (!S.sideData[letter]) {
     const v = S.meta.ready[letter]?.v || "";
     const [env, gaps] = await Promise.all([
@@ -557,59 +558,164 @@ function setByHand(t) {
   t.settled = "hand";
 }
 
-function renderTracks() {
-  const tb = $("#tracks tbody"); tb.innerHTML = "";
-  for (const t of tracks()) {
-    const tr = el("tr");
-    if (ed.sel && ed.sel.track === t.number) tr.className = "sel";
+// The row is read-only, and what edits it opens beneath it, one at a time. The open track is
+// held by the object, since a split renumbers what comes after it.
+let cutOpen = null;
+let cutRedrawing = false;             // inputs leaving the page now are not a person leaving them
+let cutPressing = false, cutRedrawOwed = false;
+const trackKeys = new WeakMap();
+let trackKeysMade = 0;
+function trackKey(t) {
+  if (!trackKeys.has(t)) trackKeys.set(t, `track-${++trackKeysMade}`);
+  return trackKeys.get(t);
+}
 
-    const num = el("td", "c-num"); const ni = el("input"); ni.className = "num";
-    ni.value = t.number; ni.type = "number";
-    ni.onchange = () => { t.number = parseInt(ni.value, 10) || t.number; markDirty(); renderTracks(); ed.render(); };
-    num.appendChild(ni); tr.appendChild(num);
-
-    const ti = el("input"); ti.value = t.title;
-    ti.onchange = () => { t.title = ti.value; markDirty(); };
-    const td = el("td", "c-title"); td.appendChild(ti); tr.appendChild(td);
-
-    for (const edge of ["start", "end"]) {
-      const c = el("td", `t t-${edge}`, fmt(t[edge]));
-      c.title = `${t[edge].toFixed(2)} s`;
-      c.onclick = () => { select(t.number, edge, true); ed.fitRange(t.start, t.end); };
-      tr.appendChild(c);
-    }
-
-    const len = t.end - t.start;
-    tr.appendChild(el("td", "t t-len", fmt(len)));
-    const dr = el("td", "drift");
-    if (t.forced) {
-      dr.textContent = "—";
-      dr.title = "placed from the catalogue, not found — this column is zero by "
-               + "construction and cannot tell you whether the boundary is right";
-    } else if (t.cat) {
-      const d = len - t.cat;
-      dr.textContent = (d >= 0 ? "+" : "") + d.toFixed(2);
-      if (Math.abs(d) > 10) dr.className = "drift big";
-    } else dr.textContent = "—";
-    tr.appendChild(dr);
-    const bnd = statusCell(trackBoundary(t));
-    bnd.classList.add("c-bnd-cell");
-    if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
-    tr.appendChild(bnd);
-
-    const del = el("td", "c-del");
-    const db = el("button", "ghost", "×");
-    db.title = "delete track";
-    db.onclick = () => {
-      if (!confirm(`Delete track ${t.number} “${t.title}”?`)) return;
-      S.bySide[S.side] = tracks().filter((x) => x !== t);
-      markDirty(); renderTracks(); ed.setTracks(tracks());
-    };
-    del.appendChild(db); tr.appendChild(del);
-    tb.appendChild(tr);
+function trackRowView(t) {
+  const tr = el("tr", ed.sel && ed.sel.track === t.number ? "sel" : "");
+  tr.onclick = () => pressRow(t);
+  tr.append(el("td", "c-num num", t.number));
+  const title = el("td", "c-title", t.title);
+  title.title = t.title;
+  tr.append(title);
+  for (const edge of ["start", "end"]) {
+    const c = el("td", `t t-${edge}`, fmt(t[edge]));
+    c.title = `${t[edge].toFixed(2)} s`;
+    c.onclick = (e) => { e.stopPropagation(); select(t.number, edge, true); ed.fitRange(t.start, t.end); };
+    tr.append(c);
   }
+  const len = t.end - t.start;
+  tr.append(el("td", "t t-len", fmt(len)));
+  const dr = el("td", "drift");
+  if (t.forced) {
+    dr.textContent = "—";
+    dr.title = "placed from the catalogue, not found — this column is zero by "
+             + "construction and cannot tell you whether the boundary is right";
+  } else if (t.cat) {
+    const d = len - t.cat;
+    dr.textContent = (d >= 0 ? "+" : "") + d.toFixed(2);
+    if (Math.abs(d) > 10) dr.className = "drift big";
+  } else dr.textContent = "—";
+  tr.append(dr);
+  const bnd = statusCell(trackBoundary(t));
+  bnd.classList.add("c-bnd-cell");
+  if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
+  tr.append(bnd);
+  return tr;
+}
+
+// Pressing the open row again leaves it as it is, marker and view included.
+function pressRow(t) {
+  if (cutOpen === t && ed.sel?.track === t.number) return;
+  select(t.number, "start");
+  ed.fitRange(t.start, t.end);
+  // Stacked on a phone, the waveform is not beside the row that was pressed.
+  if (matchMedia("(max-width:48rem)").matches) $("#cut-wave").scrollIntoView({ block: "nearest" });
+}
+
+// A field is the page's own from the first key to when it is left, which writes it into the
+// track. Writing a figure as it is typed would drag the marker through every digit.
+function trackField(t, label, name, wide, shown, write) {
+  const [box, input] = fieldInput(label, name, shown, wide);
+  const leave = () => {
+    if (cutRedrawing || input.value === input.dataset.saved) return;
+    const changed = write(input) !== false;
+    input.dataset.saved = input.value;
+    if (!changed) return;
+    markDirty();
+    ed.render(); updateReadout(); renderTracks();
+  };
+  input.onblur = leave;
+  input.onkeydown = (e) => { if (e.key === "Enter") leave(); };
+  return [box, input];
+}
+
+function renumber(t, input) {
+  const was = t.number;
+  const now = parseInt(input.value, 10);
+  if (!(now > 0) || now === was) { input.value = was; return false; }
+  t.number = now;
+  if (ed.sel?.track === was) ed.sel.track = now;
+  if (cutPicked?.track === was) cutPicked.track = now;
+}
+
+// Bound as a drag is: inside the side, and never past the track's other edge.
+function typedEdge(t, edge, input) {
+  const v = parseFloat(input.value);
+  const same = !Number.isFinite(v) || round2(v) === round2(t[edge]);
+  if (!same) {
+    const at = Math.max(0, Math.min(S.sideData[S.side].duration, v));
+    t[edge] = round2(edge === "start" ? Math.min(at, t.end - 0.2) : Math.max(at, t.start + 0.2));
+    setByHand(t);
+  }
+  input.value = t[edge].toFixed(2);
+  return !same;
+}
+
+function removeTrack(t) {
+  if (!confirm(`Delete track ${t.number} “${t.title}”?`)) return;
+  S.bySide[S.side] = tracks().filter((x) => x !== t);
+  if (cutOpen === t) cutOpen = null;
+  if (ed.sel?.track === t.number) { ed.sel = null; cutPicked = null; }
+  markDirty(); renderTracks(); ed.setTracks(tracks()); updateReadout();
+}
+
+function trackOpenView(t) {
+  const tr = el("tr", "cut-open");
+  tr.dataset.open = trackKey(t);
+  tr.dataset.key = trackKey(t);
+  const td = el("td");
+  td.colSpan = 7;
+  const fields = el("div", "cut-fields");
+  const [num, numInput] = trackField(t, "Number", "number", false, String(t.number), (input) => renumber(t, input));
+  numInput.type = "number"; numInput.min = "1"; numInput.step = "1";
+  const [title] = trackField(t, "Title", "title", true, t.title, (input) => { t.title = input.value; });
+  fields.append(num, title);
+  for (const [edge, label] of [["start", "Start (s)"], ["end", "End (s)"]]) {
+    const [box, input] = trackField(t, label, edge, false, t[edge].toFixed(2), (i) => typedEdge(t, edge, i));
+    input.type = "number"; input.step = "0.01"; input.min = "0";
+    input.dataset.edge = edge;
+    fields.append(box);
+  }
+  const moves = el("div", "cut-moves");
+  moves.append(smallButton("Remove", "delete this track", () => removeTrack(t), "ghost tiny tp-danger"),
+               smallButton("Close", "close this row", () => { cutOpen = null; renderTracks(); }));
+  fields.append(moves);
+  td.append(fields);
+  tr.append(td);
+  return tr;
+}
+
+function renderTracks() {
   showSideMeta();
   showCutTools();
+  // A field left by pressing something in this table writes itself, and taking away the
+  // button under the pointer would lose the press. The rows wait for the press to finish.
+  if (cutPressing) { cutRedrawOwed = true; return; }
+  const tb = $("#tracks tbody");
+  const typed = typedInRows(tb);
+  const rows = [];
+  for (const t of tracks()) {
+    rows.push(trackRowView(t));
+    if (cutOpen === t) rows.push(trackOpenView(t));
+  }
+  cutRedrawing = true;
+  tb.replaceChildren(...rows);
+  cutRedrawing = false;
+  putBackTyped(typed, tb);
+}
+
+function wireTrackPresses() {
+  $("#tracks").addEventListener("pointerdown", () => { cutPressing = true; });
+  const finished = () => {
+    if (!cutPressing) return;
+    // After the click this press is about to make, which fires once this event is over.
+    setTimeout(() => {
+      cutPressing = false;
+      if (cutRedrawOwed) { cutRedrawOwed = false; renderTracks(); }
+    });
+  };
+  addEventListener("pointerup", finished);
+  addEventListener("pointercancel", finished);
 }
 
 // ------------------------------------------------------------------ toolbar
@@ -793,6 +899,7 @@ function splitAtPlayhead() {
 function select(num, edge, picked = false) {
   ed.sel = num == null ? null : { track: num, edge };
   cutPicked = picked && num != null ? { track: num, edge } : null;
+  if (num != null) cutOpen = trackByNum(num) ?? cutOpen;
   ed.render(); renderTracks(); updateReadout();
 }
 
@@ -2647,9 +2754,9 @@ async function addDraft() {
 // the first key to when it is left, which sends it, and a refusal then shows the truth.
 // Taking a focused input off the page makes a browser say it was left, which it was not,
 // so `tpRedrawing` says otherwise for that moment.
-function typedInRows() {
+function typedInRows(box = $("#tp-rows")) {
   const typed = [];
-  for (const input of $("#tp-rows").querySelectorAll("tr[data-open] input[data-field]")) {
+  for (const input of box.querySelectorAll("tr[data-open] input[data-field]")) {
     const focused = document.activeElement === input;
     if (focused || input.value !== input.dataset.saved) {
       const row = input.closest("tr");
@@ -2660,16 +2767,16 @@ function typedInRows() {
   return typed;
 }
 
-function putBackTyped(typed) {
-  for (const input of $("#tp-rows").querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
+function putBackTyped(typed, box = $("#tp-rows")) {
+  for (const input of box.querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
   for (const [held, value] of tpUnsent) {
     const [key, field] = held.split("/");
-    const input = $("#tp-rows").querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
+    const input = box.querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
     if (input) input.value = value;
   }
   for (const was of typed) {
     const row = was.row === "draft" ? `[data-open="draft"]` : `[data-key="${was.row}"]`;
-    const input = $("#tp-rows").querySelector(`tr${row} input[data-field="${was.field}"]`);
+    const input = box.querySelector(`tr${row} input[data-field="${was.field}"]`);
     if (!input) continue;
     input.value = was.value;
     if (!was.focused) continue;
@@ -4405,6 +4512,7 @@ function wire() {
   $("#cut-zoom-track").onclick = zoomToSelected;
   $("#cut-zoom-side").onclick = () => ed.fit();
   showCutTools();
+  wireTrackPresses();
   wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();

@@ -1233,7 +1233,7 @@ def test_the_keys_and_the_toolbar_do_one_thing_each() -> None:
 
 def test_a_track_placed_from_the_catalogue_is_marked_on_its_row() -> None:
     js = (STATIC / "app.js").read_text()
-    body = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    body = re.search(r"function trackRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "trackBoundary(t)" in body
     assert "zero by" in body, "the delta on such a row says nothing, and says so"
     word = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
@@ -1401,3 +1401,88 @@ def test_the_help_dialog_tells_the_truth_about_the_keys() -> None:
     assert "<kbd>E</kbd></td><td>choose the start or end" in help_
     assert "<kbd>J</kbd> <kbd>K</kbd></td><td>the next track or song" in help_
     assert "Selecting a track chooses nothing" in help_
+
+
+def cut_table_code() -> str:
+    js = (STATIC / "app.js").read_text()
+    return js[
+        js.index("function trackRowView(") : js.index("function wireTrackPresses(")
+    ]
+
+
+def test_a_track_s_row_is_read_only_and_what_edits_it_opens_beneath() -> None:
+    js = (STATIC / "app.js").read_text()
+    row = re.search(r"function trackRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "input" not in row.lower() and "button" not in row.lower()
+    opened = re.search(r"function trackOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for part in (
+        '"Title"',
+        '"Start (s)"',
+        '"End (s)"',
+        '"Remove"',
+        '"Close"',
+        '"Number"',
+    ):
+        assert part in opened, part
+    assert "c-del" not in (STATIC / "index.html").read_text()
+    assert "c-del" not in (STATIC / "style.css").read_text()
+
+
+def test_pressing_an_open_row_leaves_it_open() -> None:
+    js = (STATIC / "app.js").read_text()
+    press = re.search(r"function pressRow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutOpen === t && ed.sel?.track === t.number) return;" in press
+    assert 'select(t.number, "start");' in press, "a row press arms no marker"
+
+
+def test_a_redraw_of_the_table_keeps_what_is_being_typed() -> None:
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    order = [
+        "typedInRows(tb)",
+        "cutRedrawing = true;",
+        "replaceChildren(...rows)",
+        "cutRedrawing = false;",
+        "putBackTyped(typed, tb)",
+    ]
+    places = [shown.index(part) for part in order]
+    assert places == sorted(places)
+    field = re.search(r"function trackField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutRedrawing || input.value === input.dataset.saved) return;" in field
+    assert "onchange" not in field and "oninput" not in field
+
+
+def test_a_field_left_by_pressing_a_button_does_not_take_the_button_away() -> None:
+    """Leaving a field redraws the rows between press and release, and the click
+    then lands on nothing: Close and Remove did not answer."""
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutPressing) { cutRedrawOwed = true; return; }" in shown
+    wired = re.search(r"function wireTrackPresses\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert (
+        '"pointerdown"' in wired
+        and '"pointerup"' in wired
+        and '"pointercancel"' in wired
+    )
+    assert "setTimeout(" in wired
+
+
+def test_every_typed_boundary_is_the_person_s_and_an_unchanged_one_is_not() -> None:
+    js = (STATIC / "app.js").read_text()
+    typed = re.search(r"function typedEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "setByHand(t)" in typed
+    assert "!Number.isFinite(v) || round2(v) === round2(t[edge])" in typed
+    assert "input.value === input.dataset.saved) return" in cut_table_code()
+
+
+def test_no_top_level_name_is_declared_twice() -> None:
+    """A second `boundaryWord` is a SyntaxError that stops the whole module, and
+    every page goes blank with nothing on screen to say why."""
+    for script in scripts():
+        names = re.findall(
+            r"^(?:async )?(?:function\*? |const |let |class )(\w+)",
+            script.read_text(),
+            re.M,
+        )
+        doubled = {n for n in names if names.count(n) > 1}
+        assert not doubled, f"{script.name}: {sorted(doubled)}"
