@@ -72,6 +72,7 @@ _VERSION = re.compile(
     r"|extended|dub|mix|video|tribute)(?:ed|e?s)?\b",
     re.I,
 )
+_VERSION_PART = re.compile(r"[(\[]([^)\]]*)[)\]]|\s-\s(.*)$")
 _THE = re.compile(r"^the\s+")
 _SUFFIX = re.compile(r"\s*(?:\(.*\)|\[.*\]|\s-\s.*)\s*$")
 # Catalogued as one of these, a release is still that primary kind of record.
@@ -217,9 +218,15 @@ def _exact(text: str) -> str:
     return " ".join(plain.split())
 
 
+def _guest_only(clause: re.Match[str]) -> str:
+    """A guest clause is dropped unless it also holds a version, as in (feat. X Remix),
+    which is a different recording from the title without it."""
+    return clause.group(0) if _VERSION.search(clause.group(0)) else ""
+
+
 def _bare(text: str) -> str:
     """Without a guest clause or a remaster suffix; a title that is only one stays."""
-    return _REMASTER.sub("", _CREDIT.sub("", text)).strip() or text
+    return _REMASTER.sub("", _CREDIT.sub(_guest_only, text)).strip() or text
 
 
 def _guests(text: str) -> set[str]:
@@ -378,14 +385,29 @@ def _track(wanted: Wanted, edition: Edition) -> tuple[int, CatalogueTrack | None
     return (grade, track) if grade != NOTHING else (NOTHING, None)
 
 
+def _version_part(title: str) -> str:
+    """What a title says of its version: a bracketed or dash-led clause. Elsewhere the
+    same word is only a word, as in "Live Forever", and excuses no live recording."""
+    return " ".join(a or b for a, b in _VERSION_PART.findall(fold(title)))
+
+
 def _version(wanted: Wanted, *texts: str) -> str:
     """A word in these that says another version, and the list's title does not."""
-    title = fold(wanted.title)
+    said = _version_part(wanted.title)
     for text in texts:
         for word in _VERSION.finditer(text):
-            if not re.search(rf"\b{re.escape(word.group(1).lower())}", title):
+            if not re.search(rf"\b{re.escape(word.group(1).lower())}", said):
                 return text
     return ""
+
+
+def _unnamed_remix(wanted: Wanted, edition: Edition, track: CatalogueTrack) -> bool:
+    """A remix album's track, when neither the list nor the track says what remix. Its
+    own title can be the song's alone, and it is still another recording."""
+    if "Remix" not in edition.secondary:
+        return False
+    titles = (wanted.title, track.title, track.recording_title)
+    return not any(_VERSION.search(fold(t)) for t in titles)
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +424,7 @@ class _Fit:
     repeats: int
     version: str
     other_release: str
+    remix: bool
     in_library: bool
 
 
@@ -436,6 +459,9 @@ def _fit(wanted: Wanted, edition: Edition, library: Iterable[str]) -> _Fit:
         other_release=""
         if named
         else _version(wanted, edition.title, edition.disambiguation),
+        remix=track is not None
+        and not named
+        and _unnamed_remix(wanted, edition, track),
         in_library=edition.release in library,
     )
 
@@ -463,7 +489,7 @@ def _nearness(fit: _Fit) -> tuple[Any, ...]:
         not fit.official,
         fit.album,
         fit.off > WITHIN,
-        fit.live or bool(fit.kinds) or bool(fit.version or fit.other_release),
+        fit.live or bool(fit.kinds or fit.remix or fit.version or fit.other_release),
         *_rank(fit)[2:],
     )
 
@@ -489,6 +515,11 @@ def _doubt(wanted: Wanted, fit: _Fit) -> str:
         kinds = " + ".join(fit.kinds)
         return (
             f"{c.release_title} is catalogued as {kinds}, which the list did not name"
+        )
+    if fit.remix:
+        return (
+            f"{c.release_title} is a remix album, and neither the list nor the "
+            "track says which remix"
         )
     if fit.version:
         return (

@@ -574,15 +574,17 @@ def test_a_release_of_another_kind_is_a_persons_to_judge(kind: str) -> None:
     assert kind in got.reason
 
 
-@pytest.mark.parametrize("kind", ["Remix", "Mixtape/Street"])
-def test_a_remix_or_mixtape_release_ranks_as_the_record_it_is(kind: str) -> None:
-    got = M.propose(
-        wanted(),
-        [
-            edition("ep", album="B Record", group="b", primary="EP", date="1980"),
-            edition("lp", album="C Record", group="c", secondary=(kind,), date="1999"),
-        ],
+@pytest.mark.parametrize(
+    ("kind", "song"), [("Remix", "A Song (Club Mix)"), ("Mixtape/Street", "A Song")]
+)
+def test_a_remix_or_mixtape_release_ranks_as_the_record_it_is(
+    kind: str, song: str
+) -> None:
+    ep = edition("ep", title=song, album="B Record", group="b", primary="EP")
+    lp = edition(
+        "lp", title=song, album="C Record", group="c", secondary=(kind,), date="1999"
     )
+    got = M.propose(wanted(song), [replace(ep, date="1980"), lp])
     assert got.status == M.MATCHED
     assert got.choice is not None and got.choice.release == "lp"
 
@@ -1198,3 +1200,80 @@ def test_an_album_also_a_compilation_says_album_when_the_list_names_it() -> None
     assert [o["kind"] for o in named] == ["album"]
     other = M.options(replace(wanted(), album="Another Thing"), made)
     assert [o["kind"] for o in other] == ["compilation"]
+
+
+@pytest.mark.parametrize(
+    ("title", "said"),
+    [
+        ("Live Forever", "live, 1995"),
+        ("Mixed Up", "club mix"),
+        ("Editor", "radio edit"),
+    ],
+)
+def test_a_word_in_a_title_excused_a_version_of_it_it_does_not_name(
+    title: str, said: str
+) -> None:
+    got = M.propose(wanted(title), [edition(title=title, disambiguation=said)])
+    assert got.status == M.REVIEW
+    assert said in got.reason
+
+
+@pytest.mark.parametrize(
+    ("title", "said"),
+    [
+        ("Song (Live, 1995)", "live, 1995"),
+        ("Song [Club Mix]", "club mix"),
+        ("Song - Radio Edit", "radio edit"),
+    ],
+)
+def test_a_title_s_version_part_still_excuses_the_version_it_names(
+    title: str, said: str
+) -> None:
+    got = M.propose(wanted(title), [edition(title=title, disambiguation=said)])
+    assert got.status == M.MATCHED
+
+
+@pytest.mark.parametrize("title", ["Song (feat. X Remix)", "Song - feat. X Remix"])
+def test_a_guest_clause_ate_the_version_and_graded_exact_against_the_plain_title(
+    title: str,
+) -> None:
+    assert M.propose(wanted(title), [edition(title="Song")]).status == M.REVIEW
+    assert M.propose(wanted("Song"), [edition(title=title)]).status == M.REVIEW
+    assert M.propose(wanted(title), [edition(title=title)]).status == M.MATCHED
+
+
+def test_a_guest_clause_with_no_version_in_it_is_still_only_a_credit() -> None:
+    plain = M.propose(wanted("Song (feat. Somebody)"), [edition(title="Song")])
+    assert plain.status == M.MATCHED
+
+
+def test_a_guest_clause_is_never_a_name_or_part_of_a_search_for_who() -> None:
+    assert M.search_artists("A Band (feat. X Remix)") == ("A Band",)
+    assert M.lead_credited("A Band (feat. X Remix)", ("A Band",))
+    assert M.search_title("Song (feat. X Remix)") == "Song (feat. X Remix)"
+    assert M.search_title("Song (feat. Somebody)") == "Song"
+
+
+def test_the_library_reads_a_guest_clause_holding_a_version_as_another_recording() -> (
+    None
+):
+    from ripdoctor.core import filing as F
+
+    song = TP.Song(1, "Song (feat. X Remix)", "A Band", "A Record", 200.0)
+    row = F.Row("Song", "A Band", "Elsewhere", 200.0, "/lib/song.flac")
+    assert not F.alike(song, row)
+    assert F.alike(replace(song, title="Song (feat. Somebody)"), row)
+
+
+def test_an_unnamed_remix_album_was_accepted_for_a_title_that_says_no_remix() -> None:
+    remix = edition(album="Remixed", secondary=("Remix",))
+    got = M.propose(wanted(album="A Record"), [remix])
+    assert got.status == M.REVIEW
+    assert "remix album" in got.reason
+
+
+def test_a_remix_album_the_list_names_or_a_remix_it_says_is_still_accepted() -> None:
+    named = edition(album="A Record", secondary=("Remix",))
+    assert M.propose(wanted(), [named]).status == M.MATCHED
+    said = edition(title="A Song (Club Mix)", album="Club Mixes", secondary=("Remix",))
+    assert M.propose(wanted("A Song (Club Mix)"), [said]).status == M.MATCHED
