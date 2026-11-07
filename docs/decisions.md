@@ -2851,13 +2851,20 @@ both and claims no gap.
 
 ### A boundary moved past its neighbour
 
-It is kept, and said at the move. A drag, an arrow key and a typed figure can all carry
-a track's edge past the next track's, and this used to save with no complaint and first
-surface as a refusal at Cut. Clamping it would be the program moving a person's boundary
-for them, and refusing the move would throw away what they meant to do next: often it is
-one of two edges being fixed in turn. So the move stands, the status line says so at once,
-the row reads `Overlaps 3` in red, and the rail's Cut step waits with the reason. A save
-is allowed, because a save loses nothing.
+It does not move, and says why, as on Tapes. A drag, a nudge and a typed figure that would
+carry a track's edge past the next track's stay where they were, and the status line names
+the track in the way and when it ends or starts. Clamping it to that edge would be the program
+placing a person's boundary for them. A crossing move is rarely what was meant: it reads as one
+of two edges being fixed in turn, and moving the other one first is always possible, since an
+edge moved away from its partner passes nothing.
+
+Two markers on one spot stay separable with the mouse from either side: the side the pointer
+is on says which, and only a press dead on it falls to the selected track's.
+
+An overlap already in a saved plan is still said, not hidden. The row reads `Overlaps 3` in red,
+the rail's Cut step waits with the reason, and a move in the direction that undoes it is allowed
+at every step, including one that leaves it overlapping less. A save is allowed, because a save
+loses nothing.
 
 `GET /api/archive` answers 409 on such a plan and that is the overlap: the gate validates
 the plan it would gate on (`test_the_archive_gates_409_is_the_overlap_saying_so`). The

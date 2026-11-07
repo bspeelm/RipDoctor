@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { canCheck, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
+import { canCheck, crossed, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -599,16 +599,26 @@ const placedByLength = (t) => !t.settled && !t.forced && t.placed === "length";
 
 let saidOverlap = false;
 
-// A boundary moved is the person's, and nothing later moves it, this included: one moved
-// past its neighbour stays there, and they are told at once, while it is theirs to undo.
+// A boundary moved is the person's, and nothing later moves it.
 function setByHand(t) {
   t.forced = false;
   t.settled = "hand";
   t.placed = "";
   const over = trackOverlaps(t);
-  if (over.length) status(`${t.number} \u201c${t.title}\u201d now overlaps ${over.map((x) => `${x.number} \u201c${x.title}\u201d`).join(" and ")}. Left where you put it; Cut will not run until they no longer overlap.`, true);
+  if (over.length) status(`${t.number} \u201c${t.title}\u201d still overlaps ${over.map((x) => `${x.number} \u201c${x.title}\u201d`).join(" and ")}. Cut will not run until they no longer overlap.`, true);
   else if (saidOverlap) status("no tracks overlap now");
   saidOverlap = !!over.length;
+}
+
+// A move past the track beside it does not happen, whichever way it was asked for, and
+// says why. Nothing else moved, so nothing was decided for them. ADR-064.
+function refusedCrossing(t, edge, at) {
+  const other = crossed(t, edge, at, sideOf(t));
+  if (other) {
+    const which = edge === "start" ? "ends" : "starts";
+    status(`Not moved: that overlaps track ${other.number} \u201c${other.title}\u201d, which ${which} at ${fmt(other[edge === "start" ? "end" : "start"])}. Move that one first.`, true);
+  }
+  return !!other;
 }
 
 // The row is read-only, and what edits it opens beneath it, one at a time. The open track is
@@ -696,9 +706,9 @@ function renumber(t, input) {
 // Bound as a drag is: inside the side, and never past the track's other edge.
 function typedEdge(t, edge, input) {
   const v = parseFloat(input.value);
-  const same = !Number.isFinite(v) || round2(v) === round2(t[edge]);
+  const at = Math.max(0, Math.min(S.sideData[S.side].duration, v));
+  const same = !Number.isFinite(v) || round2(v) === round2(t[edge]) || refusedCrossing(t, edge, at);
   if (!same) {
-    const at = Math.max(0, Math.min(S.sideData[S.side].duration, v));
     t[edge] = round2(edge === "start" ? Math.min(at, t.end - 0.2) : Math.max(at, t.start + 0.2));
     setByHand(t);
   }
@@ -801,6 +811,7 @@ function nudgeSelected(step) {
     status("Choose Start or End first (E), or press a marker, and then this moves it.", true);
     return false;
   }
+  if (refusedCrossing(t, ed.sel.edge, t[ed.sel.edge] + step)) return true;
   if (ed.sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
   else t.end = Math.max(t.end + step, t.start + 0.2);
   setByHand(t);
@@ -4621,6 +4632,7 @@ function wire() {
       const tr = trackByNum(num); if (!tr) return;
       const d = S.sideData[S.side].duration;
       t = Math.max(0, Math.min(d, t));
+      if (refusedCrossing(tr, edge, t)) return;
       if (edge === "start") tr.start = Math.min(t, tr.end - 0.2);
       else tr.end = Math.max(t, tr.start + 0.2);
       setByHand(tr);

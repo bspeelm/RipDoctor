@@ -101,6 +101,25 @@ def test_two_tracks_sharing_audio_overlap_and_two_meeting_do_not() -> None:
     assert not call("overlapping", a, [{"number": 2, "start": 11.0, "end": 20.0}])
 
 
+def test_a_move_past_the_neighbour_is_crossed_and_one_undoing_an_overlap_is_not() -> (
+    None
+):
+    one = {"number": 1, "start": 0.0, "end": 10.0}
+    two = {"number": 2, "start": 12.0, "end": 20.0}
+    both = [one, two]
+    assert call("crossed", one, "end", 13.0, both)["number"] == 2
+    assert call("crossed", two, "start", 9.0, both)["number"] == 1
+    assert call("crossed", one, "end", 12.0, both) is None, "meeting is not crossing"
+    assert call("crossed", two, "start", 10.0, both) is None
+    assert call("crossed", one, "start", 1.0, both) is None, "nothing before it"
+    assert call("crossed", two, "end", 99.0, both) is None, "nothing after it"
+    saved_over = [{"number": 1, "start": 0.0, "end": 15.0}, two]
+    assert call("crossed", saved_over[0], "end", 13.0, saved_over) is None
+    assert call("crossed", two, "start", 13.0, saved_over) is None
+    assert call("crossed", two, "start", 11.0, saved_over)["number"] == 1
+    assert call("crossed", saved_over[0], "end", 16.0, saved_over)["number"] == 2
+
+
 def test_a_row_from_an_earlier_capture_ends_once_a_person_has_marked_it() -> None:
     assert call("fromEarlier", {"placed": "earlier", "settled": ""}) is True
     assert call("fromEarlier", {"placed": "earlier", "settled": "ear"}) is False

@@ -865,10 +865,10 @@ def test_a_question_about_a_list_could_be_answered_from_a_row_that_never_asked_i
     assert "if (opening) tpListAsk = null;" in picked
 
 
-def test_two_markers_on_one_spot_could_not_be_told_apart_by_a_long_timeline() -> None:
+def test_two_markers_on_one_spot_are_told_apart_by_the_side_the_mouse_is_on() -> None:
     js = (STATIC / "editor.js").read_text()
     hit = re.search(r"\n  hit\(x, y.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "best && this.long ? this._tieBroken(x, reach, best) : best" in hit
+    assert "return best && this._tieBroken(x, reach, best);" in hit
     broken = re.search(r"\n  _tieBroken\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "this.sel?.track" in broken
     assert 'x > n.at ? "start" : "end"' in broken
@@ -1749,17 +1749,24 @@ def test_a_split_takes_its_edges_from_the_rule_that_bounds_them() -> None:
     assert "g.lo" not in split, "the page has its own idea of a gap's edges again"
 
 
-def test_a_boundary_moved_past_its_neighbour_is_said_and_left_there() -> None:
-    """It saved with no complaint and first surfaced as a refusal at Cut. Issue #54.
-    A drag, an arrow and a typed figure all come through setByHand, held above."""
+def test_a_boundary_that_would_cross_its_neighbour_does_not_move_and_says_why() -> None:
+    """It used to save with no complaint and surface as a refusal at Cut, and after #54
+    stood where it was put. A drag, a nudge and a typed figure are all refused now."""
     js = (STATIC / "app.js").read_text()
-    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "trackOverlaps(t)" in helper and "now overlaps" in helper
-    assert "Left where you put it" in helper
+    said = re.search(r"function refusedCrossing\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert (
+        "crossed(t, edge, at, sideOf(t))" in said and "Not moved: that overlaps" in said
+    )
     for edge in ("t.start =", "t.end =", "t[edge] ="):
-        assert edge not in helper, "a person's boundary is not moved for them"
-    typed = re.search(r"function typedEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "setByHand(t)" in typed
+        assert edge not in said, "a person's boundary is not moved for them"
+    for body, call in (
+        (r"function nudgeSelected\(", "refusedCrossing(t, ed.sel.edge,"),
+        (r"function typedEdge\(", "refusedCrossing(t, edge, at)"),
+    ):
+        fn = re.search(body + r".*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert call in fn
+    assert "if (refusedCrossing(tr, edge, t)) return;" in js
+    assert "Left where you put it" not in js
 
 
 def test_the_row_and_the_rail_say_a_track_overlaps() -> None:

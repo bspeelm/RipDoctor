@@ -307,6 +307,19 @@ export const fromEarlier = (t) => t.placed === "earlier" && !t.settled;
 // doubt, and marking it would call a thing heard that nothing asked anyone to hear.
 export const canCheck = (t) => !!t && !t.settled && (!!t.forced || t.placed === "length" || fromEarlier(t));
 
+// The neighbour this edge would pass by moving to `at`, or nothing. An edge already past it,
+// in a plan saved that way, can still move back: that is how the overlap gets undone.
+export function crossed(track, edge, at, list) {
+  const order = [...list].sort((a, b) => a.number - b.number);
+  const here = order.findIndex((x) => x.number === track.number);
+  if (edge === "start") {
+    const before = order[here - 1];
+    return before && at < before.end && at < track.start ? before : null;
+  }
+  const after = order[here + 1];
+  return after && at > after.start && at > track.end ? after : null;
+}
+
 // The tracks on this side that share audio with this one. Meeting at a point is not sharing.
 export function overlapping(track, list) {
   return list.filter((x) => x !== track && track.start < x.end && x.start < track.end);

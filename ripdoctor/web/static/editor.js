@@ -415,12 +415,13 @@ export class Editor {
         if (d <= reach && (!best || d < best.d)) best = { track: t.number, edge, d };
       }
     }
-    return best && this.long ? this._tieBroken(x, reach, best) : best;
+    return best && this._tieBroken(x, reach, best);
   }
 
-  // Two markers on one spot have to be separable by the mouse. The selected song's comes
-  // first, then whichever one's song lies on the side the pointer is: the song starting
-  // here is to the right of it, and the one ending is to the left.
+  // Two markers on one spot have to be separable by the mouse, since neither can be dragged
+  // through the other. It is whichever one's song lies on the side the pointer is: the song
+  // starting here is to the right of it, and the one ending is to the left. Dead on it says
+  // no side, and then the selected song's comes first.
   _tieBroken(x, reach, best) {
     const near = [];
     for (const t of this.tracks) {
@@ -431,7 +432,8 @@ export class Editor {
     }
     if (near.length < 2) return best;
     const mine = near.filter((n) => n.track === this.sel?.track);
-    const pool = mine.length ? mine : near;
+    const onSpot = near.every((n) => Math.abs(n.at - x) < TIE_PX / 2);
+    const pool = onSpot && mine.length ? mine : near;
     const { track, edge, d } = pool.find((n) => n.edge === (x > n.at ? "start" : "end")) ?? pool[0];
     return { track, edge, d };
   }
