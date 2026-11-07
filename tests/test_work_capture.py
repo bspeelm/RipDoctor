@@ -155,10 +155,40 @@ def _reading_at(elapsed: float) -> S.Reading:
 
 def test_the_status_says_how_old_its_reading_is() -> None:
     """A capture loop that cannot measure keeps the last reading while running."""
-    live = W.Live("a", "a", "hw:9", started=100.0, control=S.Control())
+    clock = [500.0]
+    live = W.Live(
+        "a",
+        "a",
+        "hw:9",
+        started=100.0,
+        control=S.Control(),
+        tick=lambda: clock[0],
+        ticked=500.0,
+    )
     assert "reading_age" not in live.as_dict(101.0, 30.0, -60.0)
     live.reading = _reading_at(10.0)
+    clock[0] = 511.0
     assert live.as_dict(111.0, 30.0, -60.0)["reading_age"] == 1.0, "keeping up"
+    clock[0] = 530.0
     stuck = live.as_dict(130.0, 30.0, -60.0)
     assert stuck["reading_age"] == 20.0 and stuck["running"]
     assert stuck["levels"]["band"] == -40.0, "what it read is still reported as it was"
+
+
+def test_a_step_in_the_wall_clock_does_not_age_a_reading() -> None:
+    """Age mixed the wall clock with the loop's, so a step blanked the meter for the
+    rest of a capture."""
+    clock = [500.0]
+    live = W.Live(
+        "a",
+        "a",
+        "hw:9",
+        started=100.0,
+        control=S.Control(),
+        tick=lambda: clock[0],
+        ticked=500.0,
+    )
+    live.reading = _reading_at(10.0)
+    clock[0] = 511.0
+    for wall in (111.0, 3711.0, 11.0):
+        assert live.as_dict(wall, 30.0, -60.0)["reading_age"] == 1.0
