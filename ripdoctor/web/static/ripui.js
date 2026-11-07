@@ -33,7 +33,11 @@ export const FLOOR = -100;
 //
 // Deliberately no peak, held or otherwise: this is a 42 ms window and it jumps every poll,
 // which is unreadable. `ripdoctor probe` is where gain is set.
-export const liveLevels = (st) => (st?.running && st.levels) || null;
+// Past this a reading is one the capture loop could not replace. A loop keeping up reads
+// once a second, and the age includes the recorder's settle of less than that.
+const READING_STALE_SECONDS = 5;
+export const liveLevels = (st) =>
+  (st?.running && !(st.reading_age > READING_STALE_SECONDS) && st.levels) || null;
 
 // Where a level sits on the scale both meters share, 0 at the floor and 1 at full scale.
 // Below the floor reads as the floor: the scale ends there, and it does not bend to fit.

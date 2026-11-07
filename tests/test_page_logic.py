@@ -136,6 +136,18 @@ def test_checked_is_offered_on_a_doubt_and_not_on_a_fit_or_a_settled_track() -> 
     assert call("canCheck", None) is False
 
 
+def test_a_reading_the_capture_loop_stopped_replacing_is_not_a_level() -> None:
+    """The status keeps the last one while running, so a loop that could not measure
+    left a needle and a history that looked live. None is drawn, which is a gap."""
+    reading = {"full": -30.0, "band": -40.0}
+    stuck = {"running": True, "levels": reading, "reading_age": 6.0}
+    assert call("liveLevels", stuck) is None
+    assert call("liveLevels", {**stuck, "reading_age": 0.5}) == reading, "ordinary"
+    assert call("liveLevels", {**stuck, "reading_age": 2.0}) == reading, "a slow poll"
+    del stuck["reading_age"]
+    assert call("liveLevels", stuck) == reading, "from before this was reported"
+
+
 def test_a_finished_captures_last_reading_is_not_what_the_input_is_doing() -> None:
     """The status keeps it after the stop, so the needle stayed up and the line under
     it said `monitoring input` about a capture that had ended."""

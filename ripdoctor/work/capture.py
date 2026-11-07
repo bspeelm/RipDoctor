@@ -89,6 +89,9 @@ class Live:
             out["music"] = self.reading.music
             out["quiet_for"] = self.reading.quiet_for
             out["warning"] = self.reading.warning
+            # The loop keeps the last reading when it cannot measure, so this is what
+            # tells a level from one that was. It includes the recorder's settle.
+            out["reading_age"] = round(now - self.started - self.reading.elapsed, 1)
         if self.outcome:
             out["reason"] = self.outcome.reason
             out["seconds"] = self.outcome.seconds
