@@ -1911,3 +1911,42 @@ def test_a_merge_holding_more_rows_than_its_plan_opens_the_gate(tmp_path: Path) 
     assert get(build(service), "/api/archive/album", service).json()["ready"]
     AR.note_filed(service.layout, "album", {})
     assert not get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_rows_whose_files_have_gone_do_not_open_the_gate(tmp_path: Path) -> None:
+    """The rail read In library and Ready with the files gone."""
+    service, _library = arrived(tmp_path)
+    gone = tmp_path / "gone" / "01 One.flac"
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=every_row(str(gone)).encode()
+    )
+    service.settings = replace(service.settings, importer="beets")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and gate["library_tracks"] == 0
+
+
+def test_a_record_with_no_release_does_not_open_the_gate_on_an_edition(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    row = I_SEP.join(
+        (
+            "T",
+            "A Band",
+            "A Record",
+            "3:00",
+            f"{there}",
+            "",
+            "1",
+            "rel",
+            "A Band",
+            "",
+            "",
+        )
+    )
+    service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=row.encode())
+    service.settings = replace(service.settings, importer="beets")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and "another release" in gate["why"]

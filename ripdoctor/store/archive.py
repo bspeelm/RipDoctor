@@ -172,12 +172,18 @@ def survey(
     # By its release first: beets may keep the artist under another name than the
     # plan's. A record filed with no release has only its names to be found by, and a
     # row that does name a release is another edition, which proves nothing about this.
-    where, count = importer.locate(runner, library, artist, album, mbid=mbid)
+    # With no release, a row that names one is another edition just the same. Only rows
+    # whose files are there count: a row outliving its file proves nothing is anywhere.
+    where, count = importer.locate(
+        runner, library, artist, album, mbid=mbid, unreleased=not mbid, present=True
+    )
     editions = 0
     if where is None and mbid:
-        where, count = importer.locate(runner, library, artist, album, unreleased=True)
-        if where is None:
-            editions = importer.locate(runner, library, artist, album)[1]
+        where, count = importer.locate(
+            runner, library, artist, album, unreleased=True, present=True
+        )
+    if where is None:
+        editions = importer.locate(runner, library, artist, album, present=True)[1]
     source = layout.raw / slug
     sides = []
     if source.is_dir():

@@ -167,6 +167,7 @@ class Importer(Protocol):
         *,
         mbid: str = "",
         unreleased: bool = False,
+        present: bool = False,
     ) -> tuple[Path | None, int]: ...
 
     def filed(
@@ -229,6 +230,7 @@ class Tagger:
         *,
         mbid: str = "",
         unreleased: bool = False,
+        present: bool = False,
     ) -> tuple[Path | None, int]:
         return T.locate(library, artist, album)
 
@@ -970,16 +972,20 @@ class Beets:
         *,
         mbid: str = "",
         unreleased: bool = False,
+        present: bool = False,
     ) -> tuple[Path | None, int]:
         """Ask beets where it put things, rather than guessing a path.
 
         beets owns the naming. A gate that checked the path this project would
         have chosen would be checking the wrong directory on every install that
-        configured beets differently, which is all of them.
+        configured beets differently, which is all of them. `present` is for what
+        clears raw: a row whose file has gone proves nothing is anywhere.
         """
         rows = self._quietly_filed(runner, library, artist, album, mbid)
         if unreleased:
             rows = tuple(r for r in rows if not r.release)
+        if present:
+            rows = tuple(r for r in rows if r.present)
         return (Path(rows[0].path).parent, len(rows)) if rows else (None, 0)
 
     def filed(
