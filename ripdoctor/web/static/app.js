@@ -4717,12 +4717,8 @@ function wire() {
                              showCatalogueState();
                              checkExisting();
                              $("#imp-results").innerHTML = "";
-                             // Picking here used to set the id in the box and
-                             // nowhere else: the plan kept the release chosen in
-                             // First pass, so the Archive gate went on querying
-                             // an id that no longer described the album.
-                             S.meta.mbid = r.id;
-    markDirty();          // buildDoc sends this, so picking a release is an edit
+                             // Only looking, until Import or Re-label says otherwise: both
+                             // write the release, and the plan's closes the Archive gate.
                              offerRelabel(r);
                            }, { requireDurations: false });
     } catch (e) { $("#imp-err").textContent = e.message; }

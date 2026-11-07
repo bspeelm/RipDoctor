@@ -1023,6 +1023,17 @@ def test_an_import_under_a_pasted_release_makes_it_the_one_the_plan_names() -> N
     )
 
 
+def test_browsing_a_release_in_the_import_dialog_changes_nothing_saved() -> None:
+    """A pick saved itself, so looking at a result and closing changed the spec's
+    release and closed the Archive gate on a record already filed."""
+    js = (STATIC_JS).read_text()
+    wired = js[js.index('$("#imp-search").onclick') :]
+    wired = wired[: wired.index('$("#imp-relabel").onclick')]
+    assert "offerRelabel(r)" in wired
+    assert "markDirty" not in wired, "a pick is not an edit"
+    assert "S.meta.mbid" not in wired, "the next edit would save it"
+
+
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
     """More than was cut is not a safer kind of enough: it is what an earlier
     copy that was not replaced looks like, and clearing raw/ on the strength of
