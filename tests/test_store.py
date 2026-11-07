@@ -8,13 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.audio.runner import FakeRunner, Result, ToolFailed
 from ripdoctor.core.naming import Unsafe
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack, Spec, SpecSide, SpecTrack
 from ripdoctor.store import archive as AR
 from ripdoctor.store import files as F
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains, under
+from tests.pool import a_layout as a_pool
 from tests.pool import a_runner
 
 # ------------------------------------------------------------ containment
@@ -578,3 +579,49 @@ def test_a_track_on_another_side_is_not_taken_for_the_one_settled() -> None:
     )
     with pytest.raises(ValueError, match="on side b"):
         F.keeping_settled(a_fresh_spec(1), plan)
+
+
+def test_a_later_side_failing_once_left_an_earlier_side_replaced_and_its_take_aside(
+    tmp_path: Path,
+) -> None:
+    layout = a_pool(tmp_path, sides=("a", "b"))
+    kept = layout.archive / "album"
+    kept.mkdir(parents=True)
+    (kept / "side-a.flac").write_bytes(b"earlier a")
+    (kept / "side-b.flac").write_bytes(b"earlier b")
+
+    class FailsB(FakeRunner):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "flac" and "side-b" in args[-1] and "archive" in args[-1]:
+                return Result(tuple(args), 1, b"", b"bad")
+            if args[0] == "ffprobe":
+                return Result(tuple(args), 0, b"1.0\n", b"")
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    with pytest.raises(AR.NotReady):
+        AR.put_away(FailsB(), layout, "album")
+    assert (kept / "side-a.flac").read_bytes() == b"earlier a"
+    assert (kept / "side-b.flac").read_bytes() == b"earlier b"
+    assert not (kept / AR.SUPERSEDED).exists()
+
+
+def test_a_repair_that_dies_leaves_no_part_written_file_at_the_target(
+    tmp_path: Path,
+) -> None:
+    layout = a_pool(tmp_path, sides=("a",))
+
+    class DiesPartWay(FakeRunner):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "flac":
+                return Result(tuple(args), 1, b"", b"truncated")
+            if args[0] == "ffmpeg":
+                Path(args[-1]).write_bytes(b"part of it")
+                return Result(tuple(args), 1, b"", b"died")
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    with pytest.raises(ToolFailed):
+        AR.put_away(DiesPartWay(), layout, "album")
+    assert not (layout.archive / "album" / "side-a.flac").exists()
+    assert (layout.raw / "album" / "side-a.flac").is_file()

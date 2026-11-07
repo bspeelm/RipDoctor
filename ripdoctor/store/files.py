@@ -179,7 +179,10 @@ def with_unseen_sides(plan: Plan, before: Plan | None, on_disk: dict[str, str]) 
 
 def forget_side(layout: Layout, slug: str, file: str) -> None:
     """A side somebody discarded goes from both documents, as its dialog promises. A
-    record with no readable documents has nothing to take it out of."""
+    record with no readable documents has nothing to take it out of, and a re-rip
+    discarded still has its side in the archive."""
+    if letter_of(file) in layout.sides_on_disk(slug):
+        return
     try:
         plan = read_plan(layout.plan_file(slug))
         spec = read_spec(layout.spec_file(slug))

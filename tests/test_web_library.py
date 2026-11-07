@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -1977,3 +1978,41 @@ def test_discarding_a_side_takes_it_out_of_both_documents(tmp_path: Path) -> Non
     assert [s.letter for s in F.read_spec(service.layout.spec_file("album")).sides] == [
         "a"
     ]
+
+
+def test_discarding_a_re_rip_keeps_the_side_the_archive_still_holds(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    kept = service.layout.archive / "album"
+    kept.mkdir(parents=True, exist_ok=True)
+    (kept / "side-b.flac").write_bytes(b"the earlier capture")
+    post(
+        build(service),
+        "/api/rip/discard-side",
+        service,
+        {"slug": "album", "side": "b"},
+    )
+    assert len(F.read_plan(service.layout.plan_file("album")).sides) == 2
+
+
+def test_a_filesystem_with_coarser_times_does_not_read_as_captured_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _library = arrived(tmp_path)
+    raw = service.layout.raw / "album" / "side-a.flac"
+    os.utime(raw, ns=(1_000_000_123, 1_000_000_123))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    plan = Plan.from_dict(doc)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    real = shutil.copy2
+
+    def coarse(source: Path, target: Path) -> None:
+        real(source, target)
+        os.utime(target, (1, 1))
+
+    monkeypatch.setattr(AR.shutil, "copy2", coarse)
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    shown = get(build(service), "/api/album/album", service).json()
+    assert shown["tracks_by_side"]["a"][0].get("placed") != "earlier"

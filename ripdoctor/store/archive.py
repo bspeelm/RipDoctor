@@ -310,49 +310,51 @@ def put_away(
             progress(what, detail)
 
     archived, notes = [], []
-    reencoded: dict[str, tuple[str, str]] = {}
-    # Held until every side has read back, not just this one: a later side
-    # failing must still be able to put the earlier ones back.
-    stepped: list[Path] = []
-    for side in sorted(source.glob("side-*.flac")):
-        target = dest / side.name
-        superseded = step_aside(target)
-        if superseded:
-            stepped.append(superseded)
-        if verify(runner, str(side)):
-            say(side.name, "copying")
-            shutil.copy2(side, target)
-        else:
-            # Not a failure: it is what a capture ended with a signal looks
-            # like, and re-encoding is how it stops being that.
-            say(side.name, "re-encoding")
-            reencoded[side.name] = (C.stamp_of(side), "")
-            runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
-            notes.append(f"{side.name} was truncated and has been re-encoded")
-
-        seconds = read_back(runner, target)
-        if not seconds:
-            target.unlink(missing_ok=True)
+    # What copied so far and what it stepped aside, so that a side failing anywhere puts
+    # every earlier one back: the archive ends as it began, and raw is still whole.
+    copied: dict[str, tuple[str, str]] = {}
+    written: list[Path] = []
+    stepped: list[tuple[Path, Path]] = []
+    try:
+        for side in sorted(source.glob("side-*.flac")):
+            target = dest / side.name
+            superseded = step_aside(target)
             if superseded:
-                superseded.replace(target)
-            raise NotReady(f"{side.name} did not read back from the archive")
-        if side.name in reencoded:
-            reencoded[side.name] = (reencoded[side.name][0], C.stamp_of(target))
-        archived.append(
-            {
-                "side": side.name,
-                "bytes": target.stat().st_size,
-                "seconds": round(seconds, 2),
-            }
-        )
+                stepped.append((superseded, target))
+            written.append(target)
+            copied[side.name] = (C.stamp_of(side), "")
+            if verify(runner, str(side)):
+                say(side.name, "copying")
+                shutil.copy2(side, target)
+            else:
+                # Not a failure: it is what a capture ended with a signal looks
+                # like, and re-encoding is how it stops being that.
+                say(side.name, "re-encoding")
+                runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
+                notes.append(f"{side.name} was truncated and has been re-encoded")
+
+            seconds = read_back(runner, target)
+            if not seconds:
+                raise NotReady(f"{side.name} did not read back from the archive")
+            copied[side.name] = (copied[side.name][0], C.stamp_of(target))
+            archived.append(
+                {
+                    "side": side.name,
+                    "bytes": target.stat().st_size,
+                    "seconds": round(seconds, 2),
+                }
+            )
+    except Exception:
+        _undo_copies(written, stepped, dest)
+        raise
 
     if not archived:
         raise NotReady(f"no sides in raw for {slug}")
 
-    _same_audio(layout, slug, reencoded)
+    _same_audio(layout, slug, copied)
 
     # Only now, with every side read back from where it will live.
-    for old_take in stepped:
+    for old_take, _target in stepped:
         if keep_superseded:
             notes.append(f"the previous {old_take.name} is in {SUPERSEDED}/")
             continue
@@ -378,16 +380,28 @@ def put_away(
     }
 
 
-def _same_audio(
-    layout: Layout, slug: str, reencoded: dict[str, tuple[str, str]]
+def _undo_copies(
+    written: list[Path], stepped: list[tuple[Path, Path]], dest: Path
 ) -> None:
-    """A re-encode changes the file and not the music, so the plan follows it.
+    for target in written:
+        target.unlink(missing_ok=True)
+    for moved, target in stepped:
+        moved.replace(target)
+    with suppress(OSError):  # it holds the rest of the record, if it was there before
+        (dest / SUPERSEDED).rmdir()
+    with suppress(OSError):
+        dest.rmdir()
 
-    Times placed on a truncated capture are still right on its repaired copy. A
-    plan that does not read is left for whoever opens it to be told about.
+
+def _same_audio(layout: Layout, slug: str, copied: dict[str, tuple[str, str]]) -> None:
+    """A copy changes the file and not the music, so the plan follows it.
+
+    Times placed on a truncated capture are still right on its repaired copy, and any
+    copy may land with coarser times. A plan that does not read is left for whoever
+    opens it to be told about.
     """
     where = layout.plan_file(slug)
-    if not reencoded or not where.is_file():
+    if all(old == new for old, new in copied.values()) or not where.is_file():
         return
     try:
         plan = read_plan(where)
@@ -395,8 +409,8 @@ def _same_audio(
     except (OSError, ValueError, KeyError, OldFormat):
         return
     sides = tuple(
-        replace(s, audio=reencoded[s.file][1])
-        if s.file in reencoded and s.audio == reencoded[s.file][0]
+        replace(s, audio=copied[s.file][1])
+        if s.file in copied and s.audio == copied[s.file][0]
         else s
         for s in plan.sides
     )
