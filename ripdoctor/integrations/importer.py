@@ -36,6 +36,7 @@ from ripdoctor.core.filing import (
     term,
 )
 from ripdoctor.core.plan import Plan
+from ripdoctor.integrations import aside as A
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
 
@@ -258,7 +259,7 @@ _ROW = _SEP.join(
     ("$title", "$artist", "$album", "$length", "$path", "$mb_trackid", "$track")
 )
 _HELD = _SEP.join((_ROW, "$mb_albumid"))
-_COPY = _SEP.join((_HELD, "$albumartist"))
+_COPY = _SEP.join((_HELD, "$albumartist", "$id", "$album_id"))
 
 # What is typed at beets' matcher to accept the candidate it printed, and then
 # at the question it asks when the album is already in the library. One answer
@@ -328,7 +329,13 @@ def answers(duplicates: str, *, matching: bool) -> bytes:
 # every track is written twice and a finished import cannot be told from a refused
 # one; and the duplicate question, which a configured `remove` answers by deleting
 # the filed audio, before any answer sent here is read. ADR-042, ADR-063.
-OVERRIDE = "import:\n  quiet: no\n  timid: no\n  move: yes\n  duplicate_action: ask\n"
+#
+# `incremental` and `resume` because a retry must not be skipped as already seen, or
+# asked whether to resume a run a kill interrupted.
+OVERRIDE = (
+    "import:\n  quiet: no\n  timid: no\n  move: yes\n  duplicate_action: ask\n"
+    "  incremental: no\n  resume: no\n"
+)
 
 # For a song going into a row that has its art: the row it arrives on is about to go,
 # and a cover fetched for that would stay behind as a file nothing names.
@@ -508,47 +515,62 @@ class Beets:
         dir_mode: int = 0o775,
     ) -> Outcome:
         self._refuse_off_its_mount(runner, library)
+        self._refuse_held(runner, library)
         if duplicates == "merge" and not mbid:
             raise ImportFailed(NO_RELEASE_TO_MERGE)
         how = self._merging(runner, library, mbid, plan.album, duplicates)
-        removed: list[Path] = []
+        expected = sum(len(s.tracks) for s in plan.sides)
         # Only with the acknowledgement: "replace" alone is a default, not a
         # licence to delete. ADR-060.
-        if replacing and duplicates == "replace":
-            removed = self._remove_filed(
-                runner, library, plan.artist, plan.album, mbid=mbid
-            )
-        if not mbid:
-            # Nothing to match against, and a cut file carries no tags at
-            # all. The plan is what is known, so it is written first. ADR-049.
-            T.write_plan_tags(runner, plan, review)
-        result = runner.run(
-            self._argv(self._import(review, mbid), self._config_for(how)),
-            stdin=_merge_answers(how) or answers(duplicates, matching=bool(mbid)),
-            timeout=3600,
+        held = (
+            self._hold_filed(runner, library, plan.artist, plan.album, mbid, review)
+            if replacing and duplicates == "replace"
+            else None
         )
-        output = _plain(result.text + result.err)
-        # After the import, since the new copy may land in the same folder.
-        folders = _clear_emptied(library, removed)
-
-        left = (
-            [p for p in Path(review).glob(f"*{FLAC}")] if Path(review).is_dir() else []
-        )
-        if left:
-            # beets leaves the files where they were when it declines, so what
-            # is still in review is the honest measure of what did not import.
-            why = self.stale(runner, library, plan.artist, plan.album, mbid=mbid)
-            said = f"\n\n{why.note()}" if why else ""
-            if _STARVED in output:
-                said = (
-                    "\n\nbeets asked a question this did not answer, and gave up "
-                    "waiting. That is the cause; what is left in review is the "
-                    "symptom."
-                ) + said
-            raise ImportFailed(
-                f"{len(left)} of the tracks are still in review - beets did not "
-                f"take them.{said}\n\n{output[-2000:]}"
+        try:
+            if not mbid:
+                # Nothing to match against, and a cut file carries no tags at
+                # all. The plan is what is known, so it is written first. ADR-049.
+                T.write_plan_tags(runner, plan, review)
+            result = runner.run(
+                self._argv(self._import(review, mbid), self._config_for(how)),
+                stdin=_merge_answers(how) or answers(duplicates, matching=bool(mbid)),
+                timeout=3600,
             )
+            output = _plain(result.text + result.err)
+            left = (
+                [p for p in Path(review).glob(f"*{FLAC}")]
+                if Path(review).is_dir()
+                else []
+            )
+            if left:
+                # beets leaves the files where they were when it declines, so what
+                # is still in review is the honest measure of what did not import.
+                # A held copy's rows are not stale: its files are about to return.
+                why = (
+                    None
+                    if held
+                    else self.stale(runner, library, plan.artist, plan.album, mbid=mbid)
+                )
+                said = f"\n\n{why.note()}" if why else ""
+                if _STARVED in output:
+                    said = (
+                        "\n\nbeets asked a question this did not answer, and gave up "
+                        "waiting. That is the cause; what is left in review is the "
+                        "symptom."
+                    ) + said
+                raise ImportFailed(
+                    f"{len(left)} of the tracks are still in review - beets did not "
+                    f"take them.{said}\n\n{output[-2000:]}"
+                )
+            new = self._new_copy(runner, library, held, expected) if held else ()
+        except Exception as e:
+            if held:
+                self._undo_replace(runner, library, held, e)
+            raise
+        removed, covers, folders = (
+            self._finish_replace(runner, library, held, new) if held else ([], 0, 0)
+        )
 
         where, count = self.locate(runner, library, plan.artist, plan.album, mbid=mbid)
         notes = []
@@ -560,6 +582,8 @@ class Beets:
             notes.append(f"set {fixed} files' modes")
         if removed:
             notes.append(f"removed {len(removed)} files of the copy already filed")
+        if covers:
+            notes.append(f"removed {covers} covers of the copy already filed")
         if folders:
             notes.append(f"removed {folders} empty folders it left")
         notes.extend(self._merged(runner, library, mbid, how))
@@ -647,34 +671,45 @@ class Beets:
         """Import an album that arrived already cut, pinned to the agreed
         release so the run that commits cannot choose a different one."""
         self._refuse_off_its_mount(runner, library)
+        self._refuse_held(runner, library)
         how = self._merging(runner, library, mbid, "", duplicates)
         # Nothing asked first here, so finding none of this release is the usual case.
-        removed = (
-            self._remove_filed(runner, library, "", "", mbid=mbid, none_is_fine=True)
+        held = (
+            self._hold_filed(
+                runner, library, "", "", mbid, directory, none_is_fine=True
+            )
             if duplicates == "replace"
-            else []
+            else None
         )
-        result = runner.run(
-            self._argv(
-                ["import", "--search-id", mbid, directory], self._config_for(how)
-            ),
-            stdin=_merge_answers(how) or answers(duplicates, matching=True),
-            timeout=3600,
+        try:
+            result = runner.run(
+                self._argv(
+                    ["import", "--search-id", mbid, directory], self._config_for(how)
+                ),
+                stdin=_merge_answers(how) or answers(duplicates, matching=True),
+                timeout=3600,
+            )
+            output = _plain(result.text + result.err)
+            left = [n for n in tracks if (Path(directory) / n).exists()]
+            if left:
+                said = (
+                    "\n\nbeets asked a question this did not answer, and gave up "
+                    "waiting."
+                    if _STARVED in output
+                    else ""
+                )
+                raise ImportFailed(
+                    f"{len(left)} of the tracks are still waiting - beets did not "
+                    f"take them.{said}\n\n{output[-2000:]}"
+                )
+            new = self._new_copy(runner, library, held, len(tracks)) if held else ()
+        except Exception as e:
+            if held:
+                self._undo_replace(runner, library, held, e)
+            raise
+        removed, covers, folders = (
+            self._finish_replace(runner, library, held, new) if held else ([], 0, 0)
         )
-        output = _plain(result.text + result.err)
-        folders = _clear_emptied(library, removed)
-
-        left = [n for n in tracks if (Path(directory) / n).exists()]
-        if left:
-            said = (
-                "\n\nbeets asked a question this did not answer, and gave up waiting."
-                if _STARVED in output
-                else ""
-            )
-            raise ImportFailed(
-                f"{len(left)} of the tracks are still waiting - beets did not "
-                f"take them.{said}\n\n{output[-2000:]}"
-            )
 
         where, count = self.locate(runner, library, "", "", mbid=mbid)
         notes = []
@@ -683,6 +718,8 @@ class Beets:
             notes.append(f"set {fixed} files' modes")
         if removed:
             notes.append(f"removed {len(removed)} files of this release already filed")
+        if covers:
+            notes.append(f"removed {covers} covers of this release already filed")
         if folders:
             notes.append(f"removed {folders} empty folders it left")
         notes.extend(self._merged(runner, library, mbid, how))
@@ -984,44 +1021,142 @@ class Beets:
         rows = self._quietly_filed(runner, library, artist, album, mbid)
         return _stale_of(rows, artist, album)
 
-    def replace_filed(
-        self, runner: Runner, library: str, artist: str, album: str, *, mbid: str = ""
-    ) -> int:
-        """Remove the copy already filed, audio as well as rows. ADR-060."""
-        return len(self._remove_filed(runner, library, artist, album, mbid=mbid))
-
-    def _remove_filed(
+    def _hold_filed(
         self,
         runner: Runner,
         library: str,
         artist: str,
         album: str,
+        mbid: str,
+        directory: str,
         *,
-        mbid: str = "",
         none_is_fine: bool = False,
-    ) -> list[Path]:
-        """Exactly `filed`'s rows, or a plain refusal with nothing deleted. Every row is
-        proved first, so a bad one stops this before any file goes, and rows go before
-        files, so what stops partway has forgotten a file and not lost one."""
+    ) -> A.Held | None:
+        """Exactly `filed`'s files moved aside, or a plain refusal with nothing moved.
+        Every row is proved first, since these paths come from another program. Their
+        rows stay: only when the new copy is proved are they forgotten, so a failure has
+        only to rename files back."""
         rows = self._filed_rows(runner, library, artist, album, mbid)
         if not rows and none_is_fine:
-            return []
+            return None
         refused = replace_refusal(rows, artist, album, mbid)
         if refused:
             raise ImportFailed(refused)
         root = Path(library).resolve()
-        paths = [Path(r.path) for r in rows]
-        for path in paths:
-            # They come from another program and this deletes what they name.
-            if not contains(root, path):
-                raise ImportFailed(f"refusing to delete {path}: outside {root}")
-        self._forget_rows(runner, rows)
-        gone = []
-        for path in paths:
-            if path.is_file():
-                path.unlink()
-                gone.append(path)
-        return gone
+        for r in rows:
+            if not contains(root, r.path):
+                raise ImportFailed(f"refusing to delete {r.path}: outside {root}")
+        try:
+            return A.hold(
+                library,
+                A.Held(
+                    Path(),
+                    tuple(r.row for r in rows),
+                    tuple(r.path for r in rows),
+                    (),
+                    directory,
+                    artist,
+                    album,
+                    mbid,
+                ),
+            )
+        except OSError as e:
+            raise ImportFailed(f"nothing was replaced: {e}") from e
+
+    def _new_copy(
+        self, runner: Runner, library: str, held: A.Held, expected: int
+    ) -> tuple[Row, ...]:
+        """The rows the import added, once they are all that was asked for. Until this
+        has answered, what it replaces is only moved aside."""
+        rows = self._filed_rows(runner, library, held.artist, held.album, held.mbid)
+        new = tuple(r for r in rows if r.row not in held.rows)
+        there = sum(1 for r in new if r.present)
+        if there != expected or len(new) != expected:
+            raise ImportFailed(
+                f"the library holds {there} of the {expected} new tracks, so what was "
+                "filed before has been put back"
+            )
+        return new
+
+    def _finish_replace(
+        self, runner: Runner, library: str, held: A.Held, new: tuple[Row, ...]
+    ) -> tuple[list[Path], int, int]:
+        """The new copy is proved, so the old goes: rows, then what was held, then the
+        folders that leaves. A kill anywhere in here is finished by `recover`. Once the
+        old rows are gone, `%aunique` no longer has reason to keep the new copy in a
+        folder of its own, and `move` says where it belongs. It is filed either way."""
+        settled = A.proved(held)
+        self._forget_ids(runner, settled.rows)
+        A.drop(settled)
+        removed = [Path(p) for p in settled.files]
+        folders = _clear_emptied(library, [Path(p) for p in settled.everything])
+        for album in sorted({r.album_row for r in new if r.album_row}):
+            self._complaint(runner, ["move", "-a", f"id:{album}"], 3600)
+        return removed, len(settled.covers), folders
+
+    def _undo_replace(
+        self, runner: Runner, library: str, held: A.Held, why: Exception
+    ) -> None:
+        """Back as it was: anything the import did add returns to where it came from,
+        and the held files to their paths. The rows never left. Anything that will not
+        go back stays held, and is said with the failure that brought this here."""
+        trouble = ""
+        added: list[Row] = []
+        try:
+            rows = self._filed_rows(runner, library, held.artist, held.album, held.mbid)
+            added = [r for r in rows if r.row not in held.rows]
+            if added:
+                self._forget_ids(runner, tuple(r.row for r in added))
+                for r in added:
+                    _return_file(Path(r.path), Path(held.directory))
+        except (ImportFailed, ToolMissing, OSError) as e:
+            trouble = f" Rows it added may still be there: {e}."
+        stuck = A.put_back(held)
+        _clear_emptied(library, [Path(r.path) for r in added])
+        if stuck:
+            trouble += (
+                f" {len(stuck)} files of the earlier copy could not go back, because "
+                f"something is at their paths, and are held in {held.where}."
+            )
+        if trouble:
+            why.args = (f"{why}\n\n{trouble.strip()}",)
+
+    def recover(self, runner: Runner, library: str) -> list[str]:
+        """Whatever a kill left held in this library: finished if its new copy had been
+        proved, otherwise put back. Says what it did, and what it could not."""
+        said = []
+        for held in A.found(library):
+            if held.rows == ("?",):
+                said.append(f"{held.where} cannot be read and was left where it is")
+            elif held.proved:
+                self._forget_ids(runner, held.rows)
+                A.drop(held)
+                said.append(f"finished replacing {held.album or held.mbid}")
+            else:
+                failure = ImportFailed("a replace was interrupted")
+                self._undo_replace(runner, library, held, failure)
+                said.append(f"{failure} and {held.album or held.mbid} was put back")
+        return said
+
+    def _refuse_held(self, runner: Runner, library: str) -> None:
+        """Nothing is filed past a copy that could not be put back."""
+        self.recover(runner, library)
+        left = A.found(library)
+        if left:
+            raise ImportFailed(
+                f"an earlier replace left files held in {left[0].where} that could not "
+                "go back. Move them or what is in their way, then file again"
+            )
+
+    def _forget_ids(self, runner: Runner, rows: Collection[str]) -> None:
+        """By row id and not path: the new copy may be at the very paths of the old."""
+        if not rows:  # with no query at all, beets would take the whole library
+            return
+        terms = [part for r in rows for part in (",", f"id:{r}")][1:]
+        result = runner.run(self._argv(["remove", "-f", *terms]), timeout=600)
+        if not result.ok:
+            why = TapeRun(result.returncode, result.err).why()
+            raise ImportFailed(f"beets could not clear those rows: {why}")
 
     def _forget_rows(self, runner: Runner, rows: Collection[Row]) -> None:
         """By each exact path, in one command, and with no `-d`, so no file goes."""
@@ -1137,6 +1272,18 @@ def _merge_answers(how: str) -> bytes:
     return SKIP_ANY_OTHER if how == NEW_ALBUM else PINNED_ANSWERS[how]
 
 
+def _return_file(path: Path, directory: Path) -> None:
+    """A file the import took, back to where it took it from, overwriting nothing."""
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / path.name
+    n = 0
+    while target.exists():
+        n += 1
+        target = directory / f"{path.stem} {n}{path.suffix}"
+    if path.is_file():
+        path.rename(target)
+
+
 def _clear_emptied(library: str, removed: list[Path]) -> int:
     """The folders these files were in, and those above them, up to and not including
     the root, as far as each is now empty. `rmdir` is the check: it refuses a folder
@@ -1205,6 +1352,8 @@ def _row(
     track: str,
     release: str = "",
     album_artist: str = "",
+    row: str = "",
+    album_row: str = "",
 ) -> Row:
     where = _rooted(root, said)
     return Row(
@@ -1218,6 +1367,8 @@ def _row(
         track=int(track) if track.isdigit() else 0,
         release=release,
         album_artist=album_artist,
+        row=row,
+        album_row=album_row,
     )
 
 

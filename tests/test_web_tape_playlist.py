@@ -47,7 +47,19 @@ FORMAT = "\x1f".join(f"${k}" for k in KEYS)
 def every_row(path: object, release: str) -> str:
     """Beets' answer to being asked for every row: one album, this file."""
     return "\x1f".join(
-        ("T", "A Band", "A Record", "3:00", str(path), "", "1", release, "A Band")
+        (
+            "T",
+            "A Band",
+            "A Record",
+            "3:00",
+            str(path),
+            "",
+            "1",
+            release,
+            "A Band",
+            "",
+            "",
+        )
     )
 
 
@@ -813,7 +825,12 @@ def test_a_precut_album_still_succeeds_when_the_rebuild_raises(
         raise RuntimeError("the rebuild fell over")
 
     monkeypatch.setattr(TX, "rebuild_all", breaks)
-    body = post(build(service), "/api/precut/take", service, {"mbid": MBID}).json()
+    body = post(
+        build(service),
+        "/api/precut/take",
+        service,
+        {"mbid": MBID, "duplicates": "keep"},
+    ).json()
     assert not body["error"], body["error"]
     assert (
         "playlists were not rebuilt: the rebuild fell over" in body["result"]["notes"]

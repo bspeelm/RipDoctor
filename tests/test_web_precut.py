@@ -153,6 +153,8 @@ def test_the_upload_is_cleared_only_once_the_library_holds_it(
             "1",
             MBID,
             "A Band",
+            "",
+            "",
         )
     )
     service = a_precut_service(tmp_path)
@@ -166,7 +168,12 @@ def test_the_upload_is_cleared_only_once_the_library_holds_it(
     lib.mkdir(parents=True)
     (lib / "01 One.flac").write_bytes(b"a")
 
-    body = post(build(service), "/api/precut/take", service, {"mbid": MBID}).json()
+    body = post(
+        build(service),
+        "/api/precut/take",
+        service,
+        {"mbid": MBID, "duplicates": "keep"},
+    ).json()
 
     assert not body["error"], body["error"]
     assert IN.state(service.layout, HELD) is None

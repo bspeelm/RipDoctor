@@ -271,7 +271,7 @@ def a_plan_dict() -> dict:
 
 def every_row(path: str) -> str:
     """Beets' answer to being asked for every row: this album, this file."""
-    fields = ("T", "A Band", "A Record", "3:00", path, "", "1", "", "A Band")
+    fields = ("T", "A Band", "A Record", "3:00", path, "", "1", "", "A Band", "", "")
     return I_SEP.join(fields)
 
 
@@ -791,7 +791,19 @@ def test_a_blank_release_asks_about_the_names_and_not_the_specs_release(
     there.write_bytes(b"fLaC")
     rows = [
         I_SEP.join(
-            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", rel, "A Band")
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                rel,
+                "A Band",
+                "",
+                "",
+            )
         )
         for rel in ("aaa", "bbb")
     ]
@@ -814,7 +826,19 @@ def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     service.runner = FakeRunner(installed={"beet"}).expect(
         "ls",
         stdout=I_SEP.join(
-            ("T", "A Band", "A Record", "3:00", f"{gone}", "", "1", "", "A Band")
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{gone}",
+                "",
+                "1",
+                "",
+                "A Band",
+                "",
+                "",
+            )
         ).encode(),
     )
     body = get(build(service), "/api/library/existing/album", service).json()
@@ -841,7 +865,19 @@ def test_stale_rows_are_cleared_only_when_every_file_is_absent(
     service.runner = FakeRunner(installed={"beet"}).expect(
         "ls",
         stdout=I_SEP.join(
-            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", "", "A Band")
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                "",
+                "A Band",
+                "",
+                "",
+            )
         ).encode(),
     )
     r = post(build(service), "/api/library/clear-stale/album", service)
@@ -970,7 +1006,19 @@ def filed_as(service: Service, tmp_path: Path, *releases: str) -> None:
     there.write_bytes(b"fLaC")
     rows = [
         I_SEP.join(
-            ("T", "A Band", "A Record", "3:00", f"{there}", "", "1", rel, "A Band")
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                rel,
+                "A Band",
+                "",
+                "",
+            )
         )
         for rel in releases
     ]

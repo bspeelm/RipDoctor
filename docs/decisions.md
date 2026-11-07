@@ -2921,3 +2921,14 @@ refusals, the exact selection a replace now removes by, and the archive gate's p
 of which capture was filed, and retires nothing. The budget counts Python, so the page's own growth is
 not in that number. The trim ADR-036 promised is still owed. The comment ratio does
 not move.
+
+## ADR-065 — a replaced copy is held until the new one is proved
+
+**Status:** accepted. Set by the author, 2026-11-06.
+
+A replace deleted the filed copy and then ran the import, so a declined or dead import left
+nothing. The files now move aside inside the library, in `.ripdoctor-replacing/`, with their rows
+kept; the import runs; the new rows and files are proved; and only then are the old ones forgotten
+by id and deleted. Any failure puts them back, and a manifest lets a restart finish or undo what a
+kill interrupted. A copy that cannot go back stops the next import rather than being written over.
+The ceiling moves 13,200 → 14,000 for this and what follows in this section.

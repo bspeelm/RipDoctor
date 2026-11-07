@@ -79,6 +79,8 @@ class Row:
     track: int = 0
     release: str = ""
     album_artist: str = ""
+    row: str = ""
+    album_row: str = ""
 
 
 @dataclass(frozen=True, slots=True)

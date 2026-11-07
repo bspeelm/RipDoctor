@@ -11,10 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.audio.runner import FakeRunner, ToolMissing
 from ripdoctor.core import filing as F
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack
+from ripdoctor.integrations import aside as A
 from ripdoctor.integrations import importer as I
+from tests.beets_double import Library
 
 SEP = "\x1f"
 
@@ -23,7 +25,7 @@ def copy_row(
     path: object, release: str = "x", album: str = "A Record", who: str = "A Band"
 ) -> str:
     """One row of every row beets is asked for, by what a selection judges."""
-    return SEP.join(("T", who, album, "3:00", str(path), "", "1", release, who))
+    return SEP.join(("T", who, album, "3:00", str(path), "", "1", release, who, "", ""))
 
 
 def a_plan() -> Plan:
@@ -621,9 +623,29 @@ def a_library(tmp_path: Path, *names: str) -> tuple[str, bytes]:
     return str(tmp_path), said.encode()
 
 
-def replacing(library: str, said: bytes, review: Path) -> FakeRunner:
-    fake = Moving(review, installed={"beet", "metaflac"})
-    return fake.expect("ls", stdout=said)  # type: ignore[return-value]
+def replacing(
+    library: str,
+    said: bytes,
+    review: Path,
+    *,
+    who: str = "A Band",
+    what: str = "A Record",
+    **kw: object,
+) -> Library:
+    """A beets holding these rows, each album with a row of its own."""
+    fake = Library(Path(library), review, who=who, what=what, **kw)  # type: ignore[arg-type]
+    albums: dict[tuple[str, str, str], str] = {}
+    for line in said.decode().split("\n"):
+        f = line.split(SEP)
+        key = (f[8], f[2], f[7])
+        fake.add(
+            Path(f[4]),
+            album_id=albums.setdefault(key, str(len(albums) + 1)),
+            albumartist=f[8],
+            album=f[2],
+            mb_albumid=f[7],
+        )
+    return fake
 
 
 def test_replacing_removes_the_filed_audio_not_only_the_rows(
@@ -634,12 +656,12 @@ def test_replacing_removes_the_filed_audio_not_only_the_rows(
     directory, and shows both."""
     library, said = a_library(tmp_path, "01 Old.flac", "02 Old.flac")
     review = Path(a_review(tmp_path))
-    fake = replacing(library, said, review)
+    fake = replacing(library, said, review, who="Another Name")
 
     done = I.Beets().apply(
         fake, a_plan(), str(review), library, mbid="x", replacing=True
     )
-    assert not list((Path(library) / "A Band" / "A Record").glob("*.flac"))
+    assert not (Path(library) / "A Band").exists()
     assert any("removed 2 files" in n for n in done.notes)
     assert [c for c in fake.calls if "remove" in c], "the rows were left behind"
 
@@ -662,11 +684,14 @@ def test_a_path_outside_the_library_is_refused(tmp_path: Path) -> None:
     outside.write_bytes(b"fLaC")
     library = tmp_path / "music"
     library.mkdir()
+    review = Path(a_review(tmp_path))
     fake = FakeRunner(installed={"beet"}).expect(
         "ls", stdout=copy_row(f"{outside}").encode()
     )
     with pytest.raises(I.ImportFailed, match="outside"):
-        I.Beets().replace_filed(fake, str(library), "A Band", "A Record", mbid="x")
+        I.Beets().apply(
+            fake, a_plan(), str(review), str(library), mbid="x", replacing=True
+        )
     assert outside.is_file(), "it deleted something outside the library"
 
 
@@ -1147,7 +1172,7 @@ def answers_merge_questions(fake: FakeRunner, own: list[str], named: list[str]) 
     """By album name, which holds one field fewer, and then every row."""
     fake.expect(
         lambda a: "ls" in a and "album::" in " ".join(a),
-        stdout="\n".join(r.rpartition(SEP)[0] for r in named).encode(),
+        stdout="\n".join(SEP.join(r.split(SEP)[:8]) for r in named).encode(),
     )
     fake.expect("ls", stdout="\n".join({*own, *named}).encode())
 
@@ -1287,7 +1312,7 @@ def replaced(tmp_path: Path, *also: str) -> tuple[Path, I.Outcome]:
         where.write_bytes(b"x")
     review = Path(a_review(tmp_path))
     done = I.Beets().apply(
-        replacing(library, said, review),
+        replacing(library, said, review, who="Another Name"),
         a_plan(),
         str(review),
         library,
@@ -1349,18 +1374,13 @@ def test_the_library_root_is_never_removed_with_its_last_folder(tmp_path: Path) 
 
 
 def test_a_folder_the_new_copy_landed_back_in_stays(tmp_path: Path) -> None:
-    class Landing(Moving):
-        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
-            if "import" in [str(a) for a in argv]:
-                (album / "01 New.flac").write_bytes(b"fLaC")
-            return super().run(argv, stdin=stdin, timeout=timeout)
-
     library, said = a_library(tmp_path / "lib", "01 Old.flac")
     album = Path(library) / "A Band" / "A Record"
     review = Path(a_review(tmp_path))
-    fake = Landing(review, installed={"beet", "metaflac"}).expect("ls", stdout=said)
+    fake = replacing(library, said, review, lands="{what}")
     I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
-    assert (album / "01 New.flac").is_file()
+    assert len(list(album.glob("*.flac"))) == 2
+    assert not list(album.glob("*Old*"))
 
 
 # ------------------------------------------------- a replace removes what it names
@@ -1369,7 +1389,7 @@ def test_a_folder_the_new_copy_landed_back_in_stays(tmp_path: Path) -> None:
 def listing(*rows: tuple[str, str, Path, str]) -> bytes:
     """Every row beets holds: album artist, album, file, release."""
     return "\n".join(
-        SEP.join(("T", who, what, "3:00", str(path), "", "1", release, who))
+        SEP.join(("T", who, what, "3:00", str(path), "", "1", release, who, "", ""))
         for who, what, path, release in rows
     ).encode()
 
@@ -1414,12 +1434,11 @@ def shelf_rows(shelf: dict[str, Path]) -> list[tuple[str, str, Path, str]]:
 
 def replace(
     tmp_path: Path, plan: Plan, library: Path, rows: bytes, *, mbid: str = ""
-) -> tuple[Moving, I.Outcome | I.ImportFailed]:
+) -> tuple[Library, I.Outcome | I.ImportFailed]:
     review = tmp_path / f"rev-{len(list(tmp_path.iterdir()))}"
     review.mkdir()
     (review / "01 T.flac").write_bytes(b"fLaC")
-    fake = Moving(review, installed={"beet", "metaflac"})
-    fake.expect("ls", stdout=rows)
+    fake = replacing(str(library), rows, review, who=plan.artist, what=plan.album)
     try:
         done: I.Outcome | I.ImportFailed = I.Beets().apply(
             fake, plan, str(review), str(library), mbid=mbid, replacing=True
@@ -1440,7 +1459,7 @@ def test_a_replace_once_deleted_every_album_whose_title_held_this_one(
     assert not shelf["a"].exists()
     assert shelf["b"].is_file() and shelf["c"].is_file()
     removes = [c for c in fake.calls if "remove" in c]
-    assert [c[-1] for c in removes] == [f"path:{shelf['a']}"]
+    assert [c[-1] for c in removes] == ["id:1"]
     assert not [a for c in fake.calls for a in c if a.startswith("album:")]
 
 
@@ -1545,13 +1564,16 @@ def test_an_album_that_arrived_cut_replaces_its_release_and_no_other_edition(
     library = tmp_path / "lib"
     mine = on_disk(library, "Band A", "Blue", "01 Mine.flac")
     other = on_disk(library, "Band A", "Blue", "01 Other.flac")
-    fake = FakeRunner(installed={"beet"}).expect(
-        "ls",
-        stdout=listing(
-            ("Band A", "Blue", mine, "rel"), ("Band A", "Blue", other, "rel-other")
-        ),
+    rows = listing(
+        ("Band A", "Blue", mine, "rel"), ("Band A", "Blue", other, "rel-other")
     )
-    done = I.Beets().take(fake, str(tmp_path), str(library), mbid="rel", tracks=())
+    waiting = tmp_path / "waiting"
+    waiting.mkdir()
+    (waiting / "01 New.flac").write_bytes(b"fLaC")
+    fake = replacing(str(library), rows, waiting, who="Band A", what="Blue")
+    done = I.Beets().take(
+        fake, str(waiting), str(library), mbid="rel", tracks=("01 New.flac",)
+    )
     assert not mine.exists() and other.is_file()
     assert any("removed 1 files" in n for n in done.notes)
     assert b"R" not in next(
@@ -1629,3 +1651,153 @@ def test_nothing_to_forget_never_reaches_beets_as_forgetting_everything() -> Non
     fake = FakeRunner()
     I.Beets()._forget_rows(fake, [])
     assert not fake.calls
+
+
+# ------------------------------------------------- the old copy until the new is proved
+
+
+def held_replace(
+    tmp_path: Path, **kw: object
+) -> tuple[Path, Path, Library, I.ImportFailed]:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review, **kw)
+    with pytest.raises(I.ImportFailed) as refused:
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    return Path(library), review, fake, refused.value
+
+
+def as_filed(library: Path) -> None:
+    album = library / "A Band" / "A Record"
+    assert sorted(p.name for p in album.iterdir()) == ["01 Old.flac", "02 Old.flac"]
+    assert not (library / A.WHERE).exists()
+
+
+def test_a_declined_replace_once_left_nothing_of_the_filed_copy(tmp_path: Path) -> None:
+    library, review, fake, _ = held_replace(tmp_path, takes=0)
+    as_filed(library)
+    assert [r for r in fake.recs if "Old" in r.path.name], (
+        "the rows left with the files"
+    )
+    assert not [c for c in fake.calls if "remove" in c]
+    assert len(list(review.glob("*.flac"))) == 2
+
+
+def test_a_replace_is_put_back_when_the_import_exits_badly(tmp_path: Path) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review).expect("import", returncode=1)
+    with pytest.raises(I.ImportFailed):
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    assert (Path(library) / "A Band" / "A Record" / "01 Old.flac").is_file()
+
+
+def test_a_replace_is_put_back_when_writing_tags_raises(tmp_path: Path) -> None:
+    """Before beets is even run, on a record with no release."""
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review)
+    fake.installed = {"beet"}
+    with pytest.raises(ToolMissing):
+        I.Beets().apply(fake, a_plan(), str(review), library, replacing=True)
+    assert (Path(library) / "A Band" / "A Record" / "01 Old.flac").is_file()
+    assert not (Path(library) / A.WHERE).exists()
+
+
+def test_a_replace_part_taken_returns_what_it_took_and_puts_the_old_back(
+    tmp_path: Path,
+) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review, takes=1)
+    with pytest.raises(I.ImportFailed):
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    as_filed(Path(library))
+    assert len(list(review.glob("*.flac"))) == 2
+    assert len(fake.recs) == 2
+
+
+def test_the_override_cannot_be_skipped_as_already_imported() -> None:
+    assert "incremental: no" in I.OVERRIDE and "resume: no" in I.OVERRIDE
+
+
+def test_a_new_copy_on_the_very_paths_of_the_old_keeps_its_rows(tmp_path: Path) -> None:
+    library, said = a_library(tmp_path / "lib", "01 One.flac", "02 Two.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review, lands="{what}")
+    new = sorted(p.name for p in review.glob("*.flac"))
+    I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    assert sorted(r.path.name for r in fake.recs) == new
+
+
+def test_a_kill_while_an_import_ran_is_put_back_on_restart(tmp_path: Path) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review)
+    A.hold(
+        library,
+        A.Held(
+            Path(),
+            tuple(r.id for r in fake.recs),
+            tuple(str(r.path) for r in fake.recs),
+            (),
+            str(review),
+            "A Band",
+            "A Record",
+            "x",
+        ),
+    )
+    assert not list((Path(library) / "A Band" / "A Record").glob("*.flac"))
+    said_back = I.Beets().recover(fake, library)
+    assert "put back" in said_back[0]
+    as_filed(Path(library))
+
+
+def test_a_kill_after_the_new_copy_was_proved_finishes_on_restart(
+    tmp_path: Path,
+) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    fake = replacing(library, said, tmp_path)
+    held = A.hold(
+        library,
+        A.Held(
+            Path(),
+            tuple(r.id for r in fake.recs),
+            tuple(str(r.path) for r in fake.recs),
+            (),
+            "",
+            "A Band",
+            "A Record",
+            "x",
+        ),
+    )
+    A.proved(held)
+    assert "finished" in I.Beets().recover(fake, library)[0]
+    assert not fake.recs and not (Path(library) / A.WHERE).exists()
+
+
+def test_a_held_copy_with_something_at_its_paths_stops_the_next_import(
+    tmp_path: Path,
+) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review)
+    path = fake.recs[0].path
+    A.hold(
+        library,
+        A.Held(
+            Path(),
+            (fake.recs[0].id,),
+            (str(path),),
+            (),
+            str(review),
+            "A Band",
+            "A Record",
+            "x",
+        ),
+    )
+    path.write_bytes(b"something else")
+    with pytest.raises(I.ImportFailed, match="could not"):
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x")
+    assert path.read_bytes() == b"something else"
+    assert list((Path(library) / A.WHERE).rglob("0")), "the held file was lost"
