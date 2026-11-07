@@ -63,13 +63,14 @@ def scenario(body: str) -> dict:  # type: ignore[type-arg]
     program = (
         RIG % json.dumps(RULES.as_uri())
         + f"const out = await (async () => {{ {body} }})();"
-        + "console.log(JSON.stringify(out));"
+        + "console.log(JSON.stringify(out)); process.exit(0);"
     )
     done = subprocess.run(  # noqa: S603 - argv list, never shell=True
         [str(shutil.which("node")), "--input-type=module", "-e", program],
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     return json.loads(done.stdout)  # type: ignore[no-any-return]
 
@@ -114,4 +115,59 @@ def test_a_failed_save_keeps_the_edit_says_why_and_stops_a_caller() -> None:
     assert {"refused": "the plan has changed"} in got["told"]
     assert got["tries"] == 2, (
         "a stale save waits for a person, and does not retry alone"
+    )
+
+
+def test_an_edit_landing_as_a_reload_finishes_is_saved_and_not_dropped() -> None:
+    """The reload ended by marking the page clean, which cancelled the nudge's save."""
+    got = scenario("""
+        const read = async () => ({ seen: "fresh" });
+        const shown = await saver.reload(read, async (meta) => {
+          S.meta = meta;
+          S.value = 7; markDirty(true, 500);
+        });
+        const after = S.dirty;
+        await pause(30);
+        return { shown, after, posts, ...pill() };
+    """)
+    assert got["shown"] is True
+    assert got["after"], "still to save, not Saved"
+    assert [p["value"] for p in got["posts"]] == [7]
+    assert got["posts"][0]["seen"] == "fresh" and not got["dirty"]
+
+
+def test_an_edit_during_the_read_goes_first_and_the_record_is_read_again() -> None:
+    """What the read brought back predates the edit, and would overwrite it."""
+    got = scenario("""
+        let reads = 0;
+        const showed = [];
+        await saver.reload(async () => {
+          reads += 1;
+          if (reads === 1) { S.value = 7; markDirty(true, 500); }
+          return { seen: `read${reads}`, savedBefore: posts.length };
+        }, async (meta) => { showed.push(meta); });
+        return { reads, showed, posts, ...pill() };
+    """)
+    assert got["reads"] == 2
+    assert [p["value"] for p in got["posts"]] == [7]
+    assert got["showed"] == [{"seen": "read2", "savedBefore": 1}], (
+        "the stale read not shown"
+    )
+    assert not got["dirty"]
+
+
+def test_a_reload_during_a_busy_save_keeps_the_edit_and_shows_nothing() -> None:
+    """A record reopened while a job held the save used to lose what was waiting."""
+    got = scenario("""
+        refuse = failure("a cut is running", { busy: true });
+        S.value = 7; markDirty(true, 5000);
+        let showed = 0;
+        const show = async () => { showed += 1; };
+        const opened = await saver.reload(async () => ({}), show);
+        return { opened, showed, told, value: S.value, ...pill() };
+    """)
+    assert got["opened"] is False and got["showed"] == 0
+    assert got["value"] == 7 and got["dirty"]
+    assert got["fail"]["busy"], (
+        "the pill says it is waiting, and its retry is still set"
     )

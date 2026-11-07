@@ -385,5 +385,21 @@ export function autosaver({ state, doc, post, changed, saving, saved, refused })
     return landed;
   }
 
-  return { markDirty, flushSave, save, failure: () => fail, running: () => !!run };
+  // Reading a record afresh does not cost what the page has not saved. That goes first, and
+  // refused, the page stays as it is. An edit during the read sends it round again, since what
+  // came back is from before it. One made while the rest opens is on the fresh tracks, so it
+  // is left dirty with its save still coming.
+  async function reload(read, show) {
+    let seenEdits, got;
+    do {
+      if (state.dirty && !(await save())) return false;
+      seenEdits = edits;
+      got = await read();
+    } while (seenEdits !== edits);
+    await show(got);
+    if (seenEdits === edits) markDirty(false);
+    return true;
+  }
+
+  return { markDirty, flushSave, save, reload, failure: () => fail, running: () => !!run };
 }

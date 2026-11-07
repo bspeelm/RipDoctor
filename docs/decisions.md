@@ -2887,7 +2887,11 @@ one stays on screen with its reason and a retry, what was typed stays where it i
 pass and Import stop rather than read a plan behind the page. Saves go one at a time, and whatever
 changed during one goes next, so the last state lands
 (`test_a_failed_save_keeps_the_edit_says_why_and_stops_a_caller`,
-`test_saves_go_one_at_a_time_and_the_last_state_lands`).
+`test_saves_go_one_at_a_time_and_the_last_state_lands`). Reopening the record does not cost an
+edit: what is unsaved goes first, a refusal leaves the page as it is, and an edit made during the
+reload keeps its save (`test_an_edit_landing_as_a_reload_finishes_is_saved_and_not_dropped`,
+`test_an_edit_during_the_read_goes_first_and_the_record_is_read_again`,
+`test_a_reload_during_a_busy_save_keeps_the_edit_and_shows_nothing`).
 
 **A job in progress.** Whatever it is reading must not move under it, so a boundary, a track added
 or removed and a check are refused while it runs, and say so. Text waits: the server answers a save

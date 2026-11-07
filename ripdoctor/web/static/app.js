@@ -110,8 +110,7 @@ async function noticeDisk() {
   try { now = await api(`/api/seen/${slug}`); } catch { return; }
   if (S.slug !== slug || S.dirty || (now.seen === S.meta.seen && now.captures === S.meta.captures)) return;
   const side = S.side;
-  S.sideData = {};
-  await openAlbum(slug);
+  if (!(await openAlbum(slug))) return;
   if (side && side !== S.side && S.meta.sides.includes(side)) await openSide(side);
   status("reloaded: this record changed on disk");
 }
@@ -531,15 +530,19 @@ let cutOpening = 0;
 
 async function openAlbum(slug) {
   cutOpening += 1;
-  try { await openedAlbum(slug); } finally { cutOpening -= 1; }
+  try {
+    status("loading…", true);
+    const opened = await saver.reload(() => api(`/api/album/${slug}`), (meta) => openedAlbum(slug, meta));
+    if (!opened) renderAlbums(S.slug);    // still on this record, so the picker says so
+    return opened;
+  } finally { cutOpening -= 1; }
 }
 
-async function openedAlbum(slug) {
+async function openedAlbum(slug, meta) {
   // the transcript refers to the old album's tracks by number; replaying it
   // against a different record is worse than starting fresh
   S.slug = slug;
-  status("loading…", true);
-  S.meta = await api(`/api/album/${slug}`);
+  S.meta = meta;
   // What the record is, before anything is encoded. Building a waveform takes
   // minutes on a fresh side, and all of this comes from the document.
   showRecord();
@@ -564,7 +567,6 @@ async function openedAlbum(slug) {
   refreshAlignButton();
   refreshArchiveButton();
   refreshCutRail();             // the encode may have taken minutes
-  markDirty(false);
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
          !!unprepared);
 }
@@ -3795,7 +3797,8 @@ async function cancelIncoming() {
     status(`discarded ${mb(r.freed_bytes)}`);
     $("#up-go").textContent = "Upload";
     await loadIncoming();
-    if (r.forgot) await refreshAlbums(NEW_ALBUM);
+    // Only the record being sent is gone. One open beside it keeps what it has not saved.
+    if (r.forgot && (slug === S.slug || !S.dirty || await save())) await refreshAlbums(NEW_ALBUM);
   } catch (e) { $("#up-err").textContent = e.message; }
 }
 
@@ -4924,9 +4927,12 @@ function wire() {
     $("#realign").disabled = false;
   };
   $("#album").onchange = async (e) => {
-    if (S.dirty && !(await save()) && !confirm("This record's last change is not saved. Leave it anyway?")) {
-      e.target.value = S.slug || NEW_ALBUM;   // put the picker back
-      return;
+    if (S.dirty && !(await save())) {
+      if (!confirm("This record's last change is not saved. Leave it anyway?")) {
+        e.target.value = S.slug || NEW_ALBUM;   // put the picker back
+        return;
+      }
+      markDirty(false);
     }
     if (e.target.value === NEW_ALBUM) { startNewAlbum(); return; }
     try { await openAlbum(e.target.value); }
