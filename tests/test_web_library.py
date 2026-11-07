@@ -1034,6 +1034,20 @@ def test_browsing_a_release_in_the_import_dialog_changes_nothing_saved() -> None
     assert "S.meta.mbid" not in wired, "the next edit would save it"
 
 
+def test_an_import_from_a_page_behind_the_plan_stops_and_says_so() -> None:
+    """The dialog stops the page noticing, and the importer tags from the disk."""
+    js = (STATIC_JS).read_text()
+    run = js[js.index("async function runImport()") :]
+    run = run[: run.index("\n}\n")]
+    assert run.index("changedOnDisk()") < run.index("/api/import/")
+    assert "saver.behind(why)" in run
+
+
+def test_a_cut_names_the_plan_this_page_loaded() -> None:
+    js = (STATIC_JS).read_text()
+    assert "/api/split/${S.slug}`, { seen: S.meta.seen }" in js
+
+
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
     """More than was cut is not a safer kind of enough: it is what an earlier
     copy that was not replaced looks like, and clearing raw/ on the strength of

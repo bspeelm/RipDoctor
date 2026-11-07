@@ -401,5 +401,11 @@ export function autosaver({ state, doc, post, changed, saving, saved, refused })
     return true;
   }
 
-  return { markDirty, flushSave, save, reload, failure: () => fail, running: () => !!run };
+  // What is saved moved on without the page, found out by something other than a save.
+  function behind(why) {
+    fail = { why, stale: true };
+    changed();
+  }
+
+  return { markDirty, flushSave, save, reload, behind, failure: () => fail, running: () => !!run };
 }

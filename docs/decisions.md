@@ -2901,7 +2901,11 @@ reads only audio, so a save goes beside one.
 **Two tabs.** A save names the digest of the plan it was made from, as a tape's list does, and a
 different one is refused with nothing written. A tab with nothing in hand reloads what changed, a
 tab with an edit in hand is told and offered what is saved, and neither overwrites the other
-(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`).
+(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`). A page stops looking while
+it is hidden, playing or showing a dialog, so Cut names the digest too and is refused the same way,
+with `Load what is saved` on the rail
+(`test_a_cut_from_a_page_behind_the_plan_is_refused_and_nothing_is_cut`). Import asks first, from the
+page (`test_an_import_from_a_page_behind_the_plan_stops_and_says_so`).
 
 **What Revert was also for.** A side finished by a rip showed up by pressing it. The page now asks
 every few seconds what is on disk, and a new capture or a changed plan reaches a page with nothing

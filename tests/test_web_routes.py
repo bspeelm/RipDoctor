@@ -497,6 +497,21 @@ def test_splitting_cuts_every_track_and_verifies_it(tmp_path: Path) -> None:
     assert len(list(service.layout.review_dir("album").glob("*.flac"))) == 2
 
 
+def test_a_cut_from_a_page_behind_the_plan_is_refused_and_nothing_is_cut(
+    tmp_path: Path,
+) -> None:
+    """A tab that had not noticed a change cut what was on disk, not what it showed."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    r = post(app, "/api/split/album", service, {"seen": "what-it-loaded"})
+    assert r.status == 409 and r.json()["stale"]
+    assert "nothing was cut" in r.json()["error"]
+    assert not list(service.layout.review_dir("album").glob("*.flac"))
+    seen = F.plan_seen(service.layout, "album")
+    assert post(app, "/api/split/album", service, {"seen": seen}).status == 202
+
+
 def test_a_cut_clears_what_a_previous_cut_left(tmp_path: Path) -> None:
     """Cuts are named from the track number and title, so re-cutting after a
     retitle left the old files beside the new. The importer reads whatever is

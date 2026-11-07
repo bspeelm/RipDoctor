@@ -82,6 +82,15 @@ def add(app: App, service: Service) -> None:
         """Cut, then verify. A file that will not decode is not a track."""
         slug = slug_of(r)
         plan = _plan(service, slug)
+        # A page stops looking while it is hidden, playing or showing a dialog, and a
+        # cut is from the plan on disk, so it says which plan it means.
+        body = r.json()
+        if "seen" in body and body["seen"] != F.plan_seen(layout, slug):
+            said = (
+                "the plan has changed since this page loaded it, in another tab or by "
+                "a job, and nothing was cut"
+            )
+            return H.ok({"error": said, "stale": True}, 409)
         # Judged here, on the saved plan: the page saves for itself before it
         # asks, so an edit it has just made is already in what this reads. The
         # stamps are what a save has not yet had the chance to say.

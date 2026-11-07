@@ -386,7 +386,7 @@ function showCutHead(f) {
   const failed = fail && !fail.busy;
   pill.hidden = !S.dirty && !fail && !f.tracks.length && !f.archived;
   pill.dataset.kind = failed ? "bad" : S.dirty ? "todo" : "done";
-  pill.querySelector("span").textContent = failed ? "Not saved"
+  pill.querySelector("span").textContent = failed ? (S.dirty ? "Not saved" : "Out of date")
     : fail ? "Waiting to save" : S.dirty ? "Saving" : f.archived ? "Archived" : "Saved";
   $("#cut-save-why").hidden = !fail;
   $("#cut-save-why").firstChild.textContent = fail ? `${fail.why} ` : "";
@@ -1113,7 +1113,7 @@ async function split() {
   showCutRail();
   status("cutting…", true);
   try {
-    const r = await runJob(S.slug, `/api/split/${S.slug}`, {}, "cutting");
+    const r = await runJob(S.slug, `/api/split/${S.slug}`, { seen: S.meta.seen }, "cutting");
     const bad = r.unreadable || [];
     status(`${r.tracks} tracks cut` + (bad.length ? ` - ${bad.length} unreadable` : ""),
            bad.length > 0);
@@ -1121,7 +1121,10 @@ async function split() {
     // again, and knowing which costs nothing to report.
     if (bad.length) logline(`these did not read back: ${bad.join(", ")}`, true);
     loadReview();
-  } catch (e) { status(`cut failed: ${e.message}`, true); logline(e.message, true); }
+  } catch (e) {
+    if (e.stale) saver.behind(e.message);
+    status(`${e.stale ? "not cut" : "cut failed"}: ${e.message}`, true); logline(e.message, true);
+  }
   cutCutting = false;
   await refreshCutRail();
 }
@@ -1354,6 +1357,17 @@ async function artFetch() {
   b.disabled = false; b.textContent = was;
 }
 
+// Whether what is saved is not what this page loaded. A dialog stops the page looking.
+async function changedOnDisk() {
+  try {
+    return (await api(`/api/seen/${S.slug}`)).seen !== S.meta.seen;
+  } catch {
+    // A record cut before it arrived has no sides to ask about, and a question that
+    // cannot be answered is no reason to refuse: the import still reads what is saved.
+    return false;
+  }
+}
+
 async function runImport() {
   const tracks = Object.values(S.bySide).flat().length;
   // One question. There used to be two in a row, and the second quoted the
@@ -1369,6 +1383,12 @@ async function runImport() {
   // under must be what it names, a pasted id as much as a picked one.
   if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }
   if (S.dirty && !(await save())) return;      // the importer reads the plan from disk
+  if (await changedOnDisk()) {
+    const why = "the plan has changed since this page loaded it, in another tab or by a job, and nothing was imported";
+    saver.behind(why);
+    $("#imp-err").textContent = `${why}. Close this and load what is saved.`;
+    return;
+  }
   $("#imp-err").textContent = "";
   $("#imp-out").textContent = "tagging and placing\u2026";
   $("#imp-outwrap").hidden = false;
@@ -4685,7 +4705,7 @@ function wire() {
 
   $("#cut-save-retry").onclick = () => {
     if (!saver.failure()?.stale) { flushSave(); return; }
-    if (!confirm("Load what is saved? What this page shows and could not save goes.")) return;
+    if (S.dirty && !confirm("Load what is saved? What this page shows and could not save goes.")) return;
     markDirty(false);
     S.sideData = {};
     openAlbum(S.slug);
