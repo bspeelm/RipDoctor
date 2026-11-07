@@ -7,13 +7,19 @@ seam as the external tools, so the whole first pass runs from a scripted reply.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from ripdoctor.audio import session as S
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations.importer import _SEP as I_SEP
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import auth as A
@@ -21,8 +27,12 @@ from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.library import spec_from
 from ripdoctor.web.service import Service
+from ripdoctor.work import capture as W
+from tests.beets_double import Library
 from tests.pool import a_layout, a_runner, quiet_then_loud
 from tests.test_web_routes import a_service, get, post
+
+STATIC_JS = Path(__file__).resolve().parent.parent / "ripdoctor/web/static/app.js"
 
 
 class Catalogue:
@@ -232,7 +242,7 @@ def test_the_release_chosen_in_the_dialog_is_the_one_imported(
     imported the release picked before it."""
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
-    rows = f"A Record{I_SEP}/music/A Band/A Record/01 One.flac"
+    rows = every_row("/music/A Band/A Record/01 One.flac")
     service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
     F.remember(service.layout, "album", album="A Record", artist="A Band")
 
@@ -261,6 +271,12 @@ def a_plan_dict() -> dict:
 
 
 # --------------------------------------------------------------- archive
+
+
+def every_row(path: str) -> str:
+    """Beets' answer to being asked for every row: this album, this file."""
+    fields = ("T", "A Band", "A Record", "3:00", path, "", "1", "", "A Band", "", "")
+    return I_SEP.join(fields)
 
 
 def with_library(tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -374,13 +390,96 @@ def test_a_side_that_does_not_read_back_stops_everything(tmp_path: Path) -> None
     assert (service.layout.raw / "album" / "side-a.flac").is_file()
 
 
-def rerip(service: Service) -> bytes:
-    """Archive a record, then put a newer capture of one side in raw."""
+def rerip(service: Service, *, filed: bool = True) -> bytes:
+    """Archive a record, then put a newer capture of one side in raw, by default one
+    the library's tracks have since been cut from and filed."""
     post(build(service), "/api/archive/album", service)
     first = (service.layout.archive / "album" / "side-a.flac").read_bytes()
     (service.layout.raw / "album").mkdir()
-    (service.layout.raw / "album" / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 99)
+    again = service.layout.raw / "album" / "side-a.flac"
+    again.write_bytes(b"fLaC" + b"\x00" * 99)
+    if filed:
+        AR.note_filed(service.layout, "album", {again.name: C.stamp_of(again)})
     return first
+
+
+def test_a_re_rip_the_library_was_not_cut_from_cannot_cost_the_earlier_capture(
+    tmp_path: Path,
+) -> None:
+    """Measured in a browser: the earlier import counted in full, the rail read Ready,
+    and pressing Archive replaced the only capture those tracks were cut from."""
+    service, _library = arrived(tmp_path)
+    first = rerip(service, filed=False)
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "captured again" in body["why"]
+    assert "side a" in body["why"] and body["captured_again"]
+    r = post(build(service), "/api/archive/album", service)
+    assert r.status == 409 and "captured again" in r.json()["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").read_bytes() == first
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+
+
+def test_a_proof_of_an_older_capture_does_not_cover_a_newer_one(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    rerip(service)
+    again = service.layout.raw / "album" / "side-a.flac"
+    again.write_bytes(b"fLaC" + b"\x00" * 123)
+    assert (
+        "captured again"
+        in get(build(service), "/api/archive/album", service).json()["why"]
+    )
+
+
+def test_a_plan_on_another_capture_shuts_the_gate(tmp_path: Path) -> None:
+    """Rows reading `From an earlier capture` under a rail reading Ready."""
+    service, _library = arrived(tmp_path)
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = "some-other-capture"
+    F.write_json(service.layout.plan_file("album"), doc)
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "captured again" in body["why"]
+
+
+def test_an_import_records_the_capture_its_tracks_came_from(tmp_path: Path) -> None:
+    service, _library = ready_to_import(tmp_path)
+    service.runner = a_runner()
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    os.utime(raw, (1000, 1000))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    stamp = C.stamp_of(raw)
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    assert json.loads(service.layout.filed_file("album").read_text()) == {
+        "side-a.flac": stamp
+    }
+
+
+def test_a_cut_older_than_the_capture_proves_nothing_about_it(tmp_path: Path) -> None:
+    """Cut, captured again, saved so the plan's stamp moved, then imported: the tracks
+    are the old capture's whatever the plan now says."""
+    service, _library = ready_to_import(tmp_path)
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    cut = service.layout.review_dir("album") / "01 One.flac"
+    os.utime(cut, (raw.stat().st_mtime - 60, raw.stat().st_mtime - 60))
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert AR.cut_captures(service.layout, "album", plan) == {}
+
+
+def test_the_rail_says_why_a_record_was_not_archived_and_offers_one_press() -> None:
+    js = STATIC_JS.read_text()
+    step = js[js.index("function railArchive(") :]
+    step = step[: step.index("\n}\n")]
+    assert "archive_failed" in step and "are cleared unfiled" not in step
+    cut = js[js.index("function railCut(") :]
+    assert "f.arc?.captured_again" in cut[: cut.index("\n}\n")]
+    assert '.replace(/\\.$/, "")' in step
 
 
 def test_a_record_that_was_archived_before_can_be_archived_again(
@@ -395,15 +494,15 @@ def test_a_record_that_was_archived_before_can_be_archived_again(
     assert (service.layout.archive / "album" / "side-a.flac").read_bytes() != first
 
 
-def test_the_earlier_take_goes_once_the_new_one_has_read_back(
+def test_the_earlier_take_is_moved_aside_once_the_new_one_has_read_back(
     tmp_path: Path,
 ) -> None:
-    """By then it has been cut, tagged, filed and read back. ADR-055."""
+    """Nobody is asked before an import archives, so nothing is final. ADR-065."""
     service, _library = arrived(tmp_path)
-    rerip(service)
-    body = post(build(service), "/api/archive/album", service).json()
-    assert not (service.layout.archive / "album" / "_superseded").exists()
-    assert any("replaced" in n for n in body["result"]["notes"])
+    first = rerip(service)
+    post(build(service), "/api/archive/album", service).json()
+    aside = list((service.layout.archive / "album" / "_superseded").iterdir())
+    assert [p.read_bytes() for p in aside] == [first]
 
 
 def test_the_earlier_take_is_kept_when_the_setting_asks_for_it(
@@ -684,6 +783,44 @@ def test_a_record_already_in_the_library_is_reported_before_the_import(
     assert body["existing"]["tracks"] == 1
 
 
+def test_a_blank_release_asks_about_the_names_and_not_the_specs_release(
+    tmp_path: Path,
+) -> None:
+    """The dialog sends `mbid=` for a from-plan import. Read as no answer, the panel
+    named the spec's edition while a Replace from the plan would refuse over both."""
+    service, _library = with_library(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    pinned(service, "aaa")
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    rows = [
+        I_SEP.join(
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                rel,
+                "A Band",
+                "",
+                "",
+            )
+        )
+        for rel in ("aaa", "bbb")
+    ]
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout="\n".join(rows).encode()
+    )
+    app = build(service)
+    blank = get(app, "/api/library/existing/album?mbid=", service).json()["existing"]
+    assert blank["tracks"] == 2 and "2 different releases" in blank["refused"]
+    silent = get(app, "/api/library/existing/album", service).json()["existing"]
+    assert silent["tracks"] == 1 and not silent["refused"]
+
+
 def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     """They read as a copy already there and stop an import part-way, with a
     message from beets that does not say why."""
@@ -691,11 +828,35 @@ def test_stale_rows_are_reported_before_the_import(tmp_path: Path) -> None:
     service.settings = replace(service.settings, importer="beets")
     gone = tmp_path / "gone" / "01 One.flac"
     service.runner = FakeRunner(installed={"beet"}).expect(
-        "ls", stdout=f"A Record{I_SEP}{gone}".encode()
+        "ls",
+        stdout=I_SEP.join(
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{gone}",
+                "",
+                "1",
+                "",
+                "A Band",
+                "",
+                "",
+            )
+        ).encode(),
     )
     body = get(build(service), "/api/library/existing/album", service).json()
     assert body["stale"]["tracks"] == 1
     assert "deleted outside beets" in body["stale"]["note"]
+
+
+def test_asking_what_the_library_holds_lists_it_once(tmp_path: Path) -> None:
+    """Every Import dialog and every change of release asks this, and two whole
+    listings were twice the wait: 0.3 s on 1,000 rows and 3 s on 20,000, measured."""
+    service, _library = with_library(tmp_path)
+    filed_as(service, tmp_path, "aaa")
+    get(build(service), "/api/library/existing/album?mbid=", service)
+    assert len([c for c in service.runner.calls if "ls" in c]) == 1
 
 
 def test_stale_rows_are_cleared_only_when_every_file_is_absent(
@@ -706,7 +867,22 @@ def test_stale_rows_are_cleared_only_when_every_file_is_absent(
     there = tmp_path / "01 One.flac"
     there.write_bytes(b"fLaC")
     service.runner = FakeRunner(installed={"beet"}).expect(
-        "ls", stdout=f"A Record{I_SEP}{there}".encode()
+        "ls",
+        stdout=I_SEP.join(
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                "",
+                "A Band",
+                "",
+                "",
+            )
+        ).encode(),
     )
     r = post(build(service), "/api/library/clear-stale/album", service)
     assert r.status == 409 and "still there" in r.json()["error"]
@@ -803,6 +979,20 @@ def test_a_caller_that_says_nothing_still_gets_the_spec(tmp_path: Path) -> None:
     assert "--search-id" in argv and "from-the-spec" in argv
 
 
+def test_a_refused_import_reads_as_the_refusal_and_not_a_class_name(
+    tmp_path: Path,
+) -> None:
+    """A person read `ImportFailed: ` in front of why nothing was removed."""
+    service, _library = ready_to_import(tmp_path)
+    service.settings = replace(service.settings, importer="beets")
+    service.runner = FakeRunner(installed={"beet", "metaflac"}).expect("ls", stdout=b"")
+    pinned(service, "from-the-spec")
+    r = post(
+        build(service), "/api/import/album", service, {"mbid": "", "replace": True}
+    )
+    assert r.json()["error"].startswith("the library holds nothing that is exactly")
+
+
 def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
     """beets asks a second question when the album is already there, and an
     unanswered one ends the import with a message about stdin."""
@@ -810,8 +1000,104 @@ def test_the_duplicate_answer_reaches_beets(tmp_path: Path) -> None:
     assert runner.stdin_for("import") == b"A\nK\n"
 
 
-def test_replacing_is_what_it_does_when_nothing_is_said(tmp_path: Path) -> None:
-    assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nR\n"
+def test_saying_nothing_never_sends_beets_own_replace(tmp_path: Path) -> None:
+    assert importing_with(tmp_path, {}).stdin_for("import") == b"A\nK\n"
+
+
+def filed_as(service: Service, tmp_path: Path, *releases: str) -> None:
+    """One row of this record's names in the library, for each release given."""
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    rows = [
+        I_SEP.join(
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{there}",
+                "",
+                "1",
+                rel,
+                "A Band",
+                "",
+                "",
+            )
+        )
+        for rel in releases
+    ]
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout="\n".join(rows).encode()
+    )
+    service.settings = replace(service.settings, importer="beets")
+
+
+def test_another_edition_of_the_same_name_does_not_open_the_archive_gate(
+    tmp_path: Path,
+) -> None:
+    """Falling back on the names counted another release's rows, so a record never
+    filed could read as in the library and have its raw side cleared."""
+    service, _library = with_library(tmp_path)
+    pinned(service, "this-one")
+    filed_as(service, tmp_path, "another-one")
+    raw = service.layout.raw / "album"
+    (raw / "side-a.flac").write_bytes(b"x")
+    body = get(build(service), "/api/archive/album", service).json()
+    assert not body["ready"] and "another release" in body["why"]
+    assert body["library_tracks"] == 0
+    r = post(build(service), "/api/archive/album", service, {})
+    assert r.status == 409 and (raw / "side-a.flac").is_file()
+
+
+def test_a_record_filed_with_no_release_still_opens_the_gate_by_its_names(
+    tmp_path: Path,
+) -> None:
+    """From the plan, the rows carry no release even when the spec names one."""
+    service, _library = with_library(tmp_path)
+    pinned(service, "this-one")
+    filed_as(service, tmp_path, "")
+    raw = service.layout.raw / "album"
+    (raw / "side-a.flac").write_bytes(b"x")
+    assert get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_an_import_under_a_pasted_release_makes_it_the_one_the_plan_names() -> None:
+    """A pasted id reached the import and not the plan, so the gate then looked for a
+    release nothing was filed under and read another edition's rows."""
+    js = (STATIC_JS).read_text()
+    run = js[js.index("async function runImport()") :]
+    run = run[: run.index("\n}\n")]
+    assert (
+        "if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }" in run
+    )
+    assert run.index("S.meta.mbid = mbid") < run.index(
+        "if (S.dirty && !(await save()))"
+    )
+
+
+def test_browsing_a_release_in_the_import_dialog_changes_nothing_saved() -> None:
+    """A pick saved itself, so looking at a result and closing changed the spec's
+    release and closed the Archive gate on a record already filed."""
+    js = (STATIC_JS).read_text()
+    wired = js[js.index('$("#imp-search").onclick') :]
+    wired = wired[: wired.index('$("#imp-relabel").onclick')]
+    assert "offerRelabel(r)" in wired
+    assert "markDirty" not in wired, "a pick is not an edit"
+    assert "S.meta.mbid" not in wired, "the next edit would save it"
+
+
+def test_an_import_from_a_page_behind_the_plan_stops_and_says_so() -> None:
+    """The dialog stops the page noticing, and the importer tags from the disk."""
+    js = (STATIC_JS).read_text()
+    run = js[js.index("async function runImport()") :]
+    run = run[: run.index("\n}\n")]
+    assert run.index("changedOnDisk()") < run.index("/api/import/")
+    assert "saver.behind(why)" in run
+
+
+def test_a_cut_names_the_plan_this_page_loaded() -> None:
+    js = (STATIC_JS).read_text()
+    assert "/api/split/${S.slug}`, { seen: S.meta.seen }" in js
 
 
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
@@ -883,6 +1169,92 @@ def test_forcing_places_that_side_from_the_catalogue_and_says_which(
     assert starts == [0.0, 11.0, 22.0, 35.0]
 
 
+def a_second_pass(service, body=None):  # type: ignore[no-untyped-def]
+    service.fetcher = Catalogue(release([2000, 2000, 2000, 2000]))  # type: ignore[assignment]
+    return post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", **(body or {})}
+    ).json()
+
+
+def settled_at(service, number: int, start: float, end: float, who: str) -> None:  # type: ignore[no-untyped-def]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = next(s for s in plan.sides if any(t.number == number for t in s.tracks))
+    moved = tuple(
+        replace(t, start=start, end=end, settled=who) if t.number == number else t
+        for t in side.tracks
+    )
+    plan = replace(
+        plan,
+        sides=tuple(replace(s, tracks=moved) if s is side else s for s in plan.sides),
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+
+def track_in(service, number: int):  # type: ignore[no-untyped-def]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    return next(t for s in plan.sides for t in s.tracks if t.number == number)
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_fitting_again_never_moves_what_a_person_settled(
+    tmp_path: Path, who: str
+) -> None:
+    """Run again used to start from the catalogue, and took every corrected
+    boundary with it behind one confirmation."""
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plain = track_in(service, 1)
+    settled_at(service, 1, plain.start + 0.25, plain.end - 0.25, who)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 1
+
+    again = track_in(service, 1)
+    assert (again.start, again.end) == (plain.start + 0.25, plain.end - 0.25)
+    assert again.settled == who
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert spec.sides[0].tracks[0].settled == who
+
+
+def test_fitting_again_still_moves_what_only_the_fit_placed(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    found = track_in(service, 2)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    moved = tuple(
+        replace(t, start=found.start + 0.25) if t.number == 2 else t
+        for t in plan.sides[0].tracks
+    )
+    plan = replace(plan, sides=(replace(plan.sides[0], tracks=moved), *plan.sides[1:]))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert track_in(service, 2).start == found.start
+
+
+def test_fitting_again_refuses_a_release_with_no_place_for_a_settled_track(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = plan.sides[0]
+    last = side.tracks[-1]
+    extra = replace(last, number=9, start=last.end, end=last.end + 0.5, settled="hand")
+    plan = replace(
+        plan, sides=(replace(side, tracks=(*side.tracks, extra)), *plan.sides[1:])
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    before = service.layout.plan_file("album").read_text()
+
+    body = a_second_pass(service)
+    assert "9" in body["error"] and "no place" in body["error"]
+    assert service.layout.plan_file("album").read_text() == before
+
+
 def test_a_pass_that_needed_no_forcing_says_so(tmp_path: Path) -> None:
     service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
     body = post(
@@ -890,3 +1262,782 @@ def test_a_pass_that_needed_no_forcing_says_so(tmp_path: Path) -> None:
     ).json()
     assert not body["error"], body["error"]
     assert body["result"]["forced"] == []
+
+
+def test_a_saved_plan_keeps_what_the_fit_rested_on_through_the_page(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    before = [
+        t.placed
+        for s in F.read_plan(service.layout.plan_file("album")).sides
+        for t in s.tracks
+    ]
+    assert "length" in before and "gap" in before
+    app = build(service)
+    shown = get(app, "/api/album/album", service).json()["tracks_by_side"]
+    assert [t["placed"] for s in shown.values() for t in s] == before
+
+
+def captured_again(service: Service, letter: str = "a") -> None:
+    """What a rip, an upload and a salvage all come to: a new file under the name."""
+    side = service.layout.raw / "album" / f"side-{letter}.flac"
+    side.write_bytes(side.read_bytes() + b"another take")
+    C.build(service.runner, service.layout, "album", letter, dwell=0.0)
+
+
+def a_fit_with_a_mark(tmp_path: Path, who: str = "hand"):  # type: ignore[no-untyped-def]
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plain = track_in(service, 1)
+    settled_at(service, 1, plain.start + 0.25, plain.end - 0.25, who)
+    return service, plain
+
+
+def page_saves(service: Service, moved: dict[int, float] | None = None):  # type: ignore[no-untyped-def]
+    """The document the page sends: what it was shown, with any end moved by hand."""
+    shown = get(build(service), "/api/album/album", service).json()
+    sides = []
+    for letter, tracks in shown["tracks_by_side"].items():
+        for t in tracks:
+            if t["number"] in (moved or {}):
+                t.update(end=moved[t["number"]], settled="hand", placed="")  # type: ignore[index]
+        sides.append({"letter": letter, "tracks": tracks})
+    return post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {"album": "A", "artist": "B", "sides": sides},
+    ).json()
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_a_first_pass_after_a_re_rip_does_not_hold_times_on_the_audio_that_went(
+    tmp_path: Path, who: str
+) -> None:
+    """Run again pinned settled tracks, and after a re-rip those were positions on
+    a replaced capture that would be cut as "Set by you"."""
+    service, plain = a_fit_with_a_mark(tmp_path, who)
+    captured_again(service)
+
+    body = a_second_pass(service)
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert body["result"]["released"] == [
+        {
+            "side": "a",
+            "number": 1,
+            "title": plain.title,
+            "why": "that side has been captured again since",
+        }
+    ]
+    again = track_in(service, 1)
+    assert again.settled == ""
+    assert (again.start, again.end) == (plain.start, plain.end)
+
+
+def test_a_replaced_side_lets_go_only_of_its_own_marks(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    on_a, on_b = plan.sides[0].tracks[0], plan.sides[1].tracks[0]
+    settled_at(service, on_a.number, on_a.start + 0.25, on_a.end - 0.25, "hand")
+    settled_at(service, on_b.number, on_b.start + 0.25, on_b.end - 0.25, "ear")
+    captured_again(service, "a")
+
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert [x["number"] for x in body["result"]["released"]] == [on_a.number]
+    assert track_in(service, on_b.number).settled == "ear"
+
+
+def test_the_same_audio_says_nothing_was_released(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert body["result"]["released"] == []
+
+
+def test_a_side_since_removed_does_not_stop_the_first_pass_over_its_marks(
+    tmp_path: Path,
+) -> None:
+    """The page cannot show a side that is gone, so "remove it first" had no way out."""
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    on_b = F.read_plan(service.layout.plan_file("album")).sides[1].tracks[0]
+    settled_at(service, on_b.number, on_b.start + 0.25, on_b.end - 0.25, "hand")
+    (service.layout.raw / "album" / "side-b.flac").unlink()
+
+    service.fetcher = Catalogue(release([1000, 1000, 1000, 1000]))  # type: ignore[assignment]
+    body = post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"}).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["released"][0]["why"] == "that side is no longer there"
+
+
+def test_a_mark_on_a_plan_that_never_said_which_capture_is_not_held(
+    tmp_path: Path,
+) -> None:
+    """Holding it is the hazard, and letting it go is named."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    bare = replace(plan, sides=tuple(replace(s, audio="") for s in plan.sides))
+    F.save(service.layout, "album", F.spec_of(bare), bare)
+
+    body = a_second_pass(service)
+    assert "nothing records" in body["result"]["released"][0]["why"]
+
+
+def test_a_first_pass_records_the_capture_it_placed_on(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    plan = F.read_plan(service.layout.plan_file("album"))
+    stamps = C.stamps_of(service.layout, "album")
+    assert [s.audio for s in plan.sides] == [stamps[s.file] for s in plan.sides]
+    assert all(s.audio for s in plan.sides)
+
+
+def test_a_replaced_side_reads_as_from_an_earlier_capture_before_anything_is_run(
+    tmp_path: Path,
+) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    assert {t["placed"] for t in shown["a"]} == {"earlier"}
+    assert {t["settled"] for t in shown["a"]} == {""}
+    assert shown["a"][0]["start"] == plain.start + 0.25
+    assert "earlier" not in {t["placed"] for t in shown["b"]}
+
+
+def test_saving_over_a_re_rip_does_not_launder_an_old_mark_into_a_new_one(
+    tmp_path: Path,
+) -> None:
+    """Nothing here tells a page's unchanged row from a judgement, except its time."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+
+    untouched = page_saves(service)
+    assert untouched["released"] == []
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].tracks[0].settled == "hand", "a save moved no boundary"
+
+    page_saves(service, {1: track_in(service, 1).end - 0.5})
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+    assert saved.sides[0].tracks[0].settled == "hand"
+
+
+def test_a_boundary_moved_after_a_re_rip_is_a_judgement_about_the_new_capture(
+    tmp_path: Path,
+) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    new_end = plain.end - 0.5
+
+    assert page_saves(service, {1: new_end})["released"] == []
+    assert track_in(service, 1).settled == "hand"
+
+    body = a_second_pass(service)
+    assert body["result"]["kept"] == 1
+    assert track_in(service, 1).end == new_end
+
+
+def cut(service: Service) -> H.Response:
+    return post(build(service), "/api/split/album", service)
+
+
+def test_a_cut_of_a_replaced_side_is_refused_by_name_before_anything_is_saved(
+    tmp_path: Path,
+) -> None:
+    """The rail said Ready over rows reading "From an earlier capture", and cutting
+    would have used times from audio that was gone."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+
+    r = cut(service)
+    assert r.status == 409
+    said = r.json()["error"]
+    assert "side a was captured again" in said
+    assert "First pass" in said and "Checked" in said
+    assert "Align" not in said, "no archived capture here, so it is no way out"
+    assert (review / "01 One.flac").is_file(), "a refused cut leaves the last one"
+
+
+def test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain(
+    tmp_path: Path,
+) -> None:
+    """Align is a way out and is named until a boundary is moved or checked. That moves
+    the stamp, and from then on naming it would send a person to a refusal."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True, exist_ok=True)
+    (archived / "side-a.flac").write_bytes(b"the earlier capture")
+    captured_again(service)
+    app = build(service)
+    assert get(app, "/api/align/album", service).json()["sides"] == ["a"]
+    assert "Align from archive" in cut(service).json()["error"]
+
+    page_saves(service)
+    assert get(app, "/api/align/album", service).json()["sides"] == ["a"]
+    assert "Align from archive" in cut(service).json()["error"]
+
+    page_saves(service, {1: track_in(service, 1).end - 0.5})
+    assert get(app, "/api/align/album", service).json()["sides"] == []
+    assert "Align" not in cut(service).json()["error"]
+
+
+def test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written(
+    tmp_path: Path,
+) -> None:
+    """Two tabs: the second's whole document would put back what the first saved."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    app = build(service)
+    seen = get(app, "/api/album/album", service).json()["seen"]
+    doc = {"album": "A Record", "artist": "A Band", "date": "2022", "sides": []}
+    first = post(app, "/api/plan/album", service, {**doc, "seen": seen})
+    assert first.status == 200 and first.json()["seen"]
+    on_disk = service.layout.plan_file("album").read_bytes()
+    stale = post(app, "/api/plan/album", service, {**doc, "seen": seen, "date": "1999"})
+    assert stale.status == 409 and stale.json()["stale"]
+    assert "nothing was saved" in stale.json()["error"]
+    assert service.layout.plan_file("album").read_bytes() == on_disk
+    assert get(app, "/api/seen/album", service).json()["seen"] == first.json()["seen"]
+
+
+def test_a_save_during_a_job_waits_and_one_during_a_prepare_does_not(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    app = build(service)
+    doc = {"album": "A Record", "artist": "A Band", "date": "2022", "sides": []}
+    with service.jobs.claim("album", "first pass"):
+        held = post(app, "/api/plan/album", service, doc)
+    assert held.status == 409 and held.json()["busy"]
+    assert "saves when it ends" in held.json()["error"]
+    assert post(app, "/api/plan/album", service, doc).status == 200
+
+
+def test_asking_what_changed_about_a_record_that_went_is_a_404(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    assert get(build(service), "/api/seen/nothing-here", service).status == 404
+
+
+def test_a_cut_older_than_the_plan_is_said_to_be(tmp_path: Path) -> None:
+    """With no unsaved state left, this is what says the page has moved on from it."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    cut_file = review / "01 One.flac"
+    cut_file.write_bytes(b"fLaC")
+    plan = service.layout.plan_file("album")
+    app = build(service)
+    os.utime(plan, (1000, 1000))
+    assert not get(app, "/api/review/album", service).json()["older_than_plan"]
+    os.utime(cut_file, (500, 500))
+    assert get(app, "/api/review/album", service).json()["older_than_plan"]
+
+
+def test_a_save_does_not_turn_a_replaced_sides_times_into_something_to_cut(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    page_saves(service)
+    assert cut(service).status == 409
+
+
+def test_moving_some_boundaries_on_a_new_capture_names_only_the_rest(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    page_saves(service, {2: track_in(service, 2).end - 0.5})
+    said = cut(service).json()["error"]
+    assert "side b was captured again" in said
+    assert '3 "Track 3"' in said and '4 "Track 4"' in said
+    assert '2 "Track 2"' not in said
+
+
+def test_only_the_replaced_sides_tracks_are_named(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    said = cut(service).json()["error"]
+    assert '1 "Track 1"' not in said and '2 "Track 2"' in said
+
+
+def test_a_first_pass_gets_out_and_keeps_what_was_moved(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service, "b")
+    new_end = track_in(service, 2).end - 0.5
+    page_saves(service, {2: new_end})
+    assert cut(service).status == 409
+
+    a_second_pass(service)
+    assert track_in(service, 2).end == new_end, "what they set stays"
+    assert cut(service).status == 202
+
+
+def test_every_track_moved_on_the_new_capture_can_be_cut_with_no_first_pass(
+    tmp_path: Path,
+) -> None:
+    """Somebody with no catalogue entry and no archive has this and Checked left."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    moved = {t["number"]: t["end"] - 0.5 for rows in shown.values() for t in rows}
+    page_saves(service, moved)
+    assert cut(service).status == 202
+
+
+def test_checked_on_a_row_from_an_earlier_capture_is_a_way_out(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    captured_again(service)
+    shown = get(build(service), "/api/album/album", service).json()
+    for rows in shown["tracks_by_side"].values():
+        for t in rows:
+            if t["placed"] == "earlier":
+                t["settled"] = "ear"
+    reply = post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {
+            "album": "A",
+            "artist": "B",
+            "sides": [
+                {"letter": k, "tracks": v} for k, v in shown["tracks_by_side"].items()
+            ],
+        },
+    ).json()
+    assert reply["released"] == []
+    assert track_in(service, 1).settled == "ear"
+    assert track_in(service, 1).placed == ""
+    assert cut(service).status == 202
+
+
+def test_saving_on_the_same_audio_leaves_every_mark_alone(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    assert page_saves(service)["released"] == []
+    assert track_in(service, 1).settled == "hand"
+
+
+def test_the_page_cannot_tell_the_server_which_capture_a_plan_is_on(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"]
+    post(
+        build(service),
+        "/api/plan/album",
+        service,
+        {
+            "album": "A",
+            "artist": "B",
+            "sides": [
+                {"letter": k, "audio": "made up", "tracks": v} for k, v in shown.items()
+            ],
+        },
+    )
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_relabelling_keeps_which_capture_the_times_are_on(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    before = F.read_plan(service.layout.plan_file("album")).sides[0].audio
+    service.fetcher = Catalogue(release([2000, 2000, 2000, 2000]))  # type: ignore[assignment]
+    captured_again(service)
+    assert (
+        post(build(service), "/api/relabel/album", service, {"mbid": "aaa"}).status
+        == 200
+    )
+    assert F.read_plan(service.layout.plan_file("album")).sides[0].audio == before
+
+
+def test_a_copy_into_the_archive_is_still_the_same_capture(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    side = service.layout.raw / "album" / "side-a.flac"
+    plan = F.read_plan(service.layout.plan_file("album"))
+    plan = replace(plan, sides=(replace(plan.sides[0], audio=C.stamp_of(side)),))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    held = F.read_plan(service.layout.plan_file("album")).sides[0]
+    assert held.audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_a_truncated_side_repaired_on_the_way_is_still_the_same_capture(
+    tmp_path: Path,
+) -> None:
+    """The repair writes a different file, and the times on it are as right as ever."""
+    service, _library = arrived(tmp_path)
+    side = service.layout.raw / "album" / "side-a.flac"
+    plan = F.read_plan(service.layout.plan_file("album"))
+    plan = replace(plan, sides=(replace(plan.sides[0], audio=C.stamp_of(side)),))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    service.runner = Archiving().expect(
+        lambda a: a[0] == "flac" and "raw" in a[-1], returncode=1
+    )
+
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    held = F.read_plan(service.layout.plan_file("album")).sides[0]
+    assert held.audio == C.stamps_of(service.layout, "album")["side-a.flac"]
+
+
+def test_a_person_can_ask_to_start_over_on_the_same_audio(tmp_path: Path) -> None:
+    service, plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service, {"start_over": True})
+    assert not body["error"], body["error"]
+    assert body["result"]["kept"] == 0
+    assert [x["number"] for x in body["result"]["replaced"]] == [1]
+    assert body["result"]["released"] == []
+    again = track_in(service, 1)
+    assert again.settled == "" and (again.start, again.end) == (plain.start, plain.end)
+
+
+def test_without_being_asked_nothing_starts_over(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    body = a_second_pass(service, {"start_over": False})
+    assert body["result"]["kept"] == 1 and body["result"]["replaced"] == []
+
+
+def test_starting_over_gets_past_a_mark_the_new_release_has_no_place_for(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    plan = F.read_plan(service.layout.plan_file("album"))
+    side = plan.sides[0]
+    last = side.tracks[-1]
+    extra = replace(last, number=9, start=last.end, end=last.end + 0.5, settled="hand")
+    plan = replace(
+        plan, sides=(replace(side, tracks=(*side.tracks, extra)), *plan.sides[1:])
+    )
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+    body = a_second_pass(service, {"start_over": True})
+    assert not body["error"], body["error"]
+    assert 9 in [x["number"] for x in body["result"]["replaced"]]
+
+
+def an_overlap(service: Service) -> None:
+    """Track 2 moved back past the end of track 1, as a drag does and a save keeps."""
+    plan = F.read_plan(service.layout.plan_file("album"))
+    one, two = plan.sides[0].tracks[:2]
+    moved = tuple(
+        replace(t, start=one.end - 0.5, settled="hand") if t is two else t
+        for t in plan.sides[0].tracks
+    )
+    plan = replace(plan, sides=(replace(plan.sides[0], tracks=moved), *plan.sides[1:]))
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+
+
+def with_tracks_to_overlap(tmp_path: Path):  # type: ignore[no-untyped-def]
+    service = prepared_service(
+        tmp_path, release([1000, 1000, 1000, 1000]), sides=("a",)
+    )
+    post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"})
+    return service
+
+
+def test_an_overlap_keeps_the_save_and_what_the_person_did(tmp_path: Path) -> None:
+    service = with_tracks_to_overlap(tmp_path)
+    an_overlap(service)
+    shown = get(build(service), "/api/album/album", service).json()["tracks_by_side"][
+        "a"
+    ]
+    assert shown[1]["start"] < shown[0]["end"]
+    assert page_saves(service)["ok"]
+    assert track_in(service, 2).settled == "hand"
+
+
+def test_the_archive_gates_409_is_the_overlap_saying_so(tmp_path: Path) -> None:
+    """Issue #54 could not say whether the two were linked. They are: the gate
+    validates the plan, and this is the refusal it gives."""
+    service = with_tracks_to_overlap(tmp_path)
+    assert get(build(service), "/api/archive/album", service).status == 200
+    an_overlap(service)
+    r = get(build(service), "/api/archive/album", service)
+    assert r.status == 409
+    assert "before track 1 ends" in r.json()["error"]
+
+
+def test_a_partial_cut_may_not_replace_the_record_through_the_route(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    service.settings = replace(service.settings, library=str(tmp_path / "lib"))
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert sum(len(s.tracks) for s in plan.sides) != 1
+    r = post(build(service), "/api/import/album", service, {"replace": True})
+    assert r.status == 409 and "would lose the rest" in r.json()["error"]
+
+
+def capture_of(slug: str) -> W.Live:
+    return W.Live(slug, "b", "hw:9", started=100.0, control=S.Control())
+
+
+def test_archiving_during_a_capture_of_the_record_once_deleted_the_capture(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    partial = service.layout.raw / "album" / ".side-b.flac.partial"
+    partial.write_bytes(b"being written")
+    service.recorder.live = capture_of("album")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and gate["capturing"] and "still being" in gate["why"]
+    r = post(build(service), "/api/archive/album", service)
+    assert r.status == 409 and "still being" in r.json()["error"]
+    assert partial.is_file()
+    r = post(build(service), "/api/import/album", service, {})
+    assert r.status == 409 and "still being" in r.json()["error"]
+
+
+def test_a_capture_of_another_record_stops_nothing_here(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    service.recorder.live = capture_of("another")
+    assert get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_clearing_stale_rows_asks_about_the_release_the_page_showed(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    (tmp_path / "keep").mkdir()
+    (tmp_path / "keep" / "x.flac").write_bytes(b"x")
+    service.settings = replace(
+        service.settings, importer="beets", library=str(tmp_path / "keep")
+    )
+    gone = tmp_path / "keep" / "gone.flac"
+    fake = Library(tmp_path / "keep", tmp_path, installed={"beet"})
+    fake.add(gone, albumartist="Another Name", album="Other", mb_albumid="rel")
+    gone.unlink()
+    service.runner = fake
+    r = post(build(service), "/api/library/clear-stale/album", service, {"mbid": "rel"})
+    assert r.status == 200 and r.json()["cleared"] == 1
+    assert not fake.recs
+
+
+# ------------------------------------------------- archiving as an import's last step
+
+
+def cut_and_captured(tmp_path: Path) -> tuple[Service, Path]:
+    """Cut from the capture in raw, with a plan on that capture, and nothing filed."""
+    service, library = ready_to_import(tmp_path)
+    service.runner = Archiving()
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    os.utime(raw, (1000, 1000))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    return service, library
+
+
+def test_an_import_archives_as_its_last_step_and_says_both(tmp_path: Path) -> None:
+    service, _library = cut_and_captured(tmp_path)
+    r = post(build(service), "/api/import/album", service, {})
+    result = r.json()["result"]
+    assert result["tracks"] == 1 and result["archive"]["archived"]
+    assert (service.layout.archive / "album" / "side-a.flac").is_file()
+    assert not (service.layout.raw / "album").exists()
+
+
+def test_an_import_short_of_the_gate_stands_says_why_and_clears_nothing(
+    tmp_path: Path,
+) -> None:
+    service, library = cut_and_captured(tmp_path)
+    placed = library / "A Band" / "A Record"
+    placed.mkdir(parents=True)
+    (placed / "00 Earlier.flac").write_bytes(b"fLaC")
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "not replaced" in archive["why"]
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+    assert (placed / "01 One.flac").is_file()
+
+
+def test_archiving_that_fails_leaves_the_import_standing_and_can_be_pressed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, library = cut_and_captured(tmp_path)
+    real = AR.put_away
+
+    def full(*_a: object, **_k: object) -> dict[str, object]:
+        raise OSError("the archive cannot be written")
+
+    monkeypatch.setattr(AR, "put_away", full)
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "cannot be written" in archive["why"]
+    assert list(library.rglob("*.flac")), "the import was rolled back"
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert "cannot be written" in gate["archive_failed"] and gate["ready"]
+
+    monkeypatch.setattr(AR, "put_away", real)
+    again = post(build(service), "/api/archive/album", service).json()
+    assert not again["error"], again["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").is_file()
+    assert (
+        not get(build(service), "/api/albums?archive=1", service)
+        .json()["albums"][0]
+        .get("archive_failed")
+    )
+
+
+def test_cuts_from_an_earlier_capture_never_archive_over_it(tmp_path: Path) -> None:
+    """Cut, captured again, then imported: the new capture was never cut, and the
+    archived one is what the tracks came from."""
+    service, _library = cut_and_captured(tmp_path)
+    archived = service.layout.archive / "album" / "side-a.flac"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(b"the earlier capture")
+    raw = service.layout.raw / "album" / "side-a.flac"
+    review = next(service.layout.review_dir("album").glob("*.flac"))
+    os.utime(raw, (review.stat().st_mtime + 60, review.stat().st_mtime + 60))
+    r = post(build(service), "/api/import/album", service, {})
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "captured again" in archive["why"]
+    assert archived.read_bytes() == b"the earlier capture"
+    assert raw.is_file()
+
+
+def test_a_re_ripped_side_cut_and_imported_moves_the_earlier_capture_aside(
+    tmp_path: Path,
+) -> None:
+    service, _library = cut_and_captured(tmp_path)
+    archived = service.layout.archive / "album" / "side-a.flac"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(b"the earlier capture")
+    r = post(build(service), "/api/import/album", service, {})
+    assert r.json()["result"]["archive"]["archived"], r.json()
+    aside = list((archived.parent / "_superseded").iterdir())
+    assert [p.read_bytes() for p in aside] == [b"the earlier capture"]
+    assert archived.read_bytes() == b"fLaC"
+
+
+def test_a_merge_holding_more_rows_than_its_plan_opens_the_gate(tmp_path: Path) -> None:
+    """It said an earlier copy had not been replaced, which told a person to remove a
+    correct file, and it could never pass."""
+    service, library = arrived(tmp_path)
+    (library / "A Band" / "A Record" / "02 Two.flac").write_bytes(b"fLaC")
+    doubled = get(build(service), "/api/archive/album", service).json()
+    assert not doubled["ready"] and "not replaced" in doubled["why"]
+    AR.note_filed(service.layout, "album", {}, merged=True)
+    assert get(build(service), "/api/archive/album", service).json()["ready"]
+    AR.note_filed(service.layout, "album", {})
+    assert not get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_rows_whose_files_have_gone_do_not_open_the_gate(tmp_path: Path) -> None:
+    """The rail read In library and Ready with the files gone."""
+    service, _library = arrived(tmp_path)
+    gone = tmp_path / "gone" / "01 One.flac"
+    service.runner = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=every_row(str(gone)).encode()
+    )
+    service.settings = replace(service.settings, importer="beets")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and gate["library_tracks"] == 0
+
+
+def test_a_record_with_no_release_does_not_open_the_gate_on_an_edition(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    there = tmp_path / "01 One.flac"
+    there.write_bytes(b"fLaC")
+    row = I_SEP.join(
+        (
+            "T",
+            "A Band",
+            "A Record",
+            "3:00",
+            f"{there}",
+            "",
+            "1",
+            "rel",
+            "A Band",
+            "",
+            "",
+        )
+    )
+    service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=row.encode())
+    service.settings = replace(service.settings, importer="beets")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and "another release" in gate["why"]
+
+
+def test_a_save_once_forgot_a_side_the_page_was_not_showing(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    (service.layout.raw / "album" / "side-b.flac").unlink()
+    saved_b = F.read_plan(service.layout.plan_file("album")).sides[1]
+    assert page_saves(service)["ok"]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert [s.file for s in plan.sides] == ["side-a.flac", "side-b.flac"]
+    assert plan.sides[1].tracks == saved_b.tracks
+
+
+def test_discarding_a_side_takes_it_out_of_both_documents(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    r = post(
+        build(service),
+        "/api/rip/discard-side",
+        service,
+        {"slug": "album", "side": "b"},
+    )
+    assert r.status == 200, r.json()
+    assert [s.file for s in F.read_plan(service.layout.plan_file("album")).sides] == [
+        "side-a.flac"
+    ]
+    assert [s.letter for s in F.read_spec(service.layout.spec_file("album")).sides] == [
+        "a"
+    ]
+
+
+def test_discarding_a_re_rip_keeps_the_side_the_archive_still_holds(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    kept = service.layout.archive / "album"
+    kept.mkdir(parents=True, exist_ok=True)
+    (kept / "side-b.flac").write_bytes(b"the earlier capture")
+    post(
+        build(service),
+        "/api/rip/discard-side",
+        service,
+        {"slug": "album", "side": "b"},
+    )
+    assert len(F.read_plan(service.layout.plan_file("album")).sides) == 2
+
+
+def test_a_filesystem_with_coarser_times_does_not_read_as_captured_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _library = arrived(tmp_path)
+    raw = service.layout.raw / "album" / "side-a.flac"
+    os.utime(raw, ns=(1_000_000_123, 1_000_000_123))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    plan = Plan.from_dict(doc)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    real = shutil.copy2
+
+    def coarse(source: Path, target: Path) -> None:
+        real(source, target)
+        os.utime(target, (1, 1))
+
+    monkeypatch.setattr(AR.shutil, "copy2", coarse)
+    assert not post(build(service), "/api/archive/album", service).json()["error"]
+    shown = get(build(service), "/api/album/album", service).json()
+    assert shown["tracks_by_side"]["a"][0].get("placed") != "earlier"

@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { drawMeter, slugify } from "/ripui.js";
+import { autosaver, canCheck, crossed, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -67,10 +67,52 @@ function setLogCollapsed(c) {
   $("#logtoggle").textContent = c ? "show" : "hide";
   try { localStorage.setItem("ripdoctor:log:collapsed", c ? "1" : ""); } catch {}
 }
-function markDirty(d = true) {
-  S.dirty = d;
-  $("#save").textContent = d ? "Save •" : "Save";
-  if (d) saveDraft(); else dropDraft();
+const NUDGE_SETTLE = 500;
+const saver = autosaver({
+  state: S,
+  doc: () => buildDoc(),
+  post: (slug, body) => postJSON(`/api/plan/${slug}`, body),
+  changed: () => showCutRail(),
+  saving: () => { const alignWas = !$("#realign").hidden; showCutRail(); return alignWas; },
+  saved: (released, alignWas) => { saidSaved(released, alignWas); refreshCutRail(); },
+  refused: (why) => status(`Not saved: ${why}`, true),
+});
+const { markDirty, flushSave, save } = saver;
+
+async function saidSaved(released, alignWas) {
+  await refreshAlignButton();
+  const said = [];
+  if (released?.length) said.push(`${counted(released.length, "track", "tracks")} (${released.join(", ")}) kept ${released.length === 1 ? "its time" : "their times"} from the earlier capture, and ${released.length === 1 ? "is" : "are"} marked for that.`);
+  // Said once, as it happens. From here the rail names only what still works.
+  if (alignWas && $("#realign").hidden) said.push("A boundary moved or checked puts the side on this capture, so Align from archive is no longer offered. First pass, Checked after listening, and moving a boundary remain.");
+  if (said.length) status(said.join(" "), true);
+}
+
+// `keepalive` is what lets a request outlive the page that sent it. With one already in
+// flight this page's digest is out of date, and it is the same page's work that moved it.
+function saveOnLeaving() {
+  if (!S.dirty || !S.slug) return;
+  const doc = saver.running() ? buildDoc() : { ...buildDoc(), seen: S.meta.seen };
+  fetch(`/api/plan/${S.slug}`, { method: "POST", keepalive: true, credentials: "same-origin",
+                                 headers: { "content-type": "application/json" }, body: JSON.stringify(doc) });
+}
+
+// What was saved, when this page did not save it: a side finished by a rip, or a tab
+// beside this one. A page with something of its own in hand is left alone, and is told at
+// its own save.
+async function noticeDisk() {
+  const typing = document.activeElement?.closest?.("#cutview input, #cutview textarea");
+  if (!S.slug || !S.meta || S.dirty || saver.running() || S.job || cutOpening || typing || player?.playing
+      || document.hidden || document.querySelector("dialog[open]")
+      || (document.body.dataset.mode ?? "cut") !== "cut") return;
+  const slug = S.slug;
+  let now;
+  try { now = await api(`/api/seen/${slug}`); } catch { return; }
+  if (S.slug !== slug || S.dirty || (now.seen === S.meta.seen && now.captures === S.meta.captures)) return;
+  const side = S.side;
+  if (!(await openAlbum(slug))) return;
+  if (side && side !== S.side && S.meta.sides.includes(side)) await openSide(side);
+  status("reloaded: this record changed on disk");
 }
 
 // ------------------------------------------------------------ envelope I/O
@@ -147,15 +189,29 @@ async function pollPrepare(box) {
 async function runJob(slug, path, body, note) {
   const t0 = Date.now();
   await postJSON(path, body || {});
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 800));
-    const j = await api(`/api/job/${slug}`);
-    if (j.done) {
-      if (j.error) throw new Error(j.error);
-      return j.result;
+  S.job = note || "a job";
+  ed.frozen = true;
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 800));
+      const j = await api(`/api/job/${slug}`);
+      if (j.done) {
+        if (j.error) throw new Error(j.error);
+        return j.result;
+      }
+      if (note) status(`${note}… ${Math.round((Date.now() - t0) / 1000)}s`, true);
     }
-    if (note) status(`${note}… ${Math.round((Date.now() - t0) / 1000)}s`, true);
+  } finally {
+    S.job = null;
+    ed.frozen = false;
   }
+}
+
+// What a job is reading must not move under it, so a boundary, a track added or removed and
+// a check are refused while it runs, and say so. Text waits and saves when it ends.
+function refusedByJob() {
+  if (S.job) status(`Not changed: ${S.job} is running on this record. Try again when it finishes.`, true);
+  return !!S.job;
 }
 
 // ------------------------------------------------------------ album/side
@@ -166,7 +222,6 @@ function clearAlbum(message) {
   S.bySide = {}; S.sideData = {}; S.side = null;
   player?.stop();
   ed?.clear();
-  $("#pipeline").innerHTML = "";
   $("#sides").innerHTML = "";
   $("#tracks tbody").innerHTML = "";
   $("#sp-letter").textContent = "—";
@@ -175,56 +230,228 @@ function clearAlbum(message) {
   $("#ro-time").textContent = "—";
   $("#ro-track").textContent = "";
   $("#ro-gap").textContent = ""; $("#ro-gap").className = "";
+  if (ed) showCutTools();
   // per-album, and loadRipSides only runs from openAlbum - so without this it
   // keeps listing captures for a record that is no longer loaded
   $("#ripsides").hidden = true;
-  for (const id of ["#save", "#split", "#import", "#archive", "#firstpass", "#revert",
-                    "#addtrack", "#splittrack"])
+  for (const id of ["#split", "#import", "#firstpass", "#addtrack", "#splittrack"])
     $(id).disabled = true;
+  cutAsked = { review: null, arc: null };
   markDirty(false);
 }
 
-// Where you are in rip -> first pass -> cut -> import -> archive, and what the
-// next step needs. The information already existed (the archive gate computes
-// most of it); it was just never shown, so "why is that button grey" had no
-// answer on screen.
-async function renderPipeline() {
-  const box = $("#pipeline");
-  if (!S.slug) { box.innerHTML = ""; return; }
-  const tracks = Object.values(S.bySide).flat();
-  let review = 0, arc = null;
-  try { review = (await api(`/api/review/${S.slug}`)).tracks.length; } catch {}
-  try { arc = await api(`/api/archive/${S.slug}?album=${encodeURIComponent(S.meta.album || "")}`); } catch {}
+// ----------------------------------------------------------------- the rail
+//
+// Where a record is in rip -> first pass -> check -> cut -> import -> archive, and
+// what the next step needs, so that "why is that button grey" has an answer on screen.
 
-  const imported = !!(arc && arc.library_tracks);
-  const steps = [
-    { k: "rip", label: `rip · ${S.meta.sides.length} side${S.meta.sides.length === 1 ? "" : "s"}`,
-      done: S.meta.sides.length > 0 },
-    { k: "fit", label: `first pass · ${tracks.length} tracks`, done: tracks.length > 0,
-      why: "no tracks yet — run First pass, or add them by hand" },
-    { k: "cut", label: `cut · ${review || (imported ? "moved" : 0)}`, done: review > 0 || imported,
-      why: "nothing in review/ — press Cut tracks" },
-    { k: "imp", label: `import${imported ? " · " + arc.library_tracks : ""}`, done: imported,
-      why: "not in the library yet — press Import" },
-    { k: "arc", label: "archive", done: !!(arc && !arc.sides.length),
-      why: arc && arc.why ? arc.why : "ready to archive" },
-  ];
-  const nextIdx = steps.findIndex((x) => !x.done);
-  box.innerHTML = "";
-  steps.forEach((st, i) => {
-    if (i) box.appendChild(el("span", "sep", "›"));
-    const cls = st.done ? "st done" : (i === nextIdx ? "st now" : "st");
-    const e = el("span", cls, (st.done ? "✓ " : "") + st.label);
-    if (!st.done && st.why) e.title = st.why;
-    box.appendChild(e);
-  });
-  if (nextIdx >= 0 && steps[nextIdx].why)
-    box.appendChild(el("span", "why", steps[nextIdx].why));
+const CUT_STEPS = ["rip", "firstpass", "check", "cut", "import", "archive"];
+
+// What only the server knows. It is asked when a record opens and when a job ends; an edit
+// redraws from what the page already holds, so a nudge costs no request.
+let cutAsked = { review: null, arc: null };
+let cutCutting = false;
+
+const cutBox = (id) => document.getElementById(`cut-st-${id}`);
+const cutStep = (id, ...said) => railStep(cutBox(id), ...said);
+const blue = (id, on) => $(id).classList.toggle("ghost", !on);
+const namedList = (names) => {
+  if (names.length < 2) return names.join("");
+  const shown = names.slice(0, 3);
+  const more = names.length - shown.length;
+  return more ? `${shown.join(", ")} and ${more} more` : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+};
+
+async function refreshCutRail() {
+  const slug = S.slug;
+  const asked = { review: null, arc: null, recut: false };
+  if (slug) {
+    // A step that could not be asked says Waiting, and its own button still reports why.
+    try {
+      const cuts = await api(`/api/review/${slug}`);
+      asked.review = cuts.tracks.length;
+      asked.recut = cuts.older_than_plan;
+    } catch { asked.review = null; }
+    try { asked.arc = await api(`/api/archive/${slug}?album=${encodeURIComponent(S.meta.album || "")}`); } catch { asked.arc = null; }
+  }
+  if (S.slug !== slug) return;          // another record opened while these were answered
+  cutAsked = asked;
+  showCutRail();
+}
+
+function railRip(f) {
+  const sides = f.sides;
+  const letters = namedList(sides);
+  $("#cut-rip").textContent = sides.length ? "Rip another side" : "Rip a side";
+  blue("#cut-rip", !sides.length);
+  $("#cut-rip").hidden = f.archived;
+  if (f.archived) return cutStep("rip", "done", counted(sides.length, "side", "sides"), "In the archive.");
+  if (f.recording.length) return cutStep("rip", "run", "Recording", `Side ${namedList(f.recording)} is still being recorded.`);
+  if (!sides.length) return cutStep("rip", "todo", "No sides", "Record a side here, or bring one in from Upload.");
+  return cutStep("rip", "done", counted(sides.length, "side", "sides"), `${sides.length === 1 ? "Side" : "Sides"} ${letters}.`);
+}
+
+function sidesFromEarlier() {
+  return (S.meta?.sides ?? []).filter((letter) => (S.bySide[letter] || []).some(fromEarlier));
+}
+
+function railFirstPass(f) {
+  const n = f.tracks.length;
+  $("#firstpass").textContent = n ? "Run again" : "First pass";
+  blue("#firstpass", !!f.sides.length && !n);
+  if (!f.sides.length) return cutStep("firstpass", "wait", "Waiting", "Waiting on a side.");
+  if (!n) return cutStep("firstpass", "ready", "Not run", "Find the release and fit its tracks to the gaps, or add tracks by hand.");
+  const earlier = sidesFromEarlier();
+  if (earlier.length) {
+    blue("#firstpass", true);
+    return cutStep("firstpass", "todo", "Captured again", `Side ${namedList(earlier)} was captured again after its boundaries were placed. Run this again${$("#realign").hidden ? "" : ", or align from the archive. Moving or checking a boundary puts the side on this capture and ends that offer"}.`);
+  }
+  return cutStep("firstpass", "done", S.meta.mbid ? "Matched" : "By hand",
+                 `${counted(n, "track", "tracks")} across ${counted(f.sides.length, "side", "sides")}.`);
+}
+
+function railCheck(f) {
+  $("#cut-review").hidden = !cutDoubts().length;
+  if (!f.tracks.length) return cutStep("check", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.forced.length) {
+    const titles = namedList(f.forced.map((t) => t.title));
+    return cutStep("check", "todo", `${f.forced.length} to check`, `${titles} did not fit the gaps and ${f.forced.length === 1 ? "was" : "were"} placed from the catalogue.`);
+  }
+  const blocking = "Nothing placed from the catalogue is waiting on your ear.";
+  const byLength = f.tracks.filter(placedByLength);
+  if (byLength.length) {
+    return cutStep("check", "done", `${byLength.length} by length`, `${namedList(byLength.map((t) => t.title))} had no gap near a boundary, so ${byLength.length === 1 ? "it was" : "they were"} placed by length. Worth a listen, and Checked records that you did; Cut does not wait on ${byLength.length === 1 ? "it" : "them"}.`);
+  }
+  return cutStep("check", "done", f.tracks.some((t) => t.settled === "ear") ? "Checked" : "Clear", blocking);
+}
+
+// Never disabled by an unsaved edit: pressing it saves first. A track still to check does
+// stop it, and the server says the same to anything that asks past this button. ADR-064.
+function railCut(f) {
+  const n = counted(f.tracks.length, "track", "tracks");
+  const files = counted(f.review ?? 0, "file", "files");
+  $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length || !!f.earlier.length;
+  blue("#split", !!f.tracks.length && !f.review && (!f.imported || !!f.arc?.captured_again) && !f.forced.length && !f.overlaps.length && !f.earlier.length);
+  if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
+  if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
+  if (f.overlaps.length) return cutStep("cut", "todo", "Overlap", `Tracks ${namedList(f.overlaps.map((t) => t.number))} overlap. Move a boundary so they do not, and this can run.`);
+  // Cut again from the new audio, this would be times from the old: being in the library
+  // already is no reason to let it, and a re-rip is when a filed record gets here.
+  if (f.earlier.length) {
+    const held = f.earlier.length === 1 ? "1 track still has its time" : `${f.earlier.length} tracks still have their times`;
+    const align = $("#realign").hidden ? "" : ", or Align from archive";
+    return cutStep("cut", "wait", "Waiting", `Side ${namedList(sidesFromEarlier())} was captured again, so ${held} from the earlier capture. Run First pass${align}. Anything you have moved stays where it is; a track you have listened to on this capture can be marked Checked.`);
+  }
+  if (f.forced.length && !f.imported) return cutStep("cut", "wait", "Waiting", `Waiting on ${f.forced.length} to check.`);
+  if (f.review) return f.recut
+    ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.`)
+    : cutStep("cut", "done", "Cut", `${files} in review/.`);
+  if (f.arc?.captured_again) return cutStep("cut", "ready", "Ready", `${n} will be written to review/ from this capture. The library's came from an earlier one.`);
+  if (f.imported) return cutStep("cut", "done", "Cut", "The files have moved to the library.");
+  return cutStep("cut", "ready", "Ready", `${n} will be written to review/.`);
+}
+
+function railImport(f) {
+  // Unknown is not nothing: if the server could not say, the button stays pressable.
+  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported) || !!f.arc?.capturing;
+  if (f.arc?.capturing) return cutStep("import", "wait", "Waiting", f.arc.why);
+  blue("#import", !!f.review);
+  if (f.imported && f.review) return cutStep("import", "ready", "Not filed", `${counted(f.review, "cut track", "cut tracks")} in review/ and not in the library yet. What the library holds came from an earlier import.`);
+  if (f.imported) return cutStep("import", "done", "In library", `${counted(f.arc.library_tracks, "track", "tracks")} in the library.`);
+  if (f.review) return cutStep("import", "ready", "Ready", "Tag the cut tracks and place them in the library.");
+  return cutStep("import", "wait", "Waiting", "Waiting on the cut.");
+}
+
+function railArchive(f) {
+  const stuck = !f.archived && f.imported && !!f.arc?.sides?.length && !f.arc?.capturing;
+  $("#archive-again").hidden = !stuck;
+  blue("#archive-again", !!f.arc?.ready);
+  if (f.archived) return cutStep("archive", "done", "Archived", "The raw sides are in the archive.");
+  if (stuck) {
+    const why = f.arc.archive_failed || f.arc.why || "The record is filed, and its raw sides have not been put away";
+    return cutStep("archive", "todo", "Not archived", `${why[0].toUpperCase()}${why.slice(1).replace(/\.$/, "")}.`);
+  }
+  if (f.arc?.capturing) return cutStep("archive", "wait", "Waiting", f.arc.why);
+  if (f.overlaps.length) return cutStep("archive", "wait", "Waiting", "Waiting on the overlapping tracks.");
+  return cutStep("archive", "wait", "Waiting", "The import does this as its last step, once the record is proved to be in the library.");
+}
+
+// The names are read from the fields, so the heading says what a save would write.
+function showCutHead(f) {
+  const artist = $("#md-artist").value.trim() || S.meta?.artist;
+  const album = $("#md-album").value.trim() || S.meta?.album;
+  $("#cut-what").textContent = S.slug
+    ? (artist && album ? `${artist} \u2014 ${album}` : artist || album || S.slug)
+    : "No record open";
+  const pill = $("#cut-saved");
+  const fail = saver.failure();
+  const failed = fail && !fail.busy;
+  pill.hidden = !S.dirty && !fail && !f.tracks.length && !f.archived;
+  pill.dataset.kind = failed ? "bad" : S.dirty ? "todo" : "done";
+  pill.querySelector("span").textContent = failed ? (S.dirty ? "Not saved" : "Out of date")
+    : fail ? "Waiting to save" : S.dirty ? "Saving" : f.archived ? "Archived" : "Saved";
+  $("#cut-save-why").hidden = !fail;
+  $("#cut-save-why").firstChild.textContent = fail ? `${fail.why} ` : "";
+  $("#cut-save-retry").hidden = !failed;
+  $("#cut-save-retry").textContent = fail?.stale ? "Load what is saved" : "Retry";
+}
+
+function showCutRail() {
+  const tracks = Object.values(S.bySide).flat();
+  const { review, arc, recut } = cutAsked;
+  const f = {
+    sides: S.meta?.sides ?? [],
+    recording: S.meta?.recording ?? [],
+    tracks,
+    forced: tracks.filter((t) => t.forced),
+    earlier: tracks.filter(fromEarlier),
+    overlaps: tracks.filter((t) => trackOverlaps(t).length),
+    review,
+    recut,
+    arc,
+    imported: !!arc?.library_tracks,
+    archived: albumsHeld.find((a) => a.slug === S.slug)?.where === "archive",
+  };
+  railRip(f);
+  railFirstPass(f);
+  railCheck(f);
+  railCut(f);
+  railImport(f);
+  railArchive(f);
+  showCutHead(f);
+  const now = CUT_STEPS.find((id) => cutBox(id).dataset.kind !== "done");
+  railBarSays($("#cut-rail-bar"), now ? cutBox(now) : null);
+}
+
+// What the Check step counts, all of it, in side order. A settled track has been heard.
+function cutDoubts() {
+  return (S.meta?.sides ?? [])
+    .filter((letter) => !(S.meta.recording || []).includes(letter))
+    .flatMap((letter) => (S.bySide[letter] || []).filter(canCheck).map((t) => ({ letter, t })));
+}
+
+// They come round from whichever is selected, as Tapes' do, forwards or back.
+async function reviewNext(way) {
+  const by = way === -1 ? -1 : 1;
+  const doubts = cutDoubts();
+  if (!doubts.length) return;
+  const at = doubts.findIndex((d) => d.letter === S.side && d.t.number === ed.sel?.track);
+  const from = at < 0 && by < 0 ? 0 : at;
+  const { letter, t } = doubts[(from + by + doubts.length) % doubts.length];
+  try {
+    if (letter !== S.side) await openSide(letter);
+    select(t.number, "start");
+    ed.fitRange(t.start, t.end);
+    document.querySelector("#tracks tr.sel")?.scrollIntoView({ block: "nearest" });
+    // On a phone the open rail is in front of what was just chosen.
+    $("#cut-rail").classList.remove("open");
+    $("#cut-rail-bar").setAttribute("aria-expanded", false);
+    $("#cut-wave").scrollIntoView({ block: "nearest" });
+  } catch (e) { status(`could not open side ${letter}: ${e.message}`, true); }
 }
 
 function enableActions() {
-  for (const id of ["#save", "#split", "#import", "#firstpass", "#revert",
-                    "#addtrack", "#splittrack"])
+  for (const id of ["#split", "#import", "#firstpass", "#addtrack", "#splittrack"])
     $(id).disabled = false;
 }
 
@@ -301,12 +528,23 @@ function startNewAlbum() {
   status(none ? "no records yet — rip a side to start one" : "", none);
 }
 
+let cutOpening = 0;
+
 async function openAlbum(slug) {
+  cutOpening += 1;
+  try {
+    status("loading…", true);
+    const opened = await saver.reload(() => api(`/api/album/${slug}`), (meta) => openedAlbum(slug, meta));
+    if (!opened) renderAlbums(S.slug);    // still on this record, so the picker says so
+    return opened;
+  } finally { cutOpening -= 1; }
+}
+
+async function openedAlbum(slug, meta) {
   // the transcript refers to the old album's tracks by number; replaying it
   // against a different record is worse than starting fresh
   S.slug = slug;
-  status("loading…", true);
-  S.meta = await api(`/api/album/${slug}`);
+  S.meta = meta;
   // What the record is, before anything is encoded. Building a waveform takes
   // minutes on a fresh side, and all of this comes from the document.
   showRecord();
@@ -329,9 +567,7 @@ async function openAlbum(slug) {
   else status(`every side of ${slug} is still recording`, true);
   loadReview();
   refreshAlignButton();
-  refreshArchiveButton();
-  renderPipeline();
-  markDirty(false);
+  refreshCutRail();             // the encode may have taken minutes
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
          !!unprepared);
 }
@@ -356,6 +592,9 @@ function showRecord() {
   // about to record.
   showRecordInRipPanel(S.meta.artist, S.meta.album, S.meta.sides);
   loadPunchTracks();            // Punch follows the selection too
+  cutAsked = { review: null, arc: null };
+  showCutRail();
+  refreshCutRail();             // none of it waits on an encode either
 }
 
 function renderSideTabs() {
@@ -364,9 +603,9 @@ function renderSideTabs() {
   for (const letter of S.meta.sides) {
     const recording = rec.includes(letter);
     const b = el("button", `${letter === S.side ? "on " : ""}${recording ? "rec" : ""}`,
-                 recording ? `${letter} ●rec` : letter);
+                 recording ? `Side ${letter} ●rec` : `Side ${letter}`);
     b.disabled = recording;
-    b.title = recording ? "still being recorded — stop the rip, then hit Revert" : `side ${letter}`;
+    b.title = recording ? "still being recorded — stop the rip, and it shows up here" : `side ${letter}`;
     b.onclick = () => openSide(letter);
     box.appendChild(b);
   }
@@ -376,10 +615,11 @@ async function openSide(letter) {
   S.side = letter;
   renderSideTabs();
   if ((S.meta.recording || []).includes(letter)) {
-    status(`side ${letter} is still recording — stop the rip, then hit Revert`, true);
+    status(`side ${letter} is still recording — stop the rip, and it shows up here`, true);
     return;
   }
   player?.stop();          // otherwise the old side keeps playing under the new one
+  cutOpen = null;
   if (!S.sideData[letter]) {
     const v = S.meta.ready[letter]?.v || "";
     const [env, gaps] = await Promise.all([
@@ -395,9 +635,14 @@ async function openSide(letter) {
   player.load(`/api/audio/${S.slug}/${letter}`
               + (S.meta.ready[letter]?.v ? `?v=${S.meta.ready[letter].v}` : ""));
   $("#sp-letter").textContent = letter;
-  $("#sp-meta").textContent =
-    `${fmt(d.duration)} · ${d.gaps.band.gaps.length} silent regions · threshold ${d.gaps.band.threshold} dB`;
   renderTracks();
+}
+
+function showSideMeta() {
+  const d = S.sideData[S.side];
+  if (!d) return;
+  $("#sp-meta").textContent = [`side ${S.side}`, fmt(d.duration), counted(tracks().length, "track", "tracks"),
+    counted(d.gaps.band.gaps.length, "silent region", "silent regions"), `threshold ${d.gaps.band.threshold} dB`].join(" · ");
 }
 
 // ------------------------------------------------------------ track table
@@ -405,144 +650,331 @@ async function openSide(letter) {
 function tracks() { return S.bySide[S.side] || []; }
 function trackByNum(n) { return tracks().find((t) => t.number === n); }
 
-function renderTracks() {
-  const tb = $("#tracks tbody"); tb.innerHTML = "";
-  for (const t of tracks()) {
-    const tr = el("tr");
-    if (ed.sel && ed.sel.track === t.number) tr.className = "sel";
+// Nothing settled it, so the fit did, or the catalogue if the track is forced. A plan that
+// does not say what the fit rested on is only called fitted. ADR-064.
+const BOUNDARY_WORDS = { hand: ["Set by you", "good"], ear: ["Checked by ear", "good"] };
+const PLACED_WORDS = { gap: ["Fitted to gap", "good"], length: ["Placed by length", "quiet"], earlier: ["From an earlier capture", "warn"] };
+function trackBoundary(t) {
+  const over = trackOverlaps(t);
+  if (over.length) return [`Overlaps ${namedList(over.map((x) => x.number))}`, "bad"];
+  return BOUNDARY_WORDS[t.settled] ?? (fromEarlier(t) ? PLACED_WORDS.earlier
+    : t.forced ? ["From catalogue · check", "warn"] : PLACED_WORDS[t.placed] ?? ["Fitted", "good"]);
+}
+const trackOverlaps = (t) => overlapping(t, sideOf(t)).sort((a, b) => a.start - b.start);
+const sideOf = (t) => Object.values(S.bySide).find((list) => list.includes(t)) ?? [];
+const placedByLength = (t) => !t.settled && !t.forced && t.placed === "length";
 
-    const num = el("td"); const ni = el("input"); ni.className = "num";
-    ni.value = t.number; ni.type = "number";
-    ni.onchange = () => { t.number = parseInt(ni.value, 10) || t.number; markDirty(); renderTracks(); ed.render(); };
-    num.appendChild(ni); tr.appendChild(num);
+let saidOverlap = false;
 
-    const ti = el("input"); ti.value = t.title;
-    ti.onchange = () => { t.title = ti.value; markDirty(); };
-    const td = el("td"); td.appendChild(ti); tr.appendChild(td);
+// A boundary moved is the person's, and nothing later moves it.
+function setByHand(t) {
+  t.forced = false;
+  t.settled = "hand";
+  t.placed = "";
+  const over = trackOverlaps(t);
+  if (over.length) status(`${t.number} \u201c${t.title}\u201d still overlaps ${over.map((x) => `${x.number} \u201c${x.title}\u201d`).join(" and ")}. Cut will not run until they no longer overlap.`, true);
+  else if (saidOverlap) status("no tracks overlap now");
+  saidOverlap = !!over.length;
+}
 
-    for (const edge of ["start", "end"]) {
-      const c = el("td", "t", fmt(t[edge]));
-      c.title = `${t[edge].toFixed(2)} s`;
-      c.onclick = () => { select(t.number, edge); ed.fitRange(t.start, t.end); };
-      tr.appendChild(c);
-    }
-
-    const len = t.end - t.start;
-    tr.appendChild(el("td", "t", fmt(len)));
-    const dr = el("td", "drift");
-    if (t.forced) {
-      dr.textContent = "forced";
-      dr.className = "drift forced";
-      dr.title = "placed from the catalogue, not found — this column is zero by "
-               + "construction and cannot tell you whether the boundary is right";
-    } else if (t.cat) {
-      const d = len - t.cat;
-      dr.textContent = (d >= 0 ? "+" : "") + d.toFixed(2);
-      if (Math.abs(d) > 10) dr.className = "drift big";
-    } else dr.textContent = "—";
-    tr.appendChild(dr);
-
-    const del = el("td");
-    const db = el("button", "ghost", "×");
-    db.title = "delete track";
-    db.onclick = () => {
-      if (!confirm(`Delete track ${t.number} “${t.title}”?`)) return;
-      S.bySide[S.side] = tracks().filter((x) => x !== t);
-      markDirty(); renderTracks(); ed.setTracks(tracks());
-    };
-    del.appendChild(db); tr.appendChild(del);
-    tb.appendChild(tr);
+// A move past the track beside it does not happen, whichever way it was asked for, and
+// says why. Nothing else moved, so nothing was decided for them. ADR-064.
+function refusedCrossing(t, edge, at) {
+  const other = crossed(t, edge, at, sideOf(t));
+  if (other) {
+    const which = edge === "start" ? "ends" : "starts";
+    status(`Not moved: that overlaps track ${other.number} \u201c${other.title}\u201d, which ${which} at ${fmt(other[edge === "start" ? "end" : "start"])}. Move that one first.`, true);
   }
+  return !!other;
+}
+
+// The row is read-only, and what edits it opens beneath it, one at a time. The open track is
+// held by the object, since a split renumbers what comes after it.
+let cutOpen = null;
+let cutRedrawing = false;             // inputs leaving the page now are not a person leaving them
+let cutPressing = false, cutRedrawOwed = false;
+const trackKeys = new WeakMap();
+let trackKeysMade = 0;
+function trackKey(t) {
+  if (!trackKeys.has(t)) trackKeys.set(t, `track-${++trackKeysMade}`);
+  return trackKeys.get(t);
+}
+
+function trackRowView(t) {
+  const tr = el("tr", ed.sel && ed.sel.track === t.number ? "sel" : "");
+  tr.onclick = () => pressRow(t);
+  tr.append(el("td", "c-num num", t.number));
+  const title = el("td", "c-title", t.title);
+  title.title = t.title;
+  tr.append(title);
+  for (const edge of ["start", "end"]) {
+    const c = el("td", `t t-${edge}`, fmt(t[edge]));
+    c.title = `${t[edge].toFixed(2)} s`;
+    c.onclick = (e) => { e.stopPropagation(); select(t.number, edge, true); ed.fitRange(t.start, t.end); };
+    tr.append(c);
+  }
+  const len = t.end - t.start;
+  tr.append(el("td", "t t-len", fmt(len)));
+  const dr = el("td", "drift");
+  if (t.forced) {
+    dr.textContent = "—";
+    dr.title = "placed from the catalogue, not found — this column is zero by "
+             + "construction and cannot tell you whether the boundary is right";
+  } else if (t.cat) {
+    const d = len - t.cat;
+    dr.textContent = (d >= 0 ? "+" : "") + d.toFixed(2);
+    if (Math.abs(d) > 10) dr.className = "drift big";
+  } else dr.textContent = "—";
+  tr.append(dr);
+  const bnd = statusCell(trackBoundary(t));
+  bnd.classList.add("c-bnd-cell");
+  if (fromEarlier(t)) bnd.title = "this side was captured again after this was placed, so these times are positions on audio that has gone: run First pass or align, or listen to it here and press Checked";
+  else if (t.forced) bnd.title = "placed from the catalogue, not found: check it by ear, and moving it clears this";
+  else if (placedByLength(t)) bnd.title = "no gap near this boundary, so its place comes from the catalogue's length: worth a listen, and Checked records that you did. Cut does not wait on it";
+  tr.append(bnd);
+  return tr;
+}
+
+// Pressing the open row again leaves it as it is, marker and view included.
+function pressRow(t) {
+  if (cutOpen === t && ed.sel?.track === t.number) return;
+  select(t.number, "start");
+  ed.fitRange(t.start, t.end);
+  // Stacked on a phone, the waveform is not beside the row that was pressed.
+  if (matchMedia("(max-width:48rem)").matches) $("#cut-wave").scrollIntoView({ block: "nearest" });
+}
+
+// A field is the page's own from the first key to when it is left, which writes it into the
+// track. Writing a figure as it is typed would drag the marker through every digit.
+function trackField(t, label, name, wide, shown, write) {
+  const [box, input] = fieldInput(label, name, shown, wide);
+  const leave = () => {
+    if (cutRedrawing || input.value === input.dataset.saved) return;
+    const changed = write(input) !== false;
+    input.dataset.saved = input.value;
+    if (!changed) return;
+    markDirty();
+    ed.render(); updateReadout(); renderTracks();
+  };
+  input.onblur = leave;
+  input.onkeydown = (e) => { if (e.key === "Enter") leave(); };
+  return [box, input];
+}
+
+function renumber(t, input) {
+  const was = t.number;
+  const now = parseInt(input.value, 10);
+  if (!(now > 0) || now === was) { input.value = was; return false; }
+  t.number = now;
+  if (ed.sel?.track === was) ed.sel.track = now;
+  if (cutPicked?.track === was) cutPicked.track = now;
+}
+
+// Bound as a drag is: inside the side, and never past the track's other edge.
+function typedEdge(t, edge, input) {
+  const v = parseFloat(input.value);
+  const at = Math.max(0, Math.min(S.sideData[S.side].duration, v));
+  const same = !Number.isFinite(v) || round2(v) === round2(t[edge]) || refusedByJob() || refusedCrossing(t, edge, at);
+  if (!same) {
+    t[edge] = round2(edge === "start" ? Math.min(at, t.end - 0.2) : Math.max(at, t.start + 0.2));
+    setByHand(t);
+  }
+  input.value = t[edge].toFixed(2);
+  return !same;
+}
+
+function removeTrack(t) {
+  if (refusedByJob()) return;
+  if (!confirm(`Delete track ${t.number} “${t.title}”?`)) return;
+  S.bySide[S.side] = tracks().filter((x) => x !== t);
+  if (cutOpen === t) cutOpen = null;
+  if (ed.sel?.track === t.number) { ed.sel = null; cutPicked = null; }
+  markDirty(); renderTracks(); ed.setTracks(tracks()); updateReadout();
+}
+
+function trackOpenView(t) {
+  const tr = el("tr", "cut-open");
+  tr.dataset.open = trackKey(t);
+  tr.dataset.key = trackKey(t);
+  const td = el("td");
+  td.colSpan = 7;
+  const fields = el("div", "cut-fields");
+  const [num, numInput] = trackField(t, "Number", "number", false, String(t.number), (input) => renumber(t, input));
+  numInput.type = "number"; numInput.min = "1"; numInput.step = "1";
+  const [title] = trackField(t, "Title", "title", true, t.title, (input) => { t.title = input.value; });
+  fields.append(num, title);
+  for (const [edge, label] of [["start", "Start (s)"], ["end", "End (s)"]]) {
+    const [box, input] = trackField(t, label, edge, false, t[edge].toFixed(2), (i) => typedEdge(t, edge, i));
+    input.type = "number"; input.step = "0.01"; input.min = "0";
+    input.dataset.edge = edge;
+    fields.append(box);
+  }
+  const moves = el("div", "cut-moves");
+  moves.append(smallButton("Remove", "delete this track", () => removeTrack(t), "ghost tiny tp-danger"),
+               smallButton("Close", "close this row", () => { cutOpen = null; renderTracks(); }));
+  fields.append(moves);
+  td.append(fields);
+  tr.append(td);
+  return tr;
+}
+
+function renderTracks() {
+  showSideMeta();
+  showCutTools();
+  // A field left by pressing something in this table writes itself, and taking away the
+  // button under the pointer would lose the press. The rows wait for the press to finish.
+  if (cutPressing) { cutRedrawOwed = true; return; }
+  const tb = $("#tracks tbody");
+  const typed = typedInRows(tb);
+  const rows = [];
+  for (const t of tracks()) {
+    rows.push(trackRowView(t));
+    if (cutOpen === t) rows.push(trackOpenView(t));
+  }
+  cutRedrawing = true;
+  tb.replaceChildren(...rows);
+  cutRedrawing = false;
+  putBackTyped(typed, tb);
+}
+
+function wireTrackPresses() {
+  $("#tracks").addEventListener("pointerdown", () => { cutPressing = true; });
+  const finished = () => {
+    if (!cutPressing) return;
+    // After the click this press is about to make, which fires once this event is over.
+    setTimeout(() => {
+      cutPressing = false;
+      if (cutRedrawOwed) { cutRedrawOwed = false; renderTracks(); }
+    });
+  };
+  addEventListener("pointerup", finished);
+  addEventListener("pointercancel", finished);
+}
+
+// ------------------------------------------------------------------ toolbar
+//
+// The buttons and the keys are two ways to one set of actions.
+
+const selectedTrack = () => (ed.sel ? trackByNum(ed.sel.track) ?? null : null);
+
+function playOrPause() {
+  const t = selectedTrack();
+  player.toggle(player.playing ? null : (t ? t[ed.sel.edge] - 3 : ed.playhead));
+}
+
+function auditionSelected() {
+  const t = selectedTrack();
+  if (t) player.audition(t[ed.sel.edge]);
+}
+
+// A nudge sets a boundary for good, so a track chosen from its row is not enough: the marker
+// has to have been asked for, by pressing it, by its Start or End cell or button, or by E.
+let cutPicked = null;
+const cutArmed = () => !!ed.sel && cutPicked?.track === ed.sel.track && cutPicked.edge === ed.sel.edge;
+
+function nudgeSelected(step) {
+  const t = selectedTrack();
+  if (!t) return false;
+  if (!cutArmed()) {
+    status("Choose Start or End first (E), or press a marker, and then this moves it.", true);
+    return false;
+  }
+  if (refusedByJob() || refusedCrossing(t, ed.sel.edge, t[ed.sel.edge] + step)) return true;
+  if (ed.sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
+  else t.end = Math.max(t.end + step, t.start + 0.2);
+  setByHand(t);
+  markDirty(true, NUDGE_SETTLE); ed.render(); updateReadout(); renderTracks();
+  return true;
+}
+
+function chooseEdge(edge) {
+  if (ed.sel) select(ed.sel.track, edge, true);
+}
+
+// The first press chooses the marker the readout is showing, and the next ones swap it.
+function swapEdge() {
+  if (!ed.sel) return;
+  const chosen = cutPicked?.track === ed.sel.track;
+  chooseEdge(chosen ? (ed.sel.edge === "start" ? "end" : "start") : ed.sel.edge);
+}
+
+// Stops at either end of the side, and a whole-side view stays one.
+function stepTrack(by) {
+  const list = tracks();
+  if (!list.length) return;
+  const at = list.findIndex((t) => t.number === ed.sel?.track);
+  const next = list[at < 0 ? (by > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, at + by))];
+  const whole = !!ed.side && ed.t1 - ed.t0 >= ed.side.duration - 0.01;
+  select(next.number, "start");
+  if (!whole) ed.fitRange(next.start, next.end);
+  document.querySelector("#tracks tr.sel")?.scrollIntoView({ block: "nearest" });
+}
+
+// The boundaries stay, and the doubt goes. It is an edit like any other.
+function checkSelected() {
+  const t = selectedTrack();
+  if (!canCheck(t)) return;
+  if (refusedByJob()) return;
+  t.forced = false;
+  t.settled = "ear";
+  markDirty(); updateReadout(); renderTracks();
+  status(`“${t.title}” checked by ear`);
+}
+
+function zoomToSelected() {
+  const t = selectedTrack();
+  if (t) ed.fitRange(t.start, t.end);
+}
+
+function showCutTools() {
+  const none = !selectedTrack();
+  for (const id of ["#cut-audition", "#cut-zoom-track"]) $(id).disabled = none;
+  for (const id of ["#cut-prev", "#cut-next"]) $(id).disabled = !tracks().length;
+  const armed = cutArmed();
+  for (const edge of ["start", "end"]) {
+    const b = $(`#cut-edge-${edge}`);
+    b.disabled = none;
+    b.classList.toggle("on", armed && ed.sel.edge === edge);
+  }
+  for (const id of ["#cut-minus", "#cut-plus"]) $(id).disabled = !armed;
+  for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side", "#cut-in", "#cut-out"]) $(id).disabled = !ed.side;
+  const doubts = cutDoubts().length;
+  $("#cut-doubt").disabled = !doubts || !ed.side;
+  toolLabel("#cut-doubt", doubts ? `Next doubt (${doubts})` : "No doubts");
+  $("#cut-checked").disabled = !canCheck(selectedTrack());
+  $("#cut-checked").classList.toggle("primary", !!selectedTrack()?.forced);
+  $("#cut-play").querySelector("span").textContent = player.playing ? "Pause" : "Play";
 }
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
-// ------------------------------------------------------------------- drafts
-//
-// Marker edits live only in browser memory, so a reload or a crash loses them.
-// These are a per-browser convenience only — the plan on disk stays
-// authoritative, and a draft is discarded the moment you Save.
-const DRAFT = (slug) => `ripdoctor:draft:${slug}`;
-let draftTimer = null;
-
-function saveDraft() {
-  if (!S.slug || !S.dirty) return;
-  clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(DRAFT(S.slug), JSON.stringify({
-        at: Date.now(), side: S.side, bySide: S.bySide,
-      }));
-    } catch { /* private mode, quota — a draft is a nicety, never a blocker */ }
-  }, 800);
-}
-
-function dropDraft(slug) {
-  try { localStorage.removeItem(DRAFT(slug || S.slug)); } catch {}
-}
-
-function readDraft(slug) {
-  try {
-    const raw = localStorage.getItem(DRAFT(slug));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function offerDraft(slug) {
-  const d = readDraft(slug);
-  if (!d || !d.bySide) return false;
-  const when = new Date(d.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const n = Object.values(d.bySide).flat().length;
-  if (!confirm(`Unsaved changes to this album from ${when} (${n} tracks).\n\n`
-             + `Restore them? Cancel discards the draft and loads what is on disk.`)) {
-    dropDraft(slug);
-    return false;
-  }
-  for (const [letter, tracks] of Object.entries(d.bySide))
-    S.bySide[letter] = tracks.map((t) => ({ ...t }));
-  markDirty(true);
-  return true;
-}
-
-// Split the track under the playhead in two.
-//
-// If the playhead sits inside a detected silence, the two new edges are placed
-// the way refit2 places them - tail after the outgoing music, lead before the
-// incoming - so the second track gets its lead-in instead of starting on the
-// first note. Outside a gap the split lands exactly where you clicked, because
-// a "split here" that quietly moves somewhere else is worse than a blunt one.
+// Split the track under the playhead in two. Where the edges go is ripui.js's.
 function splitAtPlayhead() {
+  if (refusedByJob()) return;
   const at = ed.playhead;
   const list = tracks();
   const t = list.find((x) => x.start < at && at < x.end);
   if (!t) { status("playhead is not inside a track — click inside one first", true); return; }
-  if (at - t.start < 0.5 || t.end - at < 0.5) { status("too close to an existing boundary", true); return; }
-
-  const LEAD = 1.3, TAIL = 1.5;
-  let prevEnd = at, nextStart = at, note = "split at playhead";
-  const g = (S.sideData[S.side].gaps?.band?.gaps || []).find((x) => x.lo <= at && at <= x.hi);
-  if (g) {
-    prevEnd = Math.min(g.lo + TAIL, g.hi - 0.2);
-    nextStart = Math.max(g.hi - LEAD, g.lo + 0.2);
-    if (nextStart < prevEnd) prevEnd = nextStart = (g.lo + g.hi) / 2;
-    note = `split inside gap ${g.lo.toFixed(2)}–${g.hi.toFixed(2)}`;
-  }
+  const edges = splitEdges(t, at, S.sideData[S.side].gaps?.band?.gaps);
+  if (edges.refused) { status(edges.refused, true); return; }
 
   // everything at or after the insertion point shifts up one, across all sides
   const newNum = t.number + 1;
   for (const x of Object.values(S.bySide).flat()) if (x.number >= newNum) x.number += 1;
 
-  list.push({ number: newNum, title: "Untitled", start: round2(nextStart), end: t.end });
-  t.end = round2(prevEnd);
-  t.forced = false;
+  list.push({ number: newNum, title: "Untitled", start: round2(edges.start), end: t.end, settled: "hand" });
+  t.end = round2(edges.end);
+  setByHand(t);
   list.sort((a, b) => a.start - b.start);
   markDirty(); renderTracks(); ed.setTracks(list);
   select(newNum, "start");
-  status(note);
+  status(edges.note);
 }
 
-function select(num, edge) {
+function select(num, edge, picked = false) {
   ed.sel = num == null ? null : { track: num, edge };
+  cutPicked = picked && num != null ? { track: num, edge } : null;
+  if (num != null) cutOpen = trackByNum(num) ?? cutOpen;
   ed.render(); renderTracks(); updateReadout();
 }
 
@@ -550,6 +982,9 @@ function select(num, edge) {
 
 function updateReadout() {
   const sel = ed.sel;
+  const armed = cutArmed();
+  $("#ro-armed").textContent = armed ? `${sel.edge === "start" ? "Start" : "End"} chosen` : "";
+  $("#ro-armed").className = armed ? sel.edge : "";
   if (!sel) {
     $("#ro-time").textContent = fmt(ed.playhead);
     $("#ro-track").textContent = ""; $("#ro-gap").textContent = ""; $("#ro-gap").className = "";
@@ -562,7 +997,7 @@ function updateReadout() {
   const len = t.end - t.start;
   const d = t.cat ? len - t.cat : null;
   $("#ro-track").textContent =
-    `${sel.edge} of ${t.number} “${t.title}” — ${len.toFixed(2)}s` +
+    `${armed ? `${sel.edge} of ` : ""}${t.number} “${t.title}” — ${len.toFixed(2)}s` +
     (t.forced ? "  — forced, placed from the catalogue; check it by ear"
      : d == null ? "" : ` (cat ${t.cat.toFixed(2)}, ${d >= 0 ? "+" : ""}${d.toFixed(2)})`);
 
@@ -669,32 +1104,17 @@ function buildDoc() {
   };
 }
 
-// Reports whether it wrote, so a caller that must not proceed on a stale plan
-// can stop. The Save button ignores the answer; Cut does not.
-async function save() {
-  try {
-    await postJSON(`/api/plan/${S.slug}`, buildDoc());
-    markDirty(false);
-    dropDraft();
-    status("saved plan + spec");
-    return true;
-  } catch (e) {
-    status(`save failed: ${e.message}`, true);
-    alert(`Save failed:\n${e.message}`);
-    return false;
-  }
-}
-
 async function split() {
   // The cutter reads the plan from disk, so an unsaved edit is not in it. This
   // used to ask whether to cut from the last saved copy instead, which is a
   // question with one sensible answer and a dozen chances to press the wrong
   // one - three nudged boundaries and an absent-minded OK cut the old ones.
   if (S.dirty && !(await save())) return;
-  $("#split").disabled = true;
+  cutCutting = true;
+  showCutRail();
   status("cutting…", true);
   try {
-    const r = await runJob(S.slug, `/api/split/${S.slug}`, {}, "cutting");
+    const r = await runJob(S.slug, `/api/split/${S.slug}`, { seen: S.meta.seen }, "cutting");
     const bad = r.unreadable || [];
     status(`${r.tracks} tracks cut` + (bad.length ? ` - ${bad.length} unreadable` : ""),
            bad.length > 0);
@@ -702,91 +1122,44 @@ async function split() {
     // again, and knowing which costs nothing to report.
     if (bad.length) logline(`these did not read back: ${bad.join(", ")}`, true);
     loadReview();
-    renderPipeline();
-  } catch (e) { status(`cut failed: ${e.message}`, true); logline(e.message, true); }
-  $("#split").disabled = false;
+  } catch (e) {
+    if (e.stale) saver.behind(e.message);
+    status(`${e.stale ? "not cut" : "cut failed"}: ${e.message}`, true); logline(e.message, true);
+  }
+  cutCutting = false;
+  await refreshCutRail();
 }
 
 // ----------------------------------------------------------------- archive
 
-async function refreshArchiveButton() {
-  const b = $("#archive");
-  b.disabled = true;
-  if (!S.slug) return;
-  try {
-    const st = await api(`/api/archive/${S.slug}?album=${encodeURIComponent(S.meta.album || "")}`);
-    b.disabled = !st.ready;
-    b.title = st.ready
-      ? `archive ${st.sides.length} raw sides and clean up`
-      : (st.why || "not ready");
-  } catch { /* leave it disabled */ }
-}
-
-async function openArchive() {
-  $("#arc-err").textContent = "";
-  $("#arc-plan").textContent = "checking…";
-  $("#arcdlg").showModal();
-  try {
-    const st = await api(`/api/archive/${S.slug}?verify=1&album=${encodeURIComponent(S.meta.album || "")}`);
-    const lines = [];
-    lines.push(`library: ${st.library_path || "(not found)"}  — ${st.library_tracks} tracks`);
-    lines.push("");
-    lines.push("archive to " + st.will_archive_to + ":");
-    for (const sd of st.sides)
-      lines.push(`  ${sd.name.padEnd(22)} ${(sd.bytes / 1e6).toFixed(0)} MB   `
-        + (sd.valid === null ? "" : sd.valid ? "valid — copy as-is" : "TRUNCATED — re-encode"));
-    if ((st.will_replace || []).length) {
-      lines.push("");
-      lines.push("replacing in the archive (the earlier take goes):");
-      for (const name of st.will_replace) lines.push("  " + name);
-    }
-    lines.push("");
-    lines.push("then remove:");
-    for (const d of st.will_remove) lines.push("  " + d);
-    if (!st.ready) lines.push("\nNOT READY: " + st.why);
-    lastSurvey = st;
-    $("#arc-plan").textContent = lines.join("\n");
-    $("#arc-go").disabled = !st.ready;
-  } catch (e) {
-    $("#arc-plan").textContent = "";
-    $("#arc-err").textContent = e.message;
-  }
-}
-
-let lastSurvey = {};
-
-async function archiveRun() {
-  // S.slug moves when the picker is rebuilt below, so remember what was archived
+// An import archives as its last step. This is only for one that could not, and for a
+// record filed before that was so.
+async function archiveAgain() {
   const done = S.slug;
-  const replacing = (lastSurvey.will_replace || []).length;
-  if (!confirm("Archive the raw sides and delete raw/, review/ and the cache?\n\n"
-             + "Each side is verified in archive/ before anything is removed."
-             + (replacing
-                ? `\n\n${replacing} archived side(s) are being replaced. The earlier `
-                  + `take is kept until the new one reads back, then goes.`
-                : ""))) return;
-  $("#arc-err").textContent = "";
-  $("#arc-go").disabled = true;
-  $("#arc-plan").textContent = "archiving — re-encoding truncated sides, this takes a minute…";
+  const b = $("#archive-again");
+  b.disabled = true;
+  status("archiving\u2026");
   try {
-    const r = await runJob(S.slug, `/api/archive/${S.slug}`,
-                             { album: S.meta.album }, "archiving");
-    const lines = ["archived to " + r.archive_dir, ""];
-    for (const a of r.archived) lines.push(`  ${a.side.padEnd(22)} ${a.seconds}s  ${(a.bytes / 1e6).toFixed(0)} MB  verified`);
-    lines.push("", ...r.notes.map((n) => "  " + n), "", "removed:", ...r.removed.map((d) => "  " + d));
-    $("#arc-plan").textContent = lines.join("\n");
-    status("archived and cleaned up");
-    await renderPipeline();
-    $("#arcdlg").close();
-    resetCaptureAfterArchive(done);
-    await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
-
-    await loadOrphans();
+    await runJob(done, `/api/archive/${done}`, {}, "archiving");
+    await finishArchived(done);
+    status("archived");
   } catch (e) {
-    $("#arc-err").textContent = e.message;
-    $("#arc-go").disabled = false;
+    status(e.message, true);
+    logline(e.message, true);
+    await refreshCutRail();
+  } finally {
+    b.disabled = false;
   }
 }
+
+async function finishArchived(slug) {
+  resetCaptureAfterArchive(slug);
+  await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
+  await loadOrphans();
+}
+
+// Waiting for the import dialog to close, since the art panel in it still uses the record.
+let archivedWithImport = "";
 
 // ------------------------------------------------------------------ import
 
@@ -799,6 +1172,11 @@ function showCatalogueState() {
   // Left readable rather than removed: which release it would have used is
   // worth seeing while deciding not to use it.
   for (const id of ["#imp-mbid", "#imp-search"]) $(id).disabled = byPlan;
+  const noRelease = byPlan || !$("#imp-mbid").value.trim();
+  const merge = $('#imp-dupes option[value="merge"]');
+  merge.disabled = noRelease;
+  $("#imp-nomerge").hidden = !noRelease;
+  if (noRelease && $("#imp-dupes").value === "merge") $("#imp-dupes").value = "keep";
 }
 
 // The release the import will actually use. Empty is a decision here, not an
@@ -816,8 +1194,8 @@ function openImport() {
   $("#imp-err").textContent = "";
   $("#imp-outwrap").hidden = true;
   $("#imp-done").hidden = true;
+  $("#imp-pick").hidden = false;
   $("#imp-go").hidden = true;
-  $("#imp-next").hidden = true;
   $("#imp-go").hidden = false;
   $("#imp-close").textContent = "Close";
   $("#imp-results").innerHTML = "";
@@ -867,7 +1245,8 @@ async function relabelRun() {
   if (!relabelPick) return;
   if (!confirm(`Re-label ${Object.values(S.bySide).flat().length} tracks from `
              + `"${relabelPick.title}"?\n\nTitles, numbers and the release id `
-             + `change. No boundary moves. Unsaved edits to titles are lost.`)) return;
+             + `change. No boundary moves.`)) return;
+  if (S.dirty && !(await save())) return;
   $("#imp-err").textContent = "";
   $("#imp-relabel").disabled = true;
   try {
@@ -879,6 +1258,7 @@ async function relabelRun() {
     await openAlbum(S.slug);
     $("#imp-mbid").value = r.mbid;
     showCatalogueState();
+    checkExisting();
     status(`re-labelled ${r.applied} tracks from ${r.release} — boundaries untouched`);
   } catch (e) {
     $("#imp-err").textContent = e.message;
@@ -927,6 +1307,17 @@ async function artFetch() {
   b.disabled = false; b.textContent = was;
 }
 
+// Whether what is saved is not what this page loaded. A dialog stops the page looking.
+async function changedOnDisk() {
+  try {
+    return (await api(`/api/seen/${S.slug}`)).seen !== S.meta.seen;
+  } catch {
+    // A record cut before it arrived has no sides to ask about, and a question that
+    // cannot be answered is no reason to refuse: the import still reads what is saved.
+    return false;
+  }
+}
+
 async function runImport() {
   const tracks = Object.values(S.bySide).flat().length;
   // One question. There used to be two in a row, and the second quoted the
@@ -938,7 +1329,16 @@ async function runImport() {
   if (!confirm(`Tag and place ${tracks} tracks as "${S.meta.artist} \u2014 `
              + `${S.meta.album}"?\n\nThey are ${how}.`
              + `\nThe files move out of review/.`)) return;
-  if (S.dirty) await save();      // the importer reads the plan from disk
+  // The gate finds a filed record by the release the plan names, so what is filed
+  // under must be what it names, a pasted id as much as a picked one.
+  if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }
+  if (S.dirty && !(await save())) return;      // the importer reads the plan from disk
+  if (await changedOnDisk()) {
+    const why = "the plan has changed since this page loaded it, in another tab or by a job, and nothing was imported";
+    saver.behind(why);
+    $("#imp-err").textContent = `${why}. Close this and load what is saved.`;
+    return;
+  }
   $("#imp-err").textContent = "";
   $("#imp-out").textContent = "tagging and placing\u2026";
   $("#imp-outwrap").hidden = false;
@@ -949,17 +1349,25 @@ async function runImport() {
                              replace: $("#imp-replace").checked },
                            "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
+    $("#imp-archived").textContent = r.archive?.archived
+      ? `Archived: the raw sides are in ${r.archive.archive_dir}, read back.`
+      : `Not archived: ${r.archive?.why || "the import did not say why"}.`;
+    $("#imp-archived").classList.toggle("err", !r.archive?.archived);
+    if (r.archive?.archived) {
+      archivedWithImport = S.slug;
+      const held = albumsHeld.find((a) => a.slug === S.slug);
+      if (held) held.where = "archive";
+    }
     $("#imp-done").hidden = false;
+    $("#imp-pick").hidden = true;      // every choice in it has been acted on
     showTranscript(r);   // collected all along, and hidden on every path
     $("#imp-go").hidden = true;
-    $("#imp-close").textContent = "Not yet";
+    $("#imp-close").textContent = "Close";
     await loadArtState();
     await loadReview();
-    await refreshArchiveButton();
-    await renderPipeline();
+    await refreshCutRail();
     offerArt();
-    $("#imp-next").hidden = $("#archive").disabled;
-    status("imported into the library");
+    status(r.archive?.archived ? "imported and archived" : "imported, and not archived - the rail says why", !r.archive?.archived);
   } catch (e) {
     $("#imp-err").textContent = e.message;
     $("#imp-outwrap").hidden = true;
@@ -986,10 +1394,14 @@ function guessFromSlug(slug) {
 let fpReleases = [];
 
 function openFirstPass() {
-  const existing = Object.values(S.bySide).flat().length;
-  if (existing && !confirm(
-      `This replaces the plan for all ${S.meta.sides.length} sides — ${existing} tracks, `
-      + `including any boundaries you have already corrected. Continue?`)) return;
+  const held = Object.values(S.bySide).flat();
+  $("#fp-again").hidden = !held.length;
+  $("#fp-again").textContent = `This fits all ${S.meta.sides.length} sides again, ${counted(held.length, "track", "tracks")}. `
+    + "Boundaries you set or checked stay where they are.";
+  const marks = held.filter((t) => t.settled).length;
+  $("#fp-over-row").hidden = !marks;
+  $("#fp-over").checked = false;
+  $("#fp-over-what").textContent = `also replace the boundaries I set, on ${counted(marks, "track", "tracks")}`;
   const g = guessFromSlug(S.slug);
   $("#fp-artist").value = S.meta.artist || g.artist;
   $("#fp-album").value = S.meta.album || g.album;
@@ -1011,10 +1423,11 @@ function renderReleaseList(box, releases, onPick, { requireDurations = true } = 
       `${Math.round(r.total / 60)} min`);
     // MusicBrainz keeps pressing qualifiers here, not in the title — without it
     // a widely reissued record returns dozens of rows that all read the same
-    const label = r.title + (r.disambiguation ? `  \u00b7 ${r.disambiguation}` : "");
+    const label = [r.title, r.disambiguation, r.date || "----", r.country || "--", r.formats.join(",")]
+      .filter(Boolean).join(" \u00b7 ");
     const dead = requireDurations && r.durations === 0;
-    const b = el("button", dead ? "nodur" : (r.vinyl ? "vinyl" : ""),
-      `${r.date || "----"}  ${r.country || "--"}  ${(r.formats.join(",") + "          ").slice(0, 14)}  ${r.tracks} tracks  ${dur}   ${label}`);
+    const b = el("button", dead ? "nodur" : (r.vinyl ? "vinyl" : ""));
+    b.append(el("span", null, label), el("span", null, `${r.tracks} tracks \u00b7 ${dur}`));
     b.type = "button";
     b.disabled = dead;
     if (dead) b.title = "no track durations in MusicBrainz — nothing to fit against";
@@ -1046,17 +1459,33 @@ async function fpSearch() {
   }
 }
 
+// Named one by one, since each is a judgement of theirs this pass did not hold.
+function notHeld(released = []) {
+  if (!released.length) return "";
+  const lines = released.map((x) => `  ${x.number} \u201c${x.title}\u201d on side ${x.side}: ${x.why}`);
+  return `Fitted again, not kept where you had them:\n${lines.join("\n")}\n\n`;
+}
+
+function startedOver(replaced = []) {
+  if (!replaced.length) return "";
+  const lines = replaced.map((x) => `  ${x.number} \u201c${x.title}\u201d on side ${x.side}`);
+  return `Fitted again, as you asked, over what you had set:\n${lines.join("\n")}\n\n`;
+}
+
 async function fpRun(rel) {
   $("#fp-err").textContent = "";
+  // The server holds what is saved, so a boundary moved a moment ago would be fitted over.
+  if (S.dirty && !(await save())) return;
   $("#fp-report").hidden = true;
   $("#fp-results").innerHTML = "<p class=\"dim\">fitting…</p>";
   try {
     const r = await runJob(S.slug, `/api/firstpass/${S.slug}`,
-                           { mbid: rel.id, force: $("#fp-force").checked },
+                           { mbid: rel.id, force: $("#fp-force").checked, start_over: $("#fp-over").checked },
                            "fitting");
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
-    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + r.report;
+    const kept = r.kept ? `${counted(r.kept, "track", "tracks")} you set or checked left where ${r.kept === 1 ? "it was" : "they were"}` : "";
+    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + notHeld(r.released) + startedOver(r.replaced) + (kept ? `${kept}.\n\n` : "") + r.report;
     $("#fp-done").hidden = false;
     $("#fp-cancel").hidden = true;
     S.sideData = {};
@@ -1141,13 +1570,29 @@ async function sendPrecut(file) {
   }
 }
 
+// Replace removes what is filed, so it says how much and waits for a tick, as a record does.
+async function showPrecutReplace() {
+  const replacing = $("#pc-dup").value === "replace";
+  $("#pc-replace").checked = false;
+  $("#pc-replace-wrap").hidden = !replacing;
+  $("#pc-import").disabled = replacing;
+  if (!replacing) return;
+  try {
+    const { tracks, where, refused } = await api(`/api/precut/filed?mbid=${encodeURIComponent(pcMbid)}`);
+    $("#pc-replace-what").textContent = refused
+      || (tracks ? `${counted(tracks, "track", "tracks")} of this release at ${where}` : "None of this release is filed, so nothing is removed.");
+  } catch (e) {
+    $("#pc-replace-what").textContent = e.message;
+  }
+}
+
 async function takePrecut() {
   $("#pc-err").textContent = "";
   $("#pc-import").disabled = true;
   $("#pc-state").textContent = "importing…";
   try {
     const done = await runJob("precut", "/api/precut/take",
-      { mbid: pcMbid, duplicates: $("#pc-dup").value }, "importing");
+      { mbid: pcMbid, duplicates: $("#pc-dup").value, replace: $("#pc-replace").checked }, "importing");
     $("#pc-state").textContent = "";
     $("#pc-done").textContent = `${done.tracks} tracks filed`
       + (done.library ? ` at ${done.library}` : "")
@@ -1413,14 +1858,30 @@ const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const stepBox = (id) => document.getElementById(`tp-st-${id}`);
 
 // `why` is what will not fit in a line, kept one press away.
-function tpStep(id, kind, state, detail, why = "") {
-  const box = stepBox(id);
+function railStep(box, kind, state, detail, why = "") {
   box.dataset.kind = kind;
-  box.querySelector(".tp-state").textContent = state;
-  box.querySelector(".tp-detail").textContent = detail;
-  const more = box.querySelector(".tp-why");
+  box.querySelector(".step-state").textContent = state;
+  box.querySelector(".step-detail").textContent = detail;
+  const more = box.querySelector(".step-why");
   more.hidden = !why;
   more.querySelector("p").textContent = why;
+}
+
+const tpStep = (id, ...said) => railStep(stepBox(id), ...said);
+
+// On a phone a rail is this one line, saying what is next, until it is opened.
+function railBarSays(bar, box) {
+  bar.querySelector("span").textContent = box
+    ? `${box.querySelector("b").textContent}: ${box.querySelector(".step-state").textContent}` : "Done";
+  bar.dataset.kind = box?.dataset.kind ?? "done";
+}
+
+function railOpens(rail, bar) {
+  bar.onclick = () => {
+    const open = rail.classList.toggle("open");
+    bar.setAttribute("aria-expanded", open);
+    if (open) rail.scrollIntoView({ block: "start" });
+  };
 }
 
 // Only what this step can do, and the blue one is the next thing to press.
@@ -1578,18 +2039,20 @@ const PLAYLIST_WORDS = {
 function stepPlaylist(t) {
   const p = t.playlist;
   const started = t.filing.some((o) => o.state !== "pending" && o.state !== "skipped");
-  tpAction("#tp-playlist", true, started && !p.outcome, !started);
+  // A write that could not happen stays unwritten until asked again, so it is what to press.
+  const stuck = !!p.outcome && p.outcome !== "written" && p.outcome !== "unchanged" && t.songs.some((s) => !s.skip);
+  tpAction("#tp-playlist", true, started && (!p.outcome || stuck), !started);
   $("#tp-playlist").textContent = p.outcome ? "Write again" : "Write playlist";
   const named = (n) => t.songs.find((s) => s.number === n)?.title ?? "no longer on the list";
   const told = t.job?.result?.notes ?? [];
-  const why = [
+  const why = [...new Set([
     p.outcome ? `Last rebuild ${new Date(p.at * 1000).toLocaleString()}: ${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.` : "",
     p.path, p.note, ...told,
     ...p.left_out.map((g) => `Song ${g.number} (${named(g.number)}): ${g.why}`),
-  ].filter(Boolean).join("\n");
+  ])].filter(Boolean).join("\n");
   if (!p.outcome) return tpStep("playlist", started ? "ready" : "wait", started ? "Ready" : "Waiting", started ? "No playlist written yet." : "Waiting on File.", why);
   if (p.outcome !== "written" && p.outcome !== "unchanged")
-    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.`, why);
+    return tpStep("playlist", "todo", "Not written", `${PLAYLIST_WORDS[p.outcome] ?? p.outcome}.${stuck ? " Write again once the library is there." : ""}`, why);
   // The file is all this knows about: whether the server shows it is the server's to say.
   const server = "The music server imports it within about a minute, and an admin there may need to make imported playlists public.";
   const name = p.path.split("/").pop();
@@ -1601,18 +2064,21 @@ function stepPlaylist(t) {
 function stepArchive(t) {
   const p = t.playlist;
   const unfiled = t.filing.every((o) => o.state === "pending" || o.state === "skipped");
-  tpAction("#tp-archive", !p.done, !p.archive_refusal, !!p.archive_refusal);
+  // Only where it can do something: a resolved tape archives in the job that resolved it.
+  const again = !p.done && !p.archive_refusal && !!p.outcome;
+  tpAction("#tp-archive", again, true, false);
   if (p.done) return tpStep("archive", "done", "Archived", "Copied and read back. The song list stays.", p.archived.file);
   if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
   if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
-  return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
+  if (again) return tpStep("archive", "fail", "Not archived", p.archive_failed || "Every song is resolved, and the uncut file has not been put away.", p.archive_failed);
+  return tpStep("archive", "wait", "Waiting", "This happens by itself once every song is resolved.");
 }
 
 // What is next is the first step not done, and the thing to press is its blue button.
 function stepNow() {
   const id = TP_STEPS.find((s) => stepBox(s).dataset.kind !== "done");
   if (!id) return null;
-  const button = [...stepBox(id).querySelectorAll(".tp-acts button")]
+  const button = [...stepBox(id).querySelectorAll(".step-acts button")]
     .find((b) => !b.hidden && !b.disabled && !b.classList.contains("ghost"));
   return { id, button };
 }
@@ -1628,9 +2094,7 @@ function showNext() {
   act.textContent = now?.button?.textContent ?? "";
   act.onclick = () => now?.button?.click();
   const box = now && stepBox(now.id);
-  const word = box ? `${box.querySelector("b").textContent}: ${box.querySelector(".tp-state").textContent}` : "Done";
-  $("#tp-rail-bar").querySelector("span").textContent = word;
-  $("#tp-rail-bar").dataset.kind = box?.dataset.kind ?? "done";
+  railBarSays($("#tp-rail-bar"), box);
   if (!now || tpRailOn === now.id) return;
   tpRailOn = now.id;
   box.scrollIntoView({ block: "nearest" });
@@ -1660,7 +2124,7 @@ function showLeft() {
 function stepBusy(id) {
   const box = stepBox(id);
   box.dataset.kind = "run";
-  box.querySelector(".tp-state").textContent = "Working";
+  box.querySelector(".step-state").textContent = "Working";
   box.append($("#tp-progress"));
   $("#tp-progress").hidden = false;
 }
@@ -2188,7 +2652,8 @@ function releaseBlock(song, t) {
   if (rel?.edition_note) box.append(editionNoteView(song, rel.edition_note));
   const nothing = song.proposal?.status === "none" && rel?.options.length;
   const words = rel?.note || (song.settled_by || nothing || rel?.maybe_copy ? "" : song.proposal?.reason) || "";
-  if (words) {
+  // The filing outcome above this says it first when that is what the words are.
+  if (words && words !== t.filing.find((f) => f.number === song.number)?.note) {
     const line = el("p", "dim tp-rel-why", words);
     line.title = words;
     box.append(line);
@@ -2378,9 +2843,9 @@ async function addDraft() {
 // the first key to when it is left, which sends it, and a refusal then shows the truth.
 // Taking a focused input off the page makes a browser say it was left, which it was not,
 // so `tpRedrawing` says otherwise for that moment.
-function typedInRows() {
+function typedInRows(box = $("#tp-rows")) {
   const typed = [];
-  for (const input of $("#tp-rows").querySelectorAll("tr[data-open] input[data-field]")) {
+  for (const input of box.querySelectorAll("tr[data-open] input[data-field]")) {
     const focused = document.activeElement === input;
     if (focused || input.value !== input.dataset.saved) {
       const row = input.closest("tr");
@@ -2391,16 +2856,16 @@ function typedInRows() {
   return typed;
 }
 
-function putBackTyped(typed) {
-  for (const input of $("#tp-rows").querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
+function putBackTyped(typed, box = $("#tp-rows")) {
+  for (const input of box.querySelectorAll("input[data-field]")) input.dataset.saved = input.value;
   for (const [held, value] of tpUnsent) {
     const [key, field] = held.split("/");
-    const input = $("#tp-rows").querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
+    const input = box.querySelector(`tr[data-key="${key}"] input[data-field="${field}"]`);
     if (input) input.value = value;
   }
   for (const was of typed) {
     const row = was.row === "draft" ? `[data-open="draft"]` : `[data-key="${was.row}"]`;
-    const input = $("#tp-rows").querySelector(`tr${row} input[data-field="${was.field}"]`);
+    const input = box.querySelector(`tr${row} input[data-field="${was.field}"]`);
     if (!input) continue;
     input.value = was.value;
     if (!was.focused) continue;
@@ -2766,27 +3231,39 @@ function tapeSwapEdge() {
   tapeChooseEdge(chosen ? (sel.edge === "start" ? "end" : "start") : sel.edge);
 }
 
+// A verdict is sent with the edges this page holds once any nudge has saved, so one on a
+// song moved elsewhere is refused. What the page believed is then what was wrong.
 function tapeJudge(send) {
   return settleSong(async () => {
-    const after = await send();
+    let after;
+    try {
+      after = await send();
+    } catch (e) {
+      if (e.status === 409 && tape) showTape(await api(`/api/tapes/${tape.id}`));
+      throw e;
+    }
     waveSay("");
     return after;
   });
 }
+function seenOf(key) {
+  const { start, end } = songOf(numberOf(key));
+  return start == null ? {} : { seen_start: start, seen_end: end };
+}
 function tapeAccept(song) {
   const key = keyOf(song.number);
-  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard }));
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/heard`, { heard: !song.heard, ...seenOf(key) }));
 }
 function tapeSkip(song) {
   const key = keyOf(song.number);
-  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip }));
+  return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip, ...seenOf(key) }));
 }
 
-function tapeZoom(by) {
-  if (!tpEd.side) return;
-  const span = (tpEd.t1 - tpEd.t0) * by;
-  const sel = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
-  tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
+function zoomBy(editor, by) {
+  if (!editor.side) return;
+  const span = (editor.t1 - editor.t0) * by;
+  const sel = editor.sel && editor.tracks.find((x) => x.number === editor.sel.track);
+  editor.centerOn(sel ? sel[editor.sel.edge] : (editor.t0 + editor.t1) / 2, span);
 }
 
 function tapeShowSong() {
@@ -2797,7 +3274,7 @@ function tapeShowSong() {
 // Every key but the two nudges presses its button, so a key does what the button
 // would and a disabled button refuses it.
 const TAPE_KEYS = {
-  k: "#tp-prev", j: "#tp-next", h: "#tp-hear", a: "#tp-accept", s: "#tp-skip",
+  k: "#tp-prev", j: "#tp-next", a: "#tp-hear", Enter: "#tp-accept", x: "#tp-skip",
 };
 const NUDGE_KEYS = { ",": -1, "<": -1, ".": 1, ">": 1, ArrowLeft: -1, ArrowRight: 1 };
 
@@ -2836,7 +3313,7 @@ function wireTapeWave() {
     },
     (num, edge) => tapeSelect(num, edge, false, true),
     (at) => { if (tpPlayer.playing) tpPlayer.seek(at); },
-    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView });
+    { onDrop: tapeEdgeDropped, long: true, onView: showTapeView, onSong: (num) => tapeSelect(num, "start", false) });
   tpPlayer = new Player((at) => { tpEd.playhead = at; tpEd.render(); if (!tpEd.sel) tapeReadout(); });
   for (const change of ["play", "pause", "ended"]) tpPlayer.el.addEventListener(change, showTapeTools);
   // The rail coming and going changes the canvas's width with no window resize.
@@ -2853,8 +3330,8 @@ function wireTapeWave() {
   $("#tp-plus").onclick = () => nudgeChosen(0.05);
   $("#tp-play").onclick = tapePlay;
   $("#tp-hear").onclick = tapeHearSelected;
-  $("#tp-in").onclick = () => tapeZoom(0.5);
-  $("#tp-out").onclick = () => tapeZoom(2);
+  $("#tp-in").onclick = () => zoomBy(tpEd, 0.5);
+  $("#tp-out").onclick = () => zoomBy(tpEd, 2);
   $("#tp-whole").onclick = () => tpEd.fit();
   $("#tp-song").onclick = tapeShowSong;
   $("#tp-accept").onclick = () => tapeAccept(songOf(tpEd.sel?.track));
@@ -2891,8 +3368,7 @@ function cutTape() {
 const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
 const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
 function archiveTape() {
-  if (confirm(`Archive ${tape.name}? Its uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.`))
-    startTapeJob(`/api/tapes/${tape.id}/archive`, {});
+  startTapeJob(`/api/tapes/${tape.id}/archive`, {});
 }
 
 async function sendTapeList(file) {
@@ -3016,7 +3492,7 @@ async function heartbeat() {
 function serverGone() {
   lostContact();
   status("The server can't be reached. Trying again…", true);
-  if (tpJobStep) stepBox(tpJobStep).querySelector(".tp-state").textContent = "No contact";
+  if (tpJobStep) stepBox(tpJobStep).querySelector(".step-state").textContent = "No contact";
 }
 
 // Also what a reload lands in when a job is still going.
@@ -3115,6 +3591,18 @@ async function removeTape() {
 
 // -------------------------------------------------------------------- modes
 
+// Every page writes to the status line and the console. Cut gives them a place in its own
+// column; a page without one has the status in the header and the console along the foot.
+function placeShared(mode) {
+  if (mode === "cut") {
+    $("#cut-msg").append($("#status"));
+    $("#cut-scroll").append($("#logwrap"));
+  } else {
+    $("#tp-head").before($("#status"));
+    $("#app").append($("#logwrap"));
+  }
+}
+
 function setMode(mode) {
   document.body.dataset.mode = mode;
   remember("rd-mode", mode);
@@ -3126,7 +3614,8 @@ function setMode(mode) {
   const source = mode === "rip" || mode === "punch" || mode === "upload"
     || mode === "precut" || mode === "tapes";
   const metering = mode === "rip" || mode === "punch";
-  $("#cv").hidden = source;
+  placeShared(mode);
+  $("#cutview").hidden = source;
   $("#captureview").hidden = !source || mode === "tapes";
   $("#tapeview").hidden = mode !== "tapes";
   $("#tp-head").hidden = mode !== "tapes";
@@ -3140,9 +3629,8 @@ function setMode(mode) {
   $("#uploadbits").hidden = mode !== "upload";
   $("#capturepane").hidden = !metering;
   $("#uploadpane").hidden = mode !== "upload";
-  $("#source-title").textContent = mode === "upload" ? "Add a file" : "Rip a side";
-  $("#readout").hidden = source;
-  $("#lower").hidden = source;
+  $("#source-title").textContent = mode === "upload" ? "Upload a side" : "Rip a side";
+  if (mode === "rip") ripSlug();
   if (metering) startRipPoll(); else stopRipPoll();
   if (mode === "rip") loadOrphans();
   if (mode === "punch") loadPunchTracks();
@@ -3160,7 +3648,8 @@ function setMode(mode) {
 // identically twice, so when an existing album is picked the slug is pinned to
 // it and the name fields go read-only.
 function ripSlug() {
-  const side = $("#rip-side").value.trim();
+  // An upload always becomes side a, whatever the Rip tab has lined up next.
+  const side = document.body.dataset.mode === "upload" ? "a" : $("#rip-side").value.trim();
   if (S.slug) {
     const sides = (S.meta.sides || []).join(" ") || "none";
     $("#rip-slug").textContent =
@@ -3303,7 +3792,8 @@ async function cancelIncoming() {
     status(`discarded ${mb(r.freed_bytes)}`);
     $("#up-go").textContent = "Upload";
     await loadIncoming();
-    if (r.forgot) await refreshAlbums(NEW_ALBUM);
+    // Only the record being sent is gone. One open beside it keeps what it has not saved.
+    if (r.forgot && (slug === S.slug || !S.dirty || await save())) await refreshAlbums(NEW_ALBUM);
   } catch (e) { $("#up-err").textContent = e.message; }
 }
 
@@ -3338,19 +3828,27 @@ function artNote(a) {
   return `   ·   art carried over (${a.size}, ${a.embedded}/${a.tracks} tracks)`;
 }
 
+// The tick is about the files named when it was given, so a different answer takes it
+// back: a release changed after ticking would otherwise replace files nobody agreed to.
+let offered = "";
+
 function showReplaceOffer(existing, { keepTick = false } = {}) {
   const box = $("#imp-replace-wrap");
-  if (!keepTick) $("#imp-replace").checked = false;
+  const named = existing ? `${existing.tracks}|${existing.where}|${existing.folders}` : "";
+  if (!keepTick || named !== offered) $("#imp-replace").checked = false;
+  offered = named;
   if (!existing) {
     box.hidden = true;
     $("#imp-go").disabled = false;
     return;
   }
   box.hidden = false;
+  // The server's own selection, the one Replace removes, so what is named is what goes.
+  const more = existing.folders > 1 ? ` and ${existing.folders - 1} more folders` : "";
   $("#imp-replace-what").textContent =
-    `${existing.tracks} files already in ${existing.where}`;
-  // Importing writes into that same directory, so a track with the same name
-  // is overwritten. The tick is the acknowledgement; nothing is deleted.
+    `${existing.tracks} files of ${existing.artist} \u2014 ${existing.album}, `
+    + `in ${existing.where}${more}`
+    + (existing.refused ? `\nReplace is refused: ${existing.refused}` : "");
   $("#imp-go").disabled = !$("#imp-replace").checked;
 }
 
@@ -3367,7 +3865,7 @@ async function clearStale() {
   const was = b.textContent;
   b.disabled = true; b.textContent = "clearing\u2026";
   try {
-    const r = await postJSON(`/api/library/clear-stale/${S.slug}`, {});
+    const r = await postJSON(`/api/library/clear-stale/${S.slug}`, { mbid: importMbid() });
     status(`cleared ${r.cleared} stale rows`);
     await checkExisting();
   } catch (e) {
@@ -3378,12 +3876,22 @@ async function clearStale() {
 
 // Ask up front rather than finding out from a failed import. True regardless of
 // which path is taken, so it does not wait for a release id.
+// Only the latest question is answered: the release can change while the library is
+// being listed. Import waits for the answer, since unticked it would file a second copy.
+let existingAsked = 0;
+
 async function checkExisting() {
+  const asked = ++existingAsked;
+  $("#imp-err").textContent = "";
+  $("#imp-go").disabled = true;
   try {
-    const { existing, stale } = await api(`/api/library/existing/${S.slug}`);
+    const mbid = encodeURIComponent(importMbid());
+    const { existing, stale } = await api(`/api/library/existing/${S.slug}?mbid=${mbid}`);
+    if (asked !== existingAsked) return;
     showStale(stale);
     showReplaceOffer(existing, { keepTick: true });
   } catch {
+    if (asked !== existingAsked) return;
     showStale(null);
     // The import itself still refuses, so this is only the early warning - but
     // a warning that could not be checked must not read as one that was.
@@ -3451,21 +3959,21 @@ async function loadOrphans() {
     const { orphans } = await api("/api/rip/orphans");
     if (!orphans.length) { box.hidden = true; return; }
     box.hidden = false;
-    box.innerHTML = "<h4>unfinished capture</h4>";
+    box.innerHTML = "<h4>Interrupted capture</h4>";
     for (const o of orphans) {
       const m = Math.floor(o.seconds / 60), sec = Math.round(o.seconds % 60);
       const p = el("p", "", `${o.slug} side ${o.side} — ${m}:${String(sec).padStart(2, "0")} `
         + `(${(o.bytes / 1e6).toFixed(0)} MB) was cut short. The audio is intact; `
         + `it just never got encoded.`);
       const row = el("div", "row");
-      const keep = el("button", "", "Keep it — encode to FLAC");
+      const keep = el("button", "", o.kind === "punch" ? "Keep this punch" : `Keep as side ${o.side}`);
       keep.onclick = async () => {
         keep.disabled = true;
         try {
           const r = await postJSON("/api/rip/salvage",
                                    { slug: o.slug, side: o.side, kind: o.kind });
-          status(`salvaged side ${r.side} — ${fmt(r.duration)}`);
           await loadOrphans(); await refreshAlbums(o.slug);
+          status(`salvaged side ${r.side} — ${fmt(r.duration)}`);
         } catch (e) { $("#rip-err").textContent = e.message; keep.disabled = false; }
       };
       const drop = el("button", "ghost", "Discard");
@@ -3490,18 +3998,16 @@ async function loadOrphans() {
 // refuses while side-X.flac exists, so without this a side taken at the wrong
 // speed - or off the wrong input - means deleting files by hand, which leaves
 // the analysis cache and the plan entry behind describing audio that is gone.
-// "Align from archive" only means anything when the same album exists in both
-// places: an archived capture to correlate against, and a fresh one in raw/.
+// "Align from archive" only means anything where a saved time is still on the archived
+// capture and a fresh one is in raw/. A save ends that, so it is asked again after one.
 async function refreshAlignButton() {
   const b = $("#realign");
-  b.hidden = true;
-  if (!S.slug || !S.meta?.sides?.length) return;
+  if (!S.slug || !S.meta?.sides?.length) { b.hidden = true; return; }
   try {
-    const { albums } = await api("/api/albums?archive=1");
-    // one entry per slug, and raw shadows archive - so the archived original is
-    // reported by a flag on the raw entry, not as a second row
-    const a = albums.find((x) => x.slug === S.slug);
-    b.hidden = !(a && a.where === "raw" && a.archived_copy);
+    const { sides } = await api(`/api/align/${S.slug}`);
+    b.hidden = !sides.length;
+    // The rail offers this by name, and it was drawn before this was known.
+    showCutRail();
   } catch { /* leave it hidden */ }
 }
 
@@ -3512,11 +4018,17 @@ async function loadRipSides() {
     const { sides } = await api(`/api/rip/sides/${S.slug}`);
     if (!sides.length) { box.hidden = true; return; }
     box.hidden = false;
-    box.innerHTML = "<h4>captures on disk</h4>";
+    box.innerHTML = "<h4>Sides on this record</h4>";
     for (const o of sides) {
-      const row = el("div", "row");
-      row.append(el("span", "", `side ${o.side} — ${(o.bytes / 1e6).toFixed(0)} MB`
+      const row = el("div", "side");
+      row.append(el("b", "", o.side));
+      row.append(el("span", "", `${(o.bytes / 1e6).toFixed(0)} MB`
                                 + (o.recording ? " · recording now" : "")));
+      const open = el("button", "linky", "Open in Cut");
+      open.type = "button";
+      open.disabled = o.recording;
+      open.onclick = () => openInCut(o.side);
+      row.append(open);
       const drop = el("button", "ghost", "Discard");
       drop.disabled = o.recording;
       drop.onclick = async () => {
@@ -3527,16 +4039,23 @@ async function loadRipSides() {
         try {
           const r = await postJSON("/api/rip/discard-side",
                                    { slug: o.slug, side: o.side });
-          status(`discarded side ${r.side} — freed ${(r.freed_bytes / 1e6).toFixed(0)} MB`);
           if (r.notes.length) logline(r.notes.join("\n"));
           await loadRipSides();
           await refreshAlbums(S.slug);
+          status(`discarded side ${r.side} — freed ${(r.freed_bytes / 1e6).toFixed(0)} MB`);
         } catch (e) { $("#rip-err").textContent = e.message; drop.disabled = false; }
       };
       row.append(drop);
       box.append(row);
     }
   } catch { box.hidden = true; }
+}
+
+// The Cut tab, on a side of the record already open here.
+function openInCut(letter) {
+  setMode("cut");
+  if (letter && S.sideData && letter !== S.side) openSide(letter)
+    .catch((e) => status(`could not open side ${letter}: ${e.message}`, true));
 }
 
 // Auto-stop is a server-side timer, so the browser cannot hold it off - it can
@@ -3672,6 +4191,17 @@ async function loadDevices() {
   } catch (e) { $("#rip-err").textContent = e.message; }
 }
 
+// The band's last half minute, as this page polled it. It is drawing and nothing else: no
+// request is made for it, and nothing that records reads it.
+let bandSeen = [];
+
+function showLevels(levels) {
+  const at = performance.now() / 1000;
+  bandSeen = historyAfter(bandSeen, at, levels?.band);
+  drawMeter($("#meter"), levels);
+  drawHistory($("#meter-history"), bandSeen, at);
+}
+
 function startRipPoll() {
   stopRipPoll();
   const tick = async () => {
@@ -3709,12 +4239,6 @@ function startRipPoll() {
         auto.textContent = q > 5
           ? `quiet for ${Math.round(q)}s — auto-stops at ${Math.round(st.dwell)}s`
           : `music level ${st.music} dB · auto-stop armed`;
-      } else if (!on && st.levels) {
-        auto.className = "dim";
-        // deliberately no peak here: this is a 42 ms window and it jumps every
-        // poll, which is unreadable. `ripdoctor probe` is where gain is set.
-        auto.textContent = `monitoring input — full ${st.levels.full} dB · `
-                         + `1–3 kHz ${st.levels.band} dB`;
       } else { auto.textContent = ""; auto.className = "dim"; }
       // While a stop is being waited out, the readout belongs to whoever is
       // waiting. Two writers on different intervals made it alternate between
@@ -3732,15 +4256,20 @@ function startRipPoll() {
       } else if (on) {
         $("#rip-done").className = "dim";
       }
+      $("#rip-open-cut").hidden = on;
       if (!settling) {
+        $("#rip-state").toggleAttribute("data-on", on);
         $("#rip-state").textContent = on
           ? `recording ${st.slug} side ${st.side} — ${(st.bytes / 1e6).toFixed(0)} MB`
             + (st.overruns ? `  ·  ${st.overruns} DROPPED` : "")
           : (st.stage === "encoding" ? "encoding…" : "idle");
       }
-      // levels arrive while merely listening too, not only while recording
-      drawMeter($("#meter"), st.levels || null);
-    } catch {}
+      showLevels(liveLevels(st));
+    } catch {
+      // The next poll says what is going on. Until then a needle left where it was
+      // would be a level nobody measured.
+      showLevels(null);
+    }
   };
   tick();
   ripTimer = setInterval(tick, 500);
@@ -3970,10 +4499,10 @@ async function punchApply() {
   $("#punch-err").textContent = "";
   $("#punch-apply").disabled = true;
   try {
-    const r = await runJob(punchSlug(), `/api/punch/${punchSlug()}/apply`,
-                           { number: t.number, start: a, end: b }, "replacing");
+    const r = await postJSON(`/api/punch/${punchSlug()}/apply`,
+                             { number: t.number, start: a, end: b });
     $("#punch-done").textContent =
-      `replaced ${r.number}. ${r.title} — was ${fmt(r.was_seconds)}, now ${fmt(r.now_seconds)}`
+      `replaced ${t.number}. ${t.title} — was ${fmt(r.was_seconds)}, now ${fmt(r.now_seconds)}`
       + (r.art_carried ? ", art carried" : ", NO ART on the old file")
       + `   ·   old take kept at ${r.backup}`;
     if (punchAudio) punchPlay();
@@ -4095,34 +4624,85 @@ async function ripStop() {
 
 // ------------------------------------------------------------------- boot
 
+// A drag lost part way moved nothing, as on Tapes. One let go saves, once.
+let cutDragFrom = null;
+function cutEdgeDropped(num, edge, landed) {
+  const was = cutDragFrom;
+  cutDragFrom = null;
+  if (!was) return;
+  if (!landed) {
+    Object.assign(was.tr, { start: was.start, end: was.end, forced: was.forced, settled: was.settled, placed: was.placed });
+    status("the drag was interrupted, so nothing moved", true);
+    ed.render(); updateReadout(); renderTracks();
+  }
+  markDirty();
+}
+
 function wire() {
   ed = new Editor($("#cv"),
     (num, edge, t) => {                       // marker dragged
       const tr = trackByNum(num); if (!tr) return;
       const d = S.sideData[S.side].duration;
       t = Math.max(0, Math.min(d, t));
+      if (refusedCrossing(tr, edge, t)) return;
+      cutDragFrom ??= { tr, start: tr.start, end: tr.end, forced: tr.forced, settled: tr.settled, placed: tr.placed };
       if (edge === "start") tr.start = Math.min(t, tr.end - 0.2);
       else tr.end = Math.max(t, tr.start + 0.2);
-      tr.forced = false;
-      markDirty(); ed.render(); updateReadout(); renderTracks();
+      setByHand(tr);
+      markDirty(true, null); ed.render(); updateReadout(); renderTracks();
     },
-    (num, edge) => { ed.sel = num == null ? null : { track: num, edge }; renderTracks(); updateReadout(); },
-    (t) => { if (player.playing) player.seek(t); });
+    (num, edge) => { select(num, edge, true); },
+    (t) => { if (player.playing) player.seek(t); },
+    { doubt: canCheck, onSong: (num) => select(num, "start"), onDrop: cutEdgeDropped });
 
   player = new Player((t) => { ed.playhead = t; ed.render(); });
+  new ResizeObserver(() => ed.render()).observe($("#cv"));
+  for (const type of ["play", "pause", "ended"]) player.el.addEventListener(type, showCutTools);
+  $("#cut-prev").onclick = () => stepTrack(-1);
+  $("#cut-next").onclick = () => stepTrack(1);
+  $("#cut-edge-start").onclick = () => chooseEdge("start");
+  $("#cut-edge-end").onclick = () => chooseEdge("end");
+  $("#cut-minus").onclick = (e) => nudgeSelected(e.shiftKey ? -0.5 : -0.05);
+  $("#cut-plus").onclick = (e) => nudgeSelected(e.shiftKey ? 0.5 : 0.05);
+  $("#cut-play").onclick = playOrPause;
+  $("#cut-audition").onclick = auditionSelected;
+  $("#cut-checked").onclick = checkSelected;
+  $("#cut-split").onclick = splitAtPlayhead;
+  $("#cut-zoom-track").onclick = zoomToSelected;
+  $("#cut-zoom-side").onclick = () => ed.fit();
+  showCutTools();
+  wireTrackPresses();
+  wirePressedControl();
   wireTapeWave();
   $("#vol").oninput = (e) => player.setVolume(e.target.value / 100);
   $("#helpbtn").onclick = () => $("#helpdlg").showModal();
   $("#help-close").onclick = () => $("#helpdlg").close();
 
-  $("#save").onclick = save;
+  $("#cut-save-retry").onclick = () => {
+    if (!saver.failure()?.stale) { flushSave(); return; }
+    if (S.dirty && !confirm("Load what is saved? What this page shows and could not save goes.")) return;
+    markDirty(false);
+    S.sideData = {};
+    openAlbum(S.slug);
+  };
+  addEventListener("pagehide", saveOnLeaving);
+  setInterval(noticeDisk, 4000);
   $("#split").onclick = split;
   $("#album-q").oninput = () => renderAlbums(S.slug);
   $("#firstpass").onclick = openFirstPass;
+  $("#cut-review").onclick = reviewNext;
+  $("#cut-doubt").onclick = reviewNext;
+  $("#cut-in").onclick = () => zoomBy(ed, 0.5);
+  $("#cut-out").onclick = () => zoomBy(ed, 2);
+  $("#cut-rip").onclick = () => setMode("rip");
+  railOpens($("#cut-rail"), $("#cut-rail-bar"));
   $("#import").onclick = openImport;
   $("#art-upload").onclick = () => $("#art-file").click();
   $("#art-file").onchange = (e) => { if (e.target.files[0]) uploadArt(e.target.files[0]); e.target.value = ""; };
-  for (const id of ["#md-artist", "#md-album", "#md-date"]) $(id).oninput = () => markDirty();
+  for (const id of ["#md-artist", "#md-album", "#md-date"]) {
+    $(id).oninput = () => showCutRail();    // the heading says what these are about to save
+    $(id).onchange = () => markDirty();
+  }
   $("#imp-search").onclick = async () => {
     $("#imp-err").textContent = "";
     try {
@@ -4130,13 +4710,10 @@ function wire() {
                            $("#imp-results"), (r) => {
                              $("#imp-mbid").value = r.id;
                              showCatalogueState();
+                             checkExisting();
                              $("#imp-results").innerHTML = "";
-                             // Picking here used to set the id in the box and
-                             // nowhere else: the plan kept the release chosen in
-                             // First pass, so the Archive gate went on querying
-                             // an id that no longer described the album.
-                             S.meta.mbid = r.id;
-    markDirty();          // buildDoc sends this, so picking a release is an edit
+                             // Only looking, until Import or Re-label says otherwise: both
+                             // write the release, and the plan's closes the Archive gate.
                              offerRelabel(r);
                            }, { requireDurations: false });
     } catch (e) { $("#imp-err").textContent = e.message; }
@@ -4193,11 +4770,7 @@ function wire() {
   $("#tp-rematch").onclick = () => matchTape(true);
   $("#tp-next-album").onclick = stepAlbum;
   $("#tp-all-list").onclick = () => { tpAllAsk = true; showRail(tape); };
-  $("#tp-rail-bar").onclick = () => {
-    const open = $("#tp-rail").classList.toggle("open");
-    $("#tp-rail-bar").setAttribute("aria-expanded", open);
-    if (open) $("#tp-rail").scrollIntoView({ block: "start" });
-  };
+  railOpens($("#tp-rail"), $("#tp-rail-bar"));
   $("#tp-cut").onclick = cutTape;
   $("#tp-file-songs").onclick = fileTape;
   $("#tp-playlist").onclick = writePlaylist;
@@ -4224,13 +4797,19 @@ function wire() {
   for (const id of ["#rip-artist", "#rip-album"])
     $(id).addEventListener("input", () => { if (picked) showPicked(picked); });
   $("#imp-mbid").oninput = showCatalogueState;
-  $("#imp-fromplan").onchange = showCatalogueState;
+  $("#imp-mbid").onchange = checkExisting;
+  $("#imp-fromplan").onchange = () => { showCatalogueState(); checkExisting(); };
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
-  $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };
-  $("#archive").onclick = openArchive;
-  $("#arc-go").onclick = archiveRun;
-  $("#arc-close").onclick = () => $("#arcdlg").close();
+  $("#pc-dup").onchange = showPrecutReplace;
+  $("#pc-replace").onchange = () => { $("#pc-import").disabled = !$("#pc-replace").checked; };
+  $("#archive-again").onclick = archiveAgain;
+  $("#impdlg").addEventListener("close", () => {
+    if (!archivedWithImport) return;
+    const slug = archivedWithImport;
+    archivedWithImport = "";
+    finishArchived(slug);
+  });
   $("#fp-search").onclick = fpSearch;
   $("#fp-cancel").onclick = () => $("#fpdlg").close();
   $("#fp-done").onclick = () => $("#fpdlg").close();
@@ -4289,6 +4868,8 @@ function wire() {
     }
   };
   $("#rip-listen").onclick = toggleListen;
+  $("#rip-open-cut").onclick = () => openInCut();
+  $("#up-open-cut").onclick = () => openInCut();
   // A fresh load starts on a new album with empty fields and side a. These used
   // to be restored from localStorage, so opening the Rip panel showed whatever
   // record was last ripped - which is both confusing and, with a pinned re-rip,
@@ -4314,7 +4895,9 @@ function wire() {
   $("#logclear").onclick = () => { $("#log").textContent = ""; $("#logwrap").hidden = true; };
   try { setLogCollapsed(localStorage.getItem("ripdoctor:log:collapsed") === "1"); } catch {}
   $("#realign").onclick = async () => {
-    if (S.dirty && !confirm("Discard unsaved changes and align from the archived cut?")) return;
+    if (S.dirty && !(await save())) return;
+    await refreshAlignButton();
+    if ($("#realign").hidden) return;       // what just saved put the side on this capture
     $("#realign").disabled = true;
     try {
       const r = await runJob(S.slug, `/api/align/${S.slug}`, {}, "aligning");
@@ -4332,25 +4915,20 @@ function wire() {
       updateReadout();
       const n = r.aligned.reduce((a, x) => a + x.tracks.length, 0);
       status(r.aligned.length
-        ? `aligned ${n} boundaries across ${r.aligned.length} side(s) — listen, then Save`
+        ? `aligned ${n} boundaries across ${r.aligned.length} side(s) — listen`
         : "nothing could be aligned — see the log", !r.aligned.length);
     } catch (e) {
       status(`align failed: ${e.message}`, true); logline(e.message, true);
     }
     $("#realign").disabled = false;
   };
-  $("#revert").onclick = async () => {
-    if (S.dirty && !confirm("Discard unsaved changes and reload the saved plan?")) return;
-    dropDraft();
-    player.stop();
-    S.sideData = {};                       // re-fetch envelopes too, in case a rip finished
-    await openAlbum(S.slug);
-    status("reloaded from disk");
-  };
   $("#album").onchange = async (e) => {
-    if (S.dirty && !confirm("Discard unsaved changes to this album?")) {
-      e.target.value = S.slug || NEW_ALBUM;   // put the picker back
-      return;
+    if (S.dirty && !(await save())) {
+      if (!confirm("This record's last change is not saved. Leave it anyway?")) {
+        e.target.value = S.slug || NEW_ALBUM;   // put the picker back
+        return;
+      }
+      markDirty(false);
     }
     if (e.target.value === NEW_ALBUM) { startNewAlbum(); return; }
     try { await openAlbum(e.target.value); }
@@ -4358,10 +4936,11 @@ function wire() {
   };
   $("#splittrack").onclick = splitAtPlayhead;
   $("#addtrack").onclick = () => {
+    if (refusedByJob()) return;
     const list = tracks();
     const at = ed.playhead;
     const num = 1 + Math.max(0, ...Object.values(S.bySide).flat().map((t) => t.number));
-    list.push({ number: num, title: "Untitled", start: at, end: Math.min(at + 60, S.sideData[S.side].duration) });
+    list.push({ number: num, title: "Untitled", start: at, end: Math.min(at + 60, S.sideData[S.side].duration), settled: "hand" });
     list.sort((a, b) => a.start - b.start);
     markDirty(); renderTracks(); ed.setTracks(list);
   };
@@ -4371,32 +4950,63 @@ function wire() {
     // a shortcut firing behind an open dialog once split a track while the
     // First-pass dialog had focus
     if (document.querySelector("dialog[open]")) return;
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && (e.repeat || enterIsTheControls(e))) return;
     if (document.body.dataset.mode === "tapes") { tapeKey(e); return; }
-    const sel = ed.sel, t = sel && trackByNum(sel.track);
+    // Alt-left is the browser going back, and ctrl-S its save. Shift is these keys' larger step.
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "?") { e.preventDefault(); $("#helpdlg").showModal(); return; }
+    if (e.key === "Escape") { player.stop(); return; }
+    // The record's editor is behind the other pages, where its keys would act unseen. It is
+    // the page a load starts on, before any mode has been set.
+    if ((document.body.dataset.mode ?? "cut") !== "cut") return;
+    const t = selectedTrack();
     if (e.code === "Space") {
       e.preventDefault();
-      player.toggle(player.playing ? null : (t ? t[sel.edge] - 3 : ed.playhead));
+      // A button keeps the focus after a press, and would be pressed again by this.
+      if (e.target.tagName === "BUTTON") e.target.blur();
+      playOrPause();
     } else if (e.key === "a" || e.key === "A") {
-      if (t) { e.preventDefault(); player.audition(t[sel.edge]); }
-    } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && t) {
-      e.preventDefault();
-      const step = (e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1);
-      if (sel.edge === "start") t.start = Math.min(t.start + step, t.end - 0.2);
-      else t.end = Math.max(t.end + step, t.start + 0.2);
-      t.forced = false;
-      markDirty(); ed.render(); updateReadout(); renderTracks();
+      if (t) { e.preventDefault(); auditionSelected(); }
+    } else if (e.key === "Enter") {
+      e.preventDefault(); $("#cut-checked").click();
+    } else if (NUDGE_KEYS[e.key]) {
+      if (nudgeSelected((e.shiftKey ? 0.5 : 0.05) * NUDGE_KEYS[e.key])) e.preventDefault();
+    } else if (e.key === "n" || e.key === "N") {
+      e.preventDefault(); reviewNext(e.shiftKey ? -1 : 1);
+    } else if (e.key === "e" || e.key === "E") {
+      e.preventDefault(); swapEdge();
+    } else if (e.key === "j" || e.key === "J") {
+      e.preventDefault(); $("#cut-next").click();
+    } else if (e.key === "k" || e.key === "K") {
+      e.preventDefault(); $("#cut-prev").click();
     } else if (e.key === "s" || e.key === "S") {
       e.preventDefault(); splitAtPlayhead();
     } else if (e.key === "f" || e.key === "F" || e.key === "0") {
       e.preventDefault(); ed.fit();
     } else if (e.key === "z" || e.key === "Z") {
-      if (t) { e.preventDefault(); ed.fitRange(t.start, t.end); }
-    } else if (e.key === "?") {
-      e.preventDefault(); $("#helpdlg").showModal();
-    } else if (e.key === "Escape") { player.stop(); }
+      if (t) { e.preventDefault(); zoomToSelected(); }
+    }
   });
 
-  addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+}
+
+// Enter on a control reached from the keyboard presses that control. One that only kept the
+// focus after a mouse press lets go of it, or the key would press it again. `:focus-visible`
+// cannot tell them apart here, since a browser turns it on for the key being asked about.
+const CONTROLS = "button,a[href],summary";
+let pressedControl = null;
+function wirePressedControl() {
+  addEventListener("pointerdown", (e) => { pressedControl = e.target.closest?.(CONTROLS) ?? null; }, true);
+  addEventListener("focusout", (e) => { if (e.target === pressedControl) pressedControl = null; });
+}
+
+function enterIsTheControls(e) {
+  const control = e.target.closest?.(CONTROLS);
+  if (!control) return false;
+  if (control !== pressedControl) return true;
+  e.preventDefault();
+  control.blur();
+  return false;
 }
 
 async function boot() {

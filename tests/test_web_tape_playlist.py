@@ -15,6 +15,7 @@ from ripdoctor.config.settings import Settings
 from ripdoctor.core import filing as F
 from ripdoctor.core import playlist as P
 from ripdoctor.core import tape as TP
+from ripdoctor.integrations import importer as IMP
 from ripdoctor.store import archive as AR
 from ripdoctor.store import playlists as S
 from ripdoctor.store import tapes as T
@@ -30,6 +31,16 @@ from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed, settle_al
 from tests.test_web_tape_file import Beet, cut_tape, file_it, holds, pinned
 from tests.test_web_tapes import a_service, a_tape_runner, save_list
 
+
+@pytest.fixture(autouse=True)
+def tape_stays_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These are about a tape before it archives, so its last step is left out here.
+    `tests/test_web_tape_archive.py` is about that step."""
+    monkeypatch.setattr(
+        TX, "archive_if_resolved", lambda *_a, **_k: {"archived": False, "why": ""}
+    )
+
+
 KEYS = (
     "title",
     "artist",
@@ -41,6 +52,25 @@ KEYS = (
     "mb_albumid",
 )
 FORMAT = "\x1f".join(f"${k}" for k in KEYS)
+
+
+def every_row(path: object, release: str) -> str:
+    """Beets' answer to being asked for every row: one album, this file."""
+    return "\x1f".join(
+        (
+            "T",
+            "A Band",
+            "A Record",
+            "3:00",
+            str(path),
+            "",
+            "1",
+            release,
+            "A Band",
+            "",
+            "",
+        )
+    )
 
 
 class Library(Beet):
@@ -61,8 +91,9 @@ class Library(Beet):
 
     def _ls(self, args: tuple[str, ...]) -> Result:
         said = args[args.index("-f") + 1]
-        pinning = args[args.index("-f") + 2].startswith("album::")
-        if pinning or not said.endswith("$mb_albumid"):
+        query = args[args.index("-f") + 2 :]
+        pinning = bool(query) and query[0].startswith("album::")
+        if not query or pinning or not said.endswith("$mb_albumid"):
             return super()._ls(args)
         assert said == FORMAT
         self.asked.append(args)
@@ -693,7 +724,7 @@ def an_album_service(tmp_path: Path) -> tuple[Service, Taking]:
     filed_at.parent.mkdir(parents=True)
     filed_at.write_bytes(b"a")
     runner = Taking(service.layout.review_dir("album"), installed={"beet"})
-    runner.expect("ls", stdout=f"A Record\x1f{filed_at}\n".encode())
+    runner.expect("ls", stdout=every_row(filed_at, "m").encode())
     service.runner = runner
     return service, runner
 
@@ -718,7 +749,8 @@ def test_an_album_import_with_no_tapes_sends_beets_nothing_new(tmp_path: Path) -
     done = import_album(service)
     assert not done["error"]
     ls = [c for c in runner.calls if "ls" in c]
-    assert ls and all(c[c.index("-f") + 1] == "$album\x1f$path" for c in ls)
+    asked = {c[c.index("-f") + 1] for c in ls}
+    assert ls and asked <= {IMP._COPY, "$album\x1f$path"}, asked
     assert not [n for n in done["result"]["notes"] if "playlist" in n]
 
 
@@ -733,7 +765,13 @@ def test_a_finished_album_import_rebuilds_a_tapes_playlist_and_notes_it(
     moved.write_bytes(b"a")
     row = "\x1f".join(["One", "A Band", "A Record", "0:05", str(moved), "", "", ""])
     runner.replies.insert(
-        0, (lambda a: "$mb_trackid" in " ".join(a), Result((), 0, row.encode(), b""))
+        0,
+        (
+            lambda a: (
+                "$mb_trackid" in " ".join(a) and "$albumartist" not in " ".join(a)
+            ),
+            Result((), 0, row.encode(), b""),
+        ),
     )
     done = import_album(service)
     assert not done["error"] and done["result"]["tracks"] == 1
@@ -786,7 +824,12 @@ def test_a_precut_album_still_succeeds_when_the_rebuild_raises(
     service.runner = (
         Moving(staged, installed={"beet"})
         .expect(lambda a: "import" in a, stdout=MATCH)
-        .expect("ls", stdout=f"A Record\x1f{lib}/01 One.flac\n".encode())
+        .expect(
+            "ls",
+            stdout="\n".join(
+                every_row(f"{lib}/{n}.flac", MBID) for n in ("01 One", "02 Two")
+            ).encode(),
+        )
     )
     upload_album(service, an_album())
     lib.mkdir(parents=True)
@@ -797,7 +840,12 @@ def test_a_precut_album_still_succeeds_when_the_rebuild_raises(
         raise RuntimeError("the rebuild fell over")
 
     monkeypatch.setattr(TX, "rebuild_all", breaks)
-    body = post(build(service), "/api/precut/take", service, {"mbid": MBID}).json()
+    body = post(
+        build(service),
+        "/api/precut/take",
+        service,
+        {"mbid": MBID, "duplicates": "keep"},
+    ).json()
     assert not body["error"], body["error"]
     assert (
         "playlists were not rebuilt: the rebuild fell over" in body["result"]["notes"]

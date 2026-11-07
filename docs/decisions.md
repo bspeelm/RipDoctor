@@ -1417,6 +1417,11 @@ Naming the side, the number of tracks, the catalogue total against the measured
 span, and the two ways out — another release, or an ear-set boundary — is a
 finding somebody can act on.
 
+It names the track that actually has no room, rather than calling it the last one, and
+blames what is responsible. With boundaries held it names those tracks; a catalogue that
+fits but gaps that misled it say so; only a total that overruns the side blames the
+release's durations.
+
 ## ADR-046 — a record can have its sides in two places at once
 
 **Status:** accepted. Set by the author, 2026-09-08.
@@ -1749,6 +1754,18 @@ acknowledges a duplicate is then asked what to do with it, because replacing,
 keeping both and merging are three different intentions and none of them is
 safe to assume.
 
+**Merge says what it does, and does only that.** Measured on 2.1.0, `A`, `M` ran out of input
+at the second apply a merge asks for, so a pinned Merge filed nothing, and with no release `M`
+meant keep both: lookup off has no step that acts on it, so a second album row, in a folder
+`Album [2]` under `%aunique`, and the owned tracks byte-identical. So with no release Merge is
+not offered and is refused, because the dialog cannot tell a person what beets will not do. With
+one it answers `A`, `M`, `A` when every row of the album is that release, and says that wrote
+their tags again. Beside another edition it joins that release's row by hand, as ADR-063 does for a
+tape, and those tracks do not change. With another edition held and none of this release, it
+refuses before anything runs, because merging renames, renumbers and retags it: Keep both is the
+way in. A release titled otherwise than the plan can hide an edition from that check, so with
+nothing held the answer to a question nobody foresaw is Skip. The ceiling moves 12,635 → 12,700.
+
 **An empty release id means no release.** The route read the dialog's field and
 fell back to the spec when it was blank. A first pass writes a release into the
 spec, so after one has run the field could not be cleared — clearing it put the
@@ -1802,6 +1819,17 @@ will do; it names the sides being replaced, and the confirmation says the
 earlier take is kept until the new one reads back and then goes. A pool that
 silently doubles and one that silently does not are both worse than one that
 says which.
+
+**The gate has to prove that premise, and for a while it did not.** It counted rows, and
+a side captured again leaves the earlier import counted in full: measured in a browser,
+rows read `From an earlier capture`, the rail read `Ready`, and pressing it replaced the
+only capture those tracks were cut from. So a successful import records in
+`<slug>.filed.json` which capture each side's tracks came from, as the size and time stamp
+the plan uses, and a raw side passes only on matching it. A plan on another capture shuts
+the gate as well. With no record at all, a side differing from its archived copy shuts it
+and a side with no archived copy passes, so a record imported before this can still be
+archived the first time. The way through is the ordinary one: cut this capture and import
+it over them (`test_a_re_rip_the_library_was_not_cut_from_cannot_cost_the_earlier_capture`).
 
 **`keep_superseded` is there for the other case.** Comparing two cartridges, or
 keeping a first pressing's capture, is a real reason to want both. It is off,
@@ -1976,6 +2004,34 @@ over is named, because that is what a player will show.
 without the importer detecting a duplicate at all, and that remains open. This
 is the case that is understood: the duplicate was detected, the answer was
 correct, and the promise made to the person was not kept.
+
+**A replace removes the record it names, and nothing else.** It selected with `album:<title>`,
+a substring over every artist. Measured on 2.1.0, replacing `Band A - Blue` deleted `Band B - Blue`
+and `Band C - Blue Skies`, audio and rows, and replacing an artist with nothing filed did the same.
+A release id of `e` deleted an unrelated album and then filed nothing. And beets' own `R` deleted
+the audio of every album of that artist and name: another edition went on a pinned Replace, with no
+tick, and on an album that arrived cut. That is not what this record said of `R` above, which was
+that it leaves the audio; 2.8.0 was not measured again. So `R` is never sent, and every selection is one function in core over every row: the whole release id, or
+with none the album artist and album, folded. `filed` shows the dialog what that holds, and a
+replace removes what that holds, by each row's exact path. Nothing exact is refused with nothing
+deleted, and so are rows of several releases under one name, since only a release says which is
+meant. `locate`, `stale` and the archive gate read the same selection: a gate fed another album's
+rows could have cleared raw sides on the strength of them. A pinned Replace goes by the id alone, so
+it takes every album row of that id in any folder, and no other edition's. An album that arrived
+cut has no plan, and no person ticked anything, so finding none of its release there is not a
+refusal. The ceiling moves 12,730 → 12,830.
+
+**The folders it empties go too.** Measured on 2.1.0, a replace removed the files and left the
+folders: `Album [2]` under `%aunique`, and the old artist's folder when a record came back under
+another name. So once the import has run, the folders those files were in, and those above them
+up to the root, are removed as far as each is empty. Only `rmdir` does it, so a folder holding
+anything else stays, and so does one this did not empty. The ceiling moves 12,700 → 12,730.
+
+**Its covers go with it.** beets leaves a replaced album's cover behind, and each Replace that finds
+one numbers the next. So the row's own `artpath` and the numbered siblings of that name beside it
+are held and deleted with the audio, unless another album row names them. A folder that still holds
+another album's audio keeps its siblings, since nothing says whose they are
+(`test_in_a_folder_with_another_album_s_audio_only_the_row_s_own_cover_goes`).
 
 ## ADR-061 — a side can be placed from the catalogue alone, when it is asked for
 
@@ -2429,9 +2485,29 @@ existing files byte-identical and made a second album row, with its own cover an
 gain, in the same folder unless the library's path format has `%aunique`, and a track
 number from its edition that may match one beside it. That is said on the song's outcome,
 which does not count the entries, since it reads tracks and not album rows. Each later edition
-adds another entry, as does a later song of an edition held beside another, because merging
-there would take in both. Each entry fetches its own cover, because a shared art path would
-have removing one entry delete the other's.
+adds another entry. Each entry fetches its own cover, because a shared art path would have
+removing one entry delete the other's.
+
+**A later song of an edition held beside another** joins that edition's row, and takes in
+nothing else. Merging cannot do it, because merging would take in both. So the import keeps both
+with fetching off, since the row it arrives on is about to go and a cover fetched for it would
+stay behind as a file nothing names. Then `modify album_id` moves that row's tracks to the
+release's oldest row with `-M -W`, the row left empty is removed, and album gain is computed again
+for that row alone. Measured on 2.1.0 with both editions in one folder: the other edition stayed
+byte-identical over three filings, 18 tracks stood on 2 album rows, no cover file was added, the
+new song took the row's art, and its siblings' only change was their album gain. Only the rows of
+that release are named, and `remove -a` forgets whatever is on the row, so a row is removed only
+once it is asked and found empty. A row of the release in another folder is left apart and said,
+and with paths that could part them, the import goes beside as any other edition does. A kill
+between the two steps leaves an empty row, which `beet ls -a -f '$path'` crashes on until the next
+filing of that release clears it, and a kill before them leaves a separate row a retry joins.
+A row that will not join leaves the song filed, and says so. Earlier separate rows of the release
+join at that point too, since they are that release.
+
+The other way to make beets' own merge do this does not work. Stamping the row with an `album_id`
+attribute and setting `duplicate_keys` to it did find only that row, once. On a second try it
+crashed with `empty album for album id` and left the album's tracks with no album row at all.
+The ceiling moves 12,600 → 12,620 for joining a row, and retires nothing.
 
 Adding `mb_albumid` to beets' `duplicate_keys` looks like the way out and is not. Measured on
 2.1.0, beets builds the question's query from the match, whose release id is called `album_id`,
@@ -2458,6 +2534,18 @@ delete the filed audio. A `duplicate_action` in a person's beets configuration a
 the question before stdin is read, and `remove` deletes the filed album, on beets 2.1.0
 and 2.14.0 alike, so the override forces `duplicate_action: ask` for tape imports and
 album imports both.
+
+**A library gone from under its mount files nothing.** A systemd mount requirement holds
+at service start only, so a mount that drops later leaves the root an empty directory that
+beets files into without complaint: the song said Filed, a playlist was written, and the file
+vanished when the mount came back. On a record it was worse, measured on 2.1.0: replacing asked
+beets to forget rows it could not see, and 14 rows became 2. So before any import, on a tape,
+a record and an album that arrived cut alike, a root with nothing in it is checked against
+beets' rows under it. Rows there mean off its mount, and nothing runs; none means a library
+filing its first album. Only a root with nothing in it pays for listing the rows. A song already
+sent to beets keeps that mark, since its row may be there when the mount returns. A root holding
+anything at all passes, so a stray file on a bare mount point defeats this, and a mount dropping
+after the check is not caught. A Tagger install has no rows to ask.
 
 **An owned song is not imported.** This check is required, not an optimisation: one
 experiment reported a merged copy of an owned song silently filed as another track,
@@ -2507,7 +2595,13 @@ file and its album row's cover alone. A folder it joined may hold what is not th
 change, so it only gains what it lacks of the directory mode, and keeps its setgid; a record's
 import still sets the whole folder, because the whole folder is that record.
 The document says which songs were handed to beets, so one found in the library after
-a restart is finished the same way. A song the tape merely found already owned is left
+a restart is finished the same way, and more. An import killed once it has moved a song in has
+not reached album gain, which measured left a merged album's siblings at their old gain, 23.95
+dB where a merge that finished gave 8.68. So a recovered song of a release also has that
+release's rows joined, and album gain computed for the album row it is on, the way a merge would,
+once for the row whichever of its songs comes back first. That rewrites only that row's files, and
+their modes come back. A failure is said on the song. A from-list run writes no album gain in the
+first place, so it has none to refresh. The ceiling moves 12,620 → 12,635 for this. A song the tape merely found already owned is left
 as it was found, modes and all: that album is not this tape's to change.
 
 **A filed album with no cover says so.** beets files a release the art archive has nothing
@@ -2609,3 +2703,279 @@ wherever it was sent from.
 **Not included.** Recording a physical cassette through capture. The document
 does not assume a tape's audio came from an upload, so this stays possible, but
 no capture work is part of this.
+
+## ADR-064 — a track placed from the catalogue is heard before it is cut
+
+**Status:** proposed, awaiting the author's acceptance.
+
+**The argument against, first: a gate on a button proves a press, not a listen.**
+Nothing here can tell whether anybody heard the boundary. `Checked` writes "by ear"
+into the plan on the strength of a key, and a person told to press it once a track
+before they may cut will learn to press it. That turns a warning they could read
+into a record that says something untrue. The block is also stricter than the
+failure it answers: north-star's failure is a cut on the music that nothing in the
+interface suggested, and a forced row already says so in amber. They asked for
+forcing in the first place (ADR-061), and a wrong cut destroys nothing, since the raw
+side outlives it.
+
+What survives that is the cost on each side. Pressing one key on each doubtful
+track, with the track selected and the tick clip a key away, is small. A cut from
+arithmetic that nobody heard is found out after tagging and filing, or not at all,
+and a warning is exactly what gets read past on the tenth record. The plan's claim
+is the person's own, and if they make it falsely it is theirs. Where this goes wrong,
+it goes wrong as a boundary a person vouched for, which is the same trust the rest of
+the program already places in them.
+
+**What ADR-061 left open.** It said a forced mark lives on the track, that moving the
+boundary clears it, and that the boundaries that matter are still set by a person. It
+did not say whether a marked track could be cut, so it could. And moving was the only
+way to clear a mark, so somebody who listened and found the boundary right had to
+nudge it off and back to say so, which reads as "set by hand" and is untrue.
+
+**Why now.** The record page's Boundary column has to say who settled each track, and
+its rail has a step for checking. Both need the state on the track, and once the state
+exists, leaving Cut open past it means the rail says "2 to check" over an enabled
+button. Tapes already holds a song to the same standard.
+
+### The field
+
+A plan track carries one optional field, `settled`: `hand` for a boundary a person
+moved or placed, `ear` for one they left where it was and heard to be right. It is
+left out of the document when absent, so a plan from before it loads unchanged and
+reads as the fit's, or the catalogue's if it is `forced`. The spec carries it too. A
+save makes every edge in the spec ear-set, so the spec's edges cannot say which ones
+a person meant.
+
+It is per track, not per edge. Moving a track's end settles its start as well, which
+is what a save has always done to both.
+
+**What settling does.** It ends the doubt in any document: `forced` beside `settled`
+reads as not forced, and a value nobody knows reads as absent, so a typo cannot clear
+a doubt.
+
+**A first pass holds what is settled.** Run again used to start from the catalogue and
+replace every boundary behind one confirmation, which is the thing the program says
+never happens. It now pins each settled track, matched by side and number, and fits
+around it, and a found end stops at a settled start rather than overlapping it. A
+settled track the new release has no place for refuses the pass by name. Dropping it
+would discard a judgement nobody asked to discard; removing the track and saving is
+how to ask.
+
+**A settled time is a position in one capture.** On another it points at different
+music, so a re-rip ends the judgement, and a first pass does not hold it. Each plan side
+records the capture its times are on, as `audio`: the size and modification time the
+cache already keys a side's measurements to. That stamp can be wrong in one direction
+only. A copied or touched file reads as replaced and a mark is let go, by name; nothing
+reads as the same capture that is not. A rip, an upload and a kept partial all write a
+new file, so none of them has to remember to say so, and neither does a file dropped in
+by hand. The archive's copy keeps its stamp, and when a truncated side is repaired on the
+way the plan follows it, because that changes the file and not the music.
+
+Holding is therefore by capture. A first pass holds marks on a side whose stamp matches.
+It lets go of marks on a side captured since, on a side no longer there, and on a plan
+that never said which capture it was on, since those can only be branch-era documents and
+holding one is the hazard. Its report names each track and the reason.
+
+**The way out of a mark.** On a capture that is gone, nothing has to be done: a first
+pass lets it go and says so, and Align carries it while the side is unsaved and the old
+capture is in the archive.
+On the same audio a person can move the track, remove it and save, or start over: First
+pass offers an unticked box, `also replace the boundaries I set`, with the number of
+tracks, and only there does a fit go over what they set. It is the one way past a mark,
+since a person who wants their own judgement gone is the only one who gets to say.
+
+**A first pass saves first.** The server holds what the saved plan marks, so a boundary
+moved a moment ago and not saved would be fitted over and lost when the page reloaded. It
+saves for itself, as Cut does.
+
+**Before anything is run,** a replaced side's rows read `From an earlier capture`, in
+amber, and the First pass step says so. This is the page refusing to call an old time
+`Set by you` or `Fitted to gap`.
+
+**Cut refuses those rows.** They are positions on audio that has gone, so a cut from them
+lands wherever those numbers happen to fall on the new capture. `POST /api/split` answers
+409 naming the side and the tracks, judged against what is on disk rather than what was
+saved, and the rail's Cut step waits with the same ways out. It does not matter that the
+record is already filed: a re-rip of a filed record is the usual way here.
+
+Nothing about this may be a dead end, and somebody can arrive having already moved
+boundaries on the new capture. So a track they moved is theirs and is never named, a first
+pass holds it and fits the rest. `Checked`
+clears a row as well, because a time can turn out right on the new capture and a record with
+no catalogue entry and no archive has nothing else short of nudging every boundary. A press
+on such a row is a claim about what is there now, and the server can tell it from a stale
+tab's old mark: the page only says `earlier` after the re-rip, so `earlier` and `ear`
+together cannot be left over from before it.
+
+**Saving cannot launder an old mark.** A save that moves or checks no boundary on a side leaves
+that side alone: its stamp, its times and its marks stay as they were, and only the words change.
+One that does moves the side's stamp to the capture on disk, so a time unchanged from the plan it
+replaces is marked `placed: earlier`, loses its `settled`, and is named in the reply. A time that
+differs was set on what is there now, and is the person's. The page never says which capture a plan
+is on; the server does. This goes side by side: a nudge on one side says nothing about another.
+
+**Aligning** carries times from the archived capture onto the new one, so it is offered and
+named only for a side still stamped with the old one, and refuses one a boundary was moved or
+checked on. Such times
+would be moved by a transform that was never about them, a person's included, and running it
+twice used to do exactly that. A side saved over is not a dead end: a first pass, `Checked`
+after listening, and moving the boundary all remain, and the refusals and the rail name those
+(`test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain`).
+
+### The refusal
+
+`POST /api/split` refuses with a 409 while the saved plan has a forced track, naming
+each one. The rule is `cut_refusal` in `core/plan.py`, so it is tested with no audio.
+The server reads the saved plan after the page has saved for itself, so Cut still
+never waits on unsaved changes, and a check made a moment before pressing it counts.
+
+**What is not refused.** Tick clips, which are how a doubt gets heard. Import, because
+files cut before this existed are already judged. `ripdoctor split` on the command
+line, which takes a plan by path and has no `Checked` to offer; a refusal there would
+send somebody to hand-edit the document to get past it.
+
+**A track placed by length is said to be, and does not block.** A fit can find no gap
+near a boundary and place it from the catalogue's arithmetic, on a side that otherwise
+fits. Its delta is zero by construction, the shape ADR-061 marked `forced` for, and it
+used to read `Fitted to gap`, which was false.
+
+So a fit records what each track rests on, in one more optional field: `placed` is `gap`
+or `length`. A boundary belongs to both tracks that meet on it, so the track after one
+with no gap is `length` as well, through its start. The page says `Placed by length` in a
+quiet amber and the Check step names them.
+
+`Checked` works on it, and records that it was heard: moving the boundary and moving it
+back must not be the only way to say so. Like any check it is held by a later first pass.
+
+It does not stop Cut. A first or last track with no gap beside it is ordinary on a real
+pressing, and a block that fires on most records teaches people to press Checked without
+listening, which spends the one thing that makes the forced block worth having. The
+catalogue-placed block stays for what it was for: a side whose whole placement was
+refused and then asked for.
+
+A plan from before the field cannot know, and a track whose edges were handed to the fit
+is not something the fit found. Those are absent and read `Fitted`, which is true of
+both and claims no gap.
+
+### A boundary moved past its neighbour
+
+It does not move, and says why, as on Tapes. A drag, a nudge and a typed figure that would
+carry a track's edge past the next track's stay where they were, and the status line names
+the track in the way and when it ends or starts. Clamping it to that edge would be the program
+placing a person's boundary for them. A crossing move is rarely what was meant: it reads as one
+of two edges being fixed in turn, and moving the other one first is always possible, since an
+edge moved away from its partner passes nothing.
+
+Two markers on one spot stay separable with the mouse from either side: the side the pointer
+is on says which, and only a press dead on it falls to the selected track's.
+
+An overlap already in a saved plan is still said, not hidden. The row reads `Overlaps 3` in red,
+the rail's Cut step waits with the reason, and a move in the direction that undoes it is allowed
+at every step, including one that leaves it overlapping less. A save is allowed, because a save
+loses nothing.
+
+`GET /api/archive` answers 409 on such a plan and that is the overlap: the gate validates
+the plan it would gate on (`test_the_archive_gates_409_is_the_overlap_saying_so`). The
+rail says what it is waiting on instead of its usual line.
+
+### Edits save by themselves
+
+As on Tapes, and for the same reason: a page that holds edits a person has to remember to keep
+is a page that can lose them. Every edit saves once as it lands: a field on leaving it, a drag on
+release, a nudge after half a second so a held key is not a save a press, and Add, Split, Remove,
+Checked and the album fields at once. So there is no Save, no Revert, and no prompt on leaving; a
+page left straight after an edit sends it as it goes.
+
+The argument against is the one this section answers: a mistaken edit is now on disk at once, with
+no Revert to take it back. What survives it is that an edit is one boundary or one word, the row
+says what it is, and moving it back is the undo. A cut, an import and an archive are still pressed.
+
+**A save cannot look like it landed.** The pill reads `Saving`, `Saved` or `Not saved`, and a failed
+one stays on screen with its reason and a retry, what was typed stays where it is, and Cut, First
+pass and Import stop rather than read a plan behind the page. Saves go one at a time, and whatever
+changed during one goes next, so the last state lands
+(`test_a_failed_save_keeps_the_edit_says_why_and_stops_a_caller`,
+`test_saves_go_one_at_a_time_and_the_last_state_lands`). Reopening the record does not cost an
+edit: what is unsaved goes first, a refusal leaves the page as it is, and an edit made during the
+reload keeps its save (`test_an_edit_landing_as_a_reload_finishes_is_saved_and_not_dropped`,
+`test_an_edit_during_the_read_goes_first_and_the_record_is_read_again`,
+`test_a_reload_during_a_busy_save_keeps_the_edit_and_shows_nothing`).
+
+**A job in progress.** Whatever it is reading must not move under it, so a boundary, a track added
+or removed and a check are refused while it runs, and say so. Text waits: the server answers a save
+during a job with `busy`, the pill says `Waiting to save`, and it goes when the job ends. A prepare
+reads only audio, so a save goes beside one.
+
+**Two tabs.** A save names the digest of the plan it was made from, as a tape's list does, and a
+different one is refused with nothing written. A tab with nothing in hand reloads what changed, a
+tab with an edit in hand is told and offered what is saved, and neither overwrites the other
+(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`). A page stops looking while
+it is hidden, playing or showing a dialog, so Cut names the digest too and is refused the same way,
+with `Load what is saved` on the rail
+(`test_a_cut_from_a_page_behind_the_plan_is_refused_and_nothing_is_cut`). Import asks first, from the
+page (`test_an_import_from_a_page_behind_the_plan_stops_and_says_so`).
+
+**What Revert was also for.** A side finished by a rip showed up by pressing it. The page now asks
+every few seconds what is on disk, and a new capture or a changed plan reaches a page with nothing
+in hand, with nothing pressed.
+
+**Align.** Moving or checking a boundary puts a re-ripped side on the new capture, which ends Align
+by the rule above, so one nudge closes it, and a title or a year does not. The rail says so while it
+is offered, and the moment it closes the status line says so once; the row moved reads `Set by you`
+and the others stay `From an earlier capture`.
+
+### The keys
+
+`A` hears a boundary and `↵` accepts on both Cut and Tapes. `S` splits on Cut and does
+nothing on Tapes, where Skip is `X`. A habit carried from one page must not skip a song
+on the other. An arrow or `−`/`+` moves a marker only once it is chosen: by pressing
+it, its Start or End cell, or `E`. Selecting a track arms nothing, because a nudge sets
+a boundary for good.
+
+### The ceiling
+
+The ceiling moves 12,211 → 13,200 for the fields, the first pass's new rules, the
+refusals, the exact selection a replace now removes by, and the archive gate's proof
+of which capture was filed, and retires nothing. The budget counts Python, so the page's own growth is
+not in that number. The trim ADR-036 promised is still owed. The comment ratio does
+not move.
+
+## ADR-065 — a replaced copy is held until the new one is proved
+
+**Status:** accepted. Set by the author, 2026-11-06.
+
+A replace deleted the filed copy and then ran the import, so a declined or dead import left
+nothing. The files now move aside inside the library, in `.ripdoctor-replacing/`, with their rows
+kept; the import runs; the new rows and files are proved; and only then are the old ones forgotten
+by id and deleted. Any failure puts them back, and a manifest lets a restart finish or undo what a
+kill interrupted. A copy that cannot go back stops the next import rather than being written over.
+The ceiling moves 13,200 → 14,000 for this and what follows in this section.
+
+### An import archives, as its last step
+
+There is no Archive button and no dialog. Every side is recorded before any import, so archiving
+only ever belongs there. The job that files a record then runs the same gate and the same verified
+`put_away`, and says both outcomes. What gets past the gate gets archived, and what does not stays
+in raw with the reason on the rail's last step. An import that stands is never rolled back, whatever
+archiving does. Only then does one action show, `Archive again`, which goes through the same route
+and refusals, and which is also how a record filed before this reaches the archive. Import and that
+route are refused while the recorder holds this record, since raw is what archiving clears.
+
+**The argument against: a wrong import now moves raw straight away,** with no moment to notice. What
+makes that acceptable is that nothing is lost by it: the sides sit in the archive, read back, and a
+record can be cut again from there and replaced. That recovery is not yet proved by a run.
+
+**An earlier capture is moved aside and kept here, in `_superseded/`.** ADR-055 unlinked it after
+read-back because a person had pressed Archive, having seen it named. Nobody presses anything now,
+so nothing this does may be final. That costs the doubled archive ADR-055 set out to avoid, on
+re-rips, and `keep_superseded` no longer changes what happens. Cuts from an earlier capture do not
+archive at all: the proof written at import is the gate's, as ADR-055 has it
+(`test_cuts_from_an_earlier_capture_never_archive_over_it`).
+
+**A tape does the same.** The job that files or writes its playlist archives it if every song is
+resolved, reading the uncut file back before anything clears. A skipped song holds nothing up, and
+one not resolved stays named in the step. Filing writes the playlist already, so most tapes archive
+in the File job. An archived tape stays as it is, so the chance to change anything ends there.
+
+A merge holds more rows than its plan, which is expected, so the proof says it was one and the gate
+lets that through.

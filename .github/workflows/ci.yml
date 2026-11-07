@@ -44,7 +44,10 @@ jobs:
       # flac carries metaflac; beets arrives as a dependency of the package.
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg flac
       - run: pip install -e ".[dev]"
-      - run: python -m pytest -q --require=needs_ffmpeg --require=needs_beets
+      # Node is on the runner already and is not this project's dependency. The
+      # flag makes its absence a failure here, where anywhere else it steps aside.
+      - run: python scripts/check_js.py --require
+      - run: python -m pytest -q --require=needs_ffmpeg --require=needs_beets --require=needs_node
 
   # Python's failure mode is not a compile error, it is a wheel that will not
   # install. Build it, check it, install it clean, and run the binary.

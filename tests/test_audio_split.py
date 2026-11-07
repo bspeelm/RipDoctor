@@ -7,12 +7,20 @@ nothing at all.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner, Result, ToolFailed, ToolMissing
+from ripdoctor.audio.runner import (
+    FakeRunner,
+    RealRunner,
+    Result,
+    ToolFailed,
+    ToolMissing,
+)
 from ripdoctor.audio.split import (
     CLIP_RATE,
     EOF_MARGIN,
@@ -29,6 +37,7 @@ from ripdoctor.audio.split import (
     verify_argv,
 )
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack
+from ripdoctor.work import punch
 
 
 def track(n: int = 1, start: float = 15.35, end: float = 167.15) -> PlanTrack:
@@ -43,6 +52,37 @@ def a_cut(**kw: float) -> Cut:
 
 def flag(argv: list[str], name: str) -> str:
     return argv[argv.index(name) + 1]
+
+
+needs_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="needs a real ffmpeg"
+)
+RATE, FRAME = 44100, 4096
+MIN_FLAC_FRAME = 16
+
+
+def sample_at(ms: int) -> int:
+    """Half a sample rounds up, as ffmpeg's seek does; `round` would go to even."""
+    return (ms * RATE + 500) // 1000
+
+
+def starts_leaving_a_sliver(seconds: int, step_ms: int) -> list[int]:
+    """Times on a grid, in ms, that fall under FLAC's minimum from a frame's end."""
+    ends = (k * FRAME for k in range(1, seconds * RATE // FRAME))
+    times = ((end, end * 1000 // RATE // step_ms * step_ms) for end in ends)
+    return [ms for end, ms in times if 1 <= end - sample_at(ms) < MIN_FLAC_FRAME]
+
+
+def a_side_of_known_frames(runner: RealRunner, path: Path, seconds: int) -> Path:
+    tone = f"sine=frequency=440:sample_rate={RATE}:duration={seconds}"
+    argv = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", tone]
+    runner.run([*argv, "-c:a", "flac", "-frame_size", str(FRAME), str(path)]).require()
+    return path
+
+
+def decoded(runner: RealRunner, path: Path) -> bytes:
+    argv = ["ffmpeg", "-v", "error", "-i", str(path), "-f", "s16le", "-"]
+    return runner.run(argv).require().stdout
 
 
 # ------------------------------------------------------------- the cut
@@ -213,8 +253,58 @@ def test_the_album_flow_argv_is_exactly_what_it_was() -> None:
         "flac",
         "-compression_level",
         "8",
+        "-frame_size",
+        "4096",
         "out/01 Track 1.flac",
     ]
+
+
+def test_the_encoder_frame_size_is_never_left_to_the_first_frame() -> None:
+    for argv in (
+        cut_argv(a_cut()),
+        punch.cut_argv("side.flac", 1.0, 2.0, "o.flac"),
+        tick_argv("side.flac", at=9.0, dest="c.flac"),
+    ):
+        assert flag(argv, "-frame_size") == "4096"
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("build", [span_argv, punch.cut_argv])
+def test_a_cut_starting_just_before_a_source_frame_ends_keeps_every_sample(
+    tmp_path: Path, build: Callable[[str, float, float, str], list[str]]
+) -> None:
+    """The trim leaves a first frame of a few samples, under FLAC's minimum.
+
+    The arithmetic finds starts that do that to a source of known frames, and
+    each must come out as exactly that stretch of the source.
+    """
+    runner = RealRunner()
+    source = a_side_of_known_frames(runner, tmp_path / "side.flac", seconds=6)
+    whole = decoded(runner, source)
+    starts = starts_leaving_a_sliver(seconds=6, step_ms=1)
+    assert len(starts) >= 8, "too few starts to exercise the fault"
+
+    for ms in starts[:8]:
+        dest = tmp_path / f"{ms}.flac"
+        runner.run(build(str(source), ms / 1000, ms / 1000 + 1, str(dest))).require()
+        first = sample_at(ms) * 2
+        assert decoded(runner, dest) == whole[first : first + RATE * 2]
+
+
+@needs_ffmpeg
+def test_a_clip_starting_just_before_a_source_frame_ends_is_still_written(
+    tmp_path: Path,
+) -> None:
+    """A clip's start has two decimals, so a coarser grid and a longer source."""
+    runner = RealRunner()
+    source = a_side_of_known_frames(runner, tmp_path / "side.flac", seconds=30)
+    starts = starts_leaving_a_sliver(seconds=20, step_ms=10)
+    assert len(starts) >= 4, "too few starts to exercise the fault"
+
+    for ms in starts[:4]:
+        dest = tmp_path / f"{ms}.flac"
+        runner.run(tick_argv(str(source), ms / 1000 + 4, str(dest))).require()
+        assert len(decoded(runner, dest)) == 8 * RATE * 2 * 2
 
 
 def test_a_stretch_seeks_before_the_input_and_re_encodes_exactly() -> None:

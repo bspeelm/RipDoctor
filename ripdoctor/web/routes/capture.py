@@ -390,6 +390,7 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(404, f"no side {side} in raw for {slug}")
         freed = where.stat().st_size
         where.unlink()
+        F.forget_side(layout, slug, where.name)
         forgotten = CACHE.forget(layout, slug, side)
         notes = [f"forgot {forgotten} cached files"] if forgotten else []
         if _forget(service, slug):

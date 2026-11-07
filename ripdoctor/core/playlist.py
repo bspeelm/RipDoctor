@@ -56,6 +56,7 @@ class State:
     note: str = ""
     at: float = 0.0
     archived: dict[str, Any] | None = None
+    archive_failed: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

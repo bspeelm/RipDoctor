@@ -163,9 +163,93 @@ def test_the_record_picker_cannot_set_the_header_width() -> None:
     assert rule, "no width rule for the record picker"
     assert "min-width:0" in rule.group(1), "it cannot shrink below its content"
     assert "max-width" in rule.group(1), "it can grow without limit"
-    assert re.search(r"header > button[^{]*\{[^}]*flex:none", css), (
-        "the header actions can be squeezed off the edge"
+    assert re.search(r"header \.tabs[^{]*\{[^}]*flex:none", css), (
+        "the tabs can be squeezed off the edge"
     )
+
+
+CAPTURE_WARNINGS = {
+    "rip-done": "the dropped-buffers warning, and what a finished capture wrote",
+    "rip-force-wrap": "the way past a device that does not look like the turntable",
+    "rip-force": "record from it anyway",
+    "rip-err": "anything a capture was refused for",
+    "up-err": "anything an upload was refused for",
+    "pc-err": "anything a pre-cut was refused for",
+    "punch-err": "anything a punch was refused for",
+    "orphans": "the interrupted capture card",
+    "rip-auto": "the auto-stop text and the warning from the capture itself",
+    "autostopdlg": "the question before an auto-stop fires",
+    "up-cancel": "Cancel on an upload",
+    "pc-cancel": "Cancel on a pre-cut upload",
+    "rip-autostop-hint": "the hint under the auto-stop box, and the 35-minute cap",
+    "punch-hint": "how to record a punch",
+    "meter-hint": "which bar to watch, and where to drop the needle",
+    "up-hint": "what an upload does and does not do",
+    "pc-hint": "that nothing is filed until asked",
+}
+
+
+@pytest.mark.parametrize(("name", "why"), sorted(CAPTURE_WARNINGS.items()))
+def test_every_warning_on_the_capture_pages_is_still_there(name: str, why: str) -> None:
+    """They protect a side, and a redraw is when things like this go missing."""
+    assert f'id="{name}"' in markup(), why
+
+
+def test_the_warnings_still_say_what_they_exist_to_say() -> None:
+    js = (STATIC / "app.js").read_text()
+    page = markup()
+    assert "this side has gaps in it and should be re-ripped" in js
+    assert "${st.overruns} DROPPED" in js
+    assert "record from it anyway" in page
+    assert page.count("35-minute hard cap") == 2, "the box's own title, and its hint"
+    assert "Stop &amp; encode" in page
+
+
+def test_the_meter_values_are_not_a_drawing_s() -> None:
+    """Read from the source so that no-node runs pin them too; test_page_logic runs
+    the module itself."""
+    ui = (STATIC / "ripui.js").read_text()
+    assert "export const FLOOR = -100;" in ui
+    for line in (
+        '{ lo: -120, hi: -68, label: "dead air / needle up"',
+        '{ lo: -68, hi: -60, label: "groove"',
+        '{ lo: -60, hi: -45, label: "quiet music"',
+        '{ lo: -45, hi: 0, label: "music"',
+        '{ lo: -120, hi: -92, label: "dead air"',
+        '{ lo: -92, hi: -72, label: "silent groove"',
+        '{ lo: -72, hi: -58, label: "arm-up rumble"',
+        '{ lo: -58, hi: -44, label: "quiet music"',
+        '{ lo: -44, hi: 0, label: "music"',
+    ):
+        assert line in ui, line
+
+
+def test_nothing_about_recording_reads_the_history() -> None:
+    """Drawing only. A capture costs a side if the wrong thing changes under it."""
+    js = (STATIC / "app.js").read_text()
+    drawing = re.search(r"let bandSeen = .*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert js.count("bandSeen") == drawing.count("bandSeen")
+    assert "api(" not in drawing and "postJSON(" not in drawing
+    assert "ripTimer = setInterval(tick, 500);" in js
+
+
+def test_a_replaced_punch_reports_what_the_replacing_said() -> None:
+    """It answers at once, so waiting on a job found the locate before it, and the line
+    read `was NaN, now NaN` and said the old take was kept at undefined."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function punchApply\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "postJSON(`/api/punch/${punchSlug()}/apply`" in body
+    assert "runJob" not in body
+
+
+def test_what_keeping_or_discarding_a_capture_did_outlasts_the_reload_it_causes() -> (
+    None
+):
+    """Reopening the record clears the status line, so the sentence was gone at once."""
+    js = (STATIC / "app.js").read_text()
+    for said in ("status(`salvaged side", "status(`discarded side"):
+        at = js.index(said)
+        assert js.rindex("await refreshAlbums(", 0, at) > at - 200
 
 
 def test_the_capture_controls_invent_no_rate_or_depth() -> None:
@@ -208,7 +292,7 @@ def test_the_tapes_view_fits_a_phone_and_keeps_every_control_reachable() -> None
     assert narrow, "nothing changes on a narrow screen"
     assert "#captureview{flex-direction:column" in narrow.group(1)
     assert ".ripform{width:100%}" in narrow.group(1)
-    assert css.index(".ripform{width:30rem") < narrow.start(), "the wide rule wins"
+    assert css.index(".ripform{width:26.25rem") < narrow.start(), "the wide rule wins"
     assert "#tapeview{display:block;overflow-y:auto;overflow-x:hidden}" in narrow.group(
         1
     )
@@ -393,7 +477,7 @@ def test_what_needs_a_waveform_waits_for_one_rather_than_throwing() -> None:
     """With none loaded, these reached into a side that was not there."""
     js = (STATIC / "app.js").read_text()
     for function, guard in (
-        ("tapeZoom", "if (!tpEd.side) return;"),
+        ("zoomBy", "if (!editor.side) return;"),
         ("stepDoubt", "if (!tape || !tpEd.side) return;"),
         ("tapeHearSilence", "if (tpEd.side) tpEd.fitRange("),
     ):
@@ -454,9 +538,9 @@ def test_the_toolbar_names_the_key_each_button_answers_to() -> None:
         ("tp-minus", ","),
         ("tp-plus", "."),
         ("tp-play", "Space"),
-        ("tp-hear", "H"),
-        ("tp-accept", "A"),
-        ("tp-skip", "S"),
+        ("tp-hear", "A"),
+        ("tp-accept", "&crarr;"),
+        ("tp-skip", "X"),
         ("tp-song", "Z"),
         ("tp-whole", "Z"),
     ):
@@ -464,8 +548,16 @@ def test_the_toolbar_names_the_key_each_button_answers_to() -> None:
         assert found and found.group(1) == key, button
     js = (STATIC / "app.js").read_text()
     keys = re.search(r"const TAPE_KEYS = \{.*?\};", js, re.S).group(0)  # type: ignore[union-attr]
-    for pair in ('k: "#tp-prev"', 'j: "#tp-next"', 'h: "#tp-hear"', 'a: "#tp-accept"'):
+    for pair in (
+        'k: "#tp-prev"',
+        'j: "#tp-next"',
+        'a: "#tp-hear"',
+        'Enter: "#tp-accept"',
+        'x: "#tp-skip"',
+    ):
         assert pair in keys
+    assert "#tp-hear" not in keys.replace('a: "#tp-hear"', "")
+    assert "s:" not in keys and "h:" not in keys
 
 
 def test_the_tape_page_keeps_its_looks_in_the_stylesheet() -> None:
@@ -773,13 +865,136 @@ def test_a_question_about_a_list_could_be_answered_from_a_row_that_never_asked_i
     assert "if (opening) tpListAsk = null;" in picked
 
 
-def test_two_markers_on_one_spot_could_not_be_told_apart_by_a_long_timeline() -> None:
+def test_two_markers_on_one_spot_are_told_apart_by_the_side_the_mouse_is_on() -> None:
     js = (STATIC / "editor.js").read_text()
     hit = re.search(r"\n  hit\(x, y.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "best && this.long ? this._tieBroken(x, reach, best) : best" in hit
+    assert "return best && this._tieBroken(x, reach, best);" in hit
     broken = re.search(r"\n  _tieBroken\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "this.sel?.track" in broken
     assert 'x > n.at ? "start" : "end"' in broken
+
+
+def test_song_names_and_doubts_are_drawn_on_both_pages_at_any_zoom_they_fit() -> None:
+    js = (STATIC / "editor.js").read_text()
+    names = re.search(r"\n  _names\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "room < NAME_ROOM" in names and "this.inDoubt(t)" in names
+    assert "Math.max(this.xOf(t.start), 0)" in names, "lost when zoomed inside a song"
+    assert "this.long" not in names
+    render = re.search(r"\n  render\(\).*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "this._names(c, L);" in render
+    page = (STATIC / "app.js").read_text()
+    assert "doubt: canCheck" in page
+
+
+def test_the_overview_is_coloured_by_song_and_marks_each_doubt() -> None:
+    js = (STATIC / "editor.js").read_text()
+    over = re.search(r"\n  _overview\(.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "SONG_HUES[i % SONG_HUES.length]" in over and "this.inDoubt(t)" in over
+
+
+def test_a_press_off_any_marker_chooses_its_song_and_arms_no_edge() -> None:
+    """A marker wins: `hit` is asked at the press, and this is only a press that found
+    nothing and did not pan."""
+    js = (STATIC / "editor.js").read_text()
+    assert "t.start <= this.playhead && this.playhead < t.end" in js
+    assert "if (song) this.onSong?.(song.number);" in js
+    assert js.index("const h = this.long &&") < js.index('mode: "pan"')
+    page = (STATIC / "app.js").read_text()
+    assert 'onSong: (num) => select(num, "start")' in page
+    assert 'onSong: (num) => tapeSelect(num, "start", false)' in page
+
+
+def test_a_short_touch_drag_sends_no_click_to_a_row_scrolled_under_it() -> None:
+    """#50, reproduced with touch events: a 10 px drag on song 60's marker saved, then
+    the tap's click landed on song 57's row, which Accept and Skip would then act on."""
+    js = (STATIC / "editor.js").read_text()
+    assert 'cv.addEventListener("touchend", (e) => {' in js
+    assert "if (e.cancelable) e.preventDefault();" in js
+
+
+def test_small_leftovers_after_a_library_returns_say_things_once() -> None:
+    """#51: `not there any more` twice in a row, a save error twice on the rail, and a
+    Playlist step that gave no sign Write again was what would clear it."""
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "const why = [...new Set([" in step
+    assert "started && (!p.outcome || stuck)" in step
+    assert "Write again once the library is there." in step
+    block = re.search(r"function releaseBlock\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "words !== t.filing.find((f) => f.number === song.number)?.note" in block
+
+
+def test_next_doubt_on_a_record_goes_over_all_the_check_step_counts() -> None:
+    js = (STATIC / "app.js").read_text()
+    doubts = re.search(r"function cutDoubts\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert ".filter(canCheck)" in doubts, "forced, earlier and by length, unsettled"
+    keys = key_listener()
+    assert "reviewNext(e.shiftKey ? -1 : 1)" in keys
+    assert (
+        "if (NUDGE_KEYS[e.key]) {" in js and "} else if (NUDGE_KEYS[e.key]) {" in keys
+    )
+    assert '$("#cut-in").onclick = () => zoomBy(ed, 0.5)' in js
+    assert '$("#tp-in").onclick = () => zoomBy(tpEd, 0.5)' in js, "one zoom, not two"
+    page = markup()
+    for key in ("cut-doubt", "cut-in", "cut-out"):
+        assert f'id="{key}"' in page
+    help_dialog = page[page.index('id="helpdlg"') :]
+    assert "the next doubt, on either side of a record" in help_dialog
+    assert "on a tape, the same as" not in help_dialog
+
+
+def test_there_is_no_save_to_press_and_nothing_to_be_prompted_about() -> None:
+    page, js = markup(), (STATIC / "app.js").read_text()
+    for gone in ('id="save"', 'id="revert"', 'id="cut-st-save"'):
+        assert gone not in page
+    assert "beforeunload" not in js
+    assert "railSave" not in js and "Unsaved changes" not in js
+
+
+def test_every_edit_saves_once_and_a_failure_stays_said() -> None:
+    js = (STATIC / "app.js").read_text()
+    head = re.search(r"function showCutHead\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for said in ('"Not saved"', '"Saving"', '"Saved"', '"Waiting to save"'):
+        assert said in head
+    assert 'failed ? "bad"' in head, "a failed save does not look saved"
+    assert "fail.why" in head and "#cut-save-retry" in head
+    nudge = re.search(r"function nudgeSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "markDirty(true, NUDGE_SETTLE)" in nudge, "a held key is not a save a press"
+    assert "markDirty(true, null)" in js, "a drag saves on release"
+    assert "{ doubt: canCheck," in js and "onDrop: cutEdgeDropped" in js
+    assert "$(id).onchange = () => markDirty();" in js, "a field saves on leaving it"
+    assert 'addEventListener("pagehide", saveOnLeaving)' in js
+
+
+def test_a_nudge_that_ends_align_says_so_as_it_happens() -> None:
+    js = (STATIC / "app.js").read_text()
+    said = re.search(r"async function saidSaved\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'alignWas && $("#realign").hidden' in said
+    assert "Align from archive is no longer offered" in said
+    assert "Moving or checking a boundary puts the side on this capture" in js
+
+
+def test_a_record_changed_on_disk_reaches_the_page_with_nothing_pressed() -> None:
+    """Revert was how a side finished by a rip showed up."""
+    js = (STATIC / "app.js").read_text()
+    noticed = re.search(r"async function noticeDisk\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "now.seen === S.meta.seen && now.captures === S.meta.captures" in noticed
+    assert "S.dirty" in noticed and "saver.running()" in noticed and "typing" in noticed
+    assert "setInterval(noticeDisk, 4000)" in js
+
+
+def test_a_job_refuses_what_it_is_reading_and_says_so() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "Not changed: ${S.job} is running" in js
+    for body in (
+        r"function nudgeSelected\(",
+        r"function typedEdge\(",
+        r"function removeTrack\(",
+        r"function checkSelected\(",
+        r"function splitAtPlayhead\(",
+    ):
+        fn = re.search(body + r".*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert "refusedByJob()" in fn, body
 
 
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
@@ -956,7 +1171,7 @@ def test_file_from_my_list_was_faint_on_a_row_where_it_was_the_way_forward() -> 
     options = re.search(r"function releaseOptions\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'wayForward ? "tiny" : "tp-quiet"' in options
     css = (STATIC / "style.css").read_text()
-    primary = re.search(r"\.tp-group button\.primary[^{]*\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    primary = re.search(r"\.tool-group button\.primary[^{]*\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
     assert "var(--accent)" in primary
 
 
@@ -966,7 +1181,7 @@ def test_a_reason_is_on_its_step_and_a_step_waiting_keeps_its_button() -> None:
     step = re.search(r"function stepBoundaries\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert ".title" not in step and "t.place_refusal) return tpStep" in step
     css = (STATIC / "style.css").read_text()
-    assert ".tp-step[data-kind=wait] .tp-acts{display:none}" not in css
+    assert ".step[data-kind=wait] .step-acts{display:none}" not in css
     playlist = re.search(r"function stepPlaylist\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert '"File written", name,' in playlist
 
@@ -1042,17 +1257,18 @@ def test_on_a_phone_the_rail_was_a_long_way_above_a_doubtful_song() -> None:
     """1,361 px of it, with nothing pointing to it. It is one line now, and stays."""
     assert 'id="tp-rail-bar"' in tape_markup()
     js = (STATIC / "app.js").read_text()
-    assert '$("#tp-rail").classList.toggle("open")' in js
+    assert 'railOpens($("#tp-rail"), $("#tp-rail-bar"))' in js
+    assert 'rail.classList.toggle("open")' in js
     css = (STATIC / "style.css").read_text()
     narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
-    assert "#tp-rail:not(.open) > :not(#tp-rail-bar){display:none}" in narrow
-    assert "#tp-rail:not(.open){position:sticky;top:0" in narrow
+    assert ".rail:not(.open) > :not(.rail-bar){display:none}" in narrow
+    assert ".rail:not(.open){position:sticky;top:0" in narrow
 
 
 def test_a_finger_needs_forty_pixels_on_the_toolbar_and_a_row() -> None:
     css = (STATIC / "style.css").read_text()
     narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
-    assert ".tp-group button{min-height:40px;min-width:40px" in narrow
+    assert ".tool-group button{min-height:40px;min-width:40px" in narrow
     for row_button in (".tp-moves button", ".tp-rel-quiet button", ".tp-ask button"):
         assert row_button in narrow
     assert "min-height:40px;min-width:40px}" in narrow
@@ -1087,3 +1303,582 @@ def test_text_waiting_on_a_job_was_also_called_unchanged_in_red() -> None:
 def test_a_row_s_other_ways_forward_are_quiet_and_still_readable() -> None:
     css = (STATIC / "style.css").read_text()
     assert ".tp-rel-quiet button.tp-quiet{color:var(--dim)}" in css
+
+
+def cut_markup() -> str:
+    page = markup()
+    start = page.index('<div id="cutview"')
+    return page[start : page.index('<dialog id="helpdlg"', start)]
+
+
+def test_the_record_s_rail_runs_in_the_order_the_work_does() -> None:
+    steps = re.findall(r'id="cut-st-(\w+)"', cut_markup())
+    assert steps == ["rip", "firstpass", "check", "cut", "import", "archive"]
+    js = (STATIC / "app.js").read_text()
+    assert f"const CUT_STEPS = {json.dumps(steps)};" in js
+
+
+@pytest.mark.parametrize(
+    ("step", "buttons"),
+    [
+        ("firstpass", ["firstpass", "realign"]),
+        ("check", ["cut-review"]),
+        ("cut", ["split"]),
+        ("import", ["import"]),
+        ("archive", ["archive-again"]),
+    ],
+)
+def test_a_moved_button_keeps_its_id_on_its_step(step: str, buttons: list[str]) -> None:
+    page = cut_markup()
+    start = page.index(f'id="cut-st-{step}"')
+    box = page[start : page.index("</section>", start)]
+    assert re.findall(r'<button type="button" id="([\w-]+)"', box) == buttons
+
+
+def test_the_header_is_the_tabs_and_the_record_picker() -> None:
+    page = markup()
+    head = page[page.index("<header>") : page.index("</header>")]
+    assert re.findall(r'id="(album-q|album)"', head) == ["album-q", "album"]
+    for moved in (
+        "firstpass",
+        "realign",
+        "split",
+        "import",
+        "archive",
+    ):
+        assert f'id="{moved}"' not in head
+    assert 'id="pipeline"' not in page
+    assert "renderPipeline" not in (STATIC / "app.js").read_text()
+
+
+def test_cut_saves_for_itself_and_no_rail_state_waits_on_a_save() -> None:
+    """Asking first is how three nudged boundaries once cut the old ones.
+
+    A track still to check does stop it, which is a different thing. ADR-064."""
+    js = (STATIC / "app.js").read_text()
+    split = re.search(r"async function split\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (S.dirty && !(await save())) return;" in split
+    step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    disabled = re.search(r'\$\("#split"\)\.disabled = (.*);', step).group(1)  # type: ignore[union-attr]
+    assert "dirty" not in disabled
+
+
+def test_the_rail_says_why_the_archive_gate_is_shut() -> None:
+    js = (STATIC / "app.js").read_text()
+    step = re.search(r"function railArchive\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "f.arc.why" in step and "f.arc.archive_failed" in step
+    assert "Not archived" in step
+
+
+def test_a_catalogue_placed_track_offers_review_and_the_rail_waits_on_it() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "forced: tracks.filter((t) => t.forced)" in js
+    assert '$("#cut-review").onclick = reviewNext' in js
+    step = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "|| !!f.forced.length" in step and "|| !!f.earlier.length;" in step
+    assert "Waiting on ${f.forced.length} to check." in step
+    assert step.index("f.forced.length && !f.imported") < step.index("if (f.review)")
+
+
+def test_every_page_keeps_the_status_line_and_the_console() -> None:
+    """They live in Cut's column, and the other pages write to them too."""
+    js = (STATIC / "app.js").read_text()
+    place = re.search(r"function placeShared\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#cut-msg").append($("#status"))' in place
+    assert '$("#tp-head").before($("#status"))' in place
+    assert '$("#app").append($("#logwrap"))' in place
+    assert "placeShared(mode);" in js
+
+
+def test_the_waveform_stays_in_view_while_the_tables_scroll() -> None:
+    page = cut_markup()
+    assert page.index('id="cv"') < page.index('id="cut-scroll"')
+    assert page.index('id="status"') < page.index('id="cut-scroll"')
+    assert page.index('id="cut-scroll"') < page.index('id="tracks"')
+    css = (STATIC / "style.css").read_text()
+    scroller = re.search(r"#cut-scroll\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "overflow-y:auto" in scroller
+    canvas = re.search(r"#cv\{([^}]*)\}", css).group(1)  # type: ignore[union-attr]
+    assert "height:clamp(" in canvas and "flex:1" not in canvas
+    js = (STATIC / "app.js").read_text()
+    assert 'new ResizeObserver(() => ed.render()).observe($("#cv"))' in js
+
+
+def test_the_record_s_toolbar_names_the_key_each_button_answers_to() -> None:
+    page = cut_markup()
+    for button, key in (
+        ("cut-prev", "K"),
+        ("cut-next", "J"),
+        ("cut-edge-start", "E"),
+        ("cut-edge-end", "E"),
+        ("cut-doubt", "N"),
+        ("cut-minus", ","),
+        ("cut-plus", "."),
+        ("cut-play", "Space"),
+        ("cut-audition", "A"),
+        ("cut-checked", "&crarr;"),
+        ("cut-split", "S"),
+        ("cut-zoom-track", "Z"),
+        ("cut-zoom-side", "F"),
+    ):
+        found = re.search(rf'id="{button}"[^>]*>.*?<kbd>(.*?)</kbd>', page)
+        assert found and found.group(1) == key, button
+
+
+def test_the_keys_and_the_toolbar_do_one_thing_each() -> None:
+    js = (STATIC / "app.js").read_text()
+    for action in ("playOrPause();", "auditionSelected();", "nudgeSelected(("):
+        assert action in js.split('addEventListener("keydown"', 1)[1]
+    assert '$("#cut-audition").onclick = auditionSelected' in js
+    assert '$("#cut-play").onclick = playOrPause' in js
+    assert '$("#cut-split").onclick = splitAtPlayhead' in js
+    assert "player.audition(" in re.search(  # type: ignore[union-attr]
+        r"function auditionSelected\(.*?\n\}", js, re.S
+    ).group(0)
+
+
+def test_a_track_placed_from_the_catalogue_is_marked_on_its_row() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function trackRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "trackBoundary(t)" in body
+    assert "zero by" in body, "the delta on such a row says nothing, and says so"
+    word = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '["From catalogue · check", "warn"]' in word
+
+
+def test_the_album_panel_holds_the_finished_tracks_beside_the_table() -> None:
+    page = cut_markup()
+    panel = page[page.index('id="album-panel"') : page.index('id="logwrap"')]
+    for field in ("md-artist", "md-album", "md-date", "art-upload", "review"):
+        assert f'id="{field}"' in panel
+    table = page[page.index('id="cut-table"') : page.index('id="album-panel"')]
+    for button in ("addtrack", "splittrack"):
+        assert f'id="{button}"' in table
+    assert 'id="side-panel"' not in page
+
+
+def test_the_console_keeps_its_clear_button() -> None:
+    page = cut_markup()
+    log = page[page.index('id="logwrap"') :]
+    assert 'id="logclear"' in log and 'id="logtoggle"' in log and 'id="log"' in log
+
+
+def test_the_record_s_page_fits_a_phone_the_way_a_tape_s_does() -> None:
+    css = (STATIC / "style.css").read_text()
+    narrow = re.search(r"@media \(max-width:48rem\)\{(.*?)\n\}", css, re.S).group(1)  # type: ignore[union-attr]
+    assert "#cutview{display:block;overflow-y:auto;overflow-x:hidden}" in narrow
+    assert "#lower{grid-template-columns:minmax(0,1fr)}" in narrow
+    assert "#tracks tbody tr{display:grid" in narrow
+    assert 'id="cut-rail-bar"' in cut_markup()
+    assert (
+        'railOpens($("#cut-rail"), $("#cut-rail-bar"))'
+        in (STATIC / "app.js").read_text()
+    )
+
+
+def test_the_boundary_column_says_who_settled_a_track() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "Not flagged" not in js
+    assert 'hand: ["Set by you", "good"], ear: ["Checked by ear", "good"]' in js
+    assert '["Fitted to gap", "good"]' in js
+
+
+def test_every_way_of_moving_a_boundary_marks_it_set_by_the_person() -> None:
+    js = (STATIC / "app.js").read_text()
+    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.forced = false" in helper and 't.settled = "hand"' in helper
+    for function in ("nudgeSelected", "splitAtPlayhead"):
+        body = re.search(rf"function {function}\(.*?\n\}}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert "setByHand(t)" in body, function
+    drag = js[js.index('ed = new Editor($("#cv")') :]
+    assert "setByHand(tr)" in drag[: drag.index("player = new Player")]
+    checked = re.search(r"function checkSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "t.forced = false" not in js.replace(helper, "").replace(checked, "")
+    assert "tr.forced = false" not in js
+
+
+def test_the_first_pass_no_longer_warns_it_replaces_what_a_person_corrected() -> None:
+    js = (STATIC / "app.js").read_text()
+    asked = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "already corrected" not in asked
+    assert "Boundaries you set or checked stay where they are" in asked
+
+
+def test_checked_keeps_the_boundaries_and_only_a_track_in_doubt_offers_it() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function checkSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (!canCheck(t)) return;" in body
+    assert "t.forced = false" in body and 't.settled = "ear"' in body
+    assert "markDirty()" in body, "it waits for a save like any other edit"
+    assert "t.start" not in body and "t.end" not in body
+    tools = re.search(r"function showCutTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#cut-checked").disabled = !canCheck(selectedTrack());' in tools
+    assert '$("#cut-checked").onclick = checkSelected' in js
+
+
+def key_listener() -> str:
+    js = (STATIC / "app.js").read_text()
+    return js[js.index('addEventListener("keydown", (e) => {') :]
+
+
+def test_a_browser_shortcut_is_not_taken_for_the_record_s_keys() -> None:
+    """Ctrl-S split a track and alt-left nudged a marker while going back."""
+    keys = key_listener()
+    guard = keys.index("if (e.altKey || e.ctrlKey || e.metaKey) return;")
+    assert guard < keys.index("playOrPause();")
+
+
+def test_the_record_s_keys_did_not_stay_on_the_other_pages() -> None:
+    """S on the Rip page split a track in an editor nobody could see."""
+    keys = key_listener()
+    scoped = keys.index('!== "cut") return;')
+    assert scoped < keys.index("playOrPause();")
+    assert keys.index('if (e.key === "?")') < scoped
+
+
+def test_enter_on_a_control_presses_it_only_if_the_keyboard_went_there() -> None:
+    """Asked with `:focus-visible`, Chromium said yes for the key being pressed, and
+    Enter after a mouse press on Next moved on a track instead of checking this one."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function enterIsTheControls\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (control !== pressedControl) return true;" in body
+    assert "e.preventDefault();" in body and "control.blur();" in body
+    keys = key_listener()
+    assert keys.index("enterIsTheControls(e)") < keys.index("tapeKey(e)")
+
+
+def test_selecting_a_track_does_not_arm_a_marker_for_the_arrow_keys() -> None:
+    """A row selection on Tapes let an arrow key set a boundary for good."""
+    js = (STATIC / "app.js").read_text()
+    nudge = re.search(r"function nudgeSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert nudge.index("if (!cutArmed())") < nudge.index("setByHand(t)")
+    picks = re.search(r"function select\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "picked = false" in picks
+    assert "cutPicked = picked && num != null" in picks
+    review = re.search(r"async function reviewNext\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'select(t.number, "start");' in review
+    step = re.search(r"function stepTrack\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'select(next.number, "start");' in step
+
+
+def test_a_marker_is_armed_only_when_it_was_asked_for() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "select(num, edge, true);" in js[js.index('ed = new Editor($("#cv")') :]
+    assert "select(t.number, edge, true);" in js
+    choose = re.search(r"function chooseEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "select(ed.sel.track, edge, true)" in choose
+    assert 'chooseEdge("start")' in js and 'chooseEdge("end")' in js
+    assert "swapEdge();" in key_listener()
+    tools = re.search(r"function showCutTools\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "$(id).disabled = !armed;" in tools
+
+
+def test_the_readout_says_which_marker_is_chosen() -> None:
+    assert 'id="ro-armed"' in cut_markup()
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function updateReadout\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "chosen`" in body and "#ro-armed" in body
+
+
+def test_the_keys_are_the_same_on_a_record_and_a_tape() -> None:
+    js = (STATIC / "app.js").read_text()
+    keys = key_listener()
+    for branch, does in (
+        ('e.key === "a"', "auditionSelected();"),
+        ('e.key === "Enter"', '$("#cut-checked").click();'),
+        ('e.key === "s"', "splitAtPlayhead();"),
+        ('e.key === "j"', '$("#cut-next").click();'),
+        ('e.key === "k"', '$("#cut-prev").click();'),
+    ):
+        assert keys.index(branch) < keys.index(does), branch
+    assert js.index("function tapeKey(") < js.index("function wireTapeWave(")
+
+
+def test_the_help_dialog_tells_the_truth_about_the_keys() -> None:
+    page = (STATIC / "index.html").read_text()
+    help_ = page[
+        page.index('id="helpdlg"') : page.index("</dialog>", page.index('id="helpdlg"'))
+    ]
+    assert "<kbd>H</kbd>" not in help_
+    assert "<kbd>X</kbd></td><td>on a tape, skip the song" in help_
+    assert "<kbd>S</kbd></td><td>on a record, split" in help_
+    assert "<kbd>&crarr;</kbd></td><td>on a record" in help_
+    assert "<kbd>E</kbd></td><td>choose the start or end" in help_
+    assert "<kbd>J</kbd> <kbd>K</kbd></td><td>the next track or song" in help_
+    assert "Selecting a track chooses nothing" in help_
+
+
+def cut_table_code() -> str:
+    js = (STATIC / "app.js").read_text()
+    return js[
+        js.index("function trackRowView(") : js.index("function wireTrackPresses(")
+    ]
+
+
+def test_a_track_s_row_is_read_only_and_what_edits_it_opens_beneath() -> None:
+    js = (STATIC / "app.js").read_text()
+    row = re.search(r"function trackRowView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "input" not in row.lower() and "button" not in row.lower()
+    opened = re.search(r"function trackOpenView\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for part in (
+        '"Title"',
+        '"Start (s)"',
+        '"End (s)"',
+        '"Remove"',
+        '"Close"',
+        '"Number"',
+    ):
+        assert part in opened, part
+    assert "c-del" not in (STATIC / "index.html").read_text()
+    assert "c-del" not in (STATIC / "style.css").read_text()
+
+
+def test_pressing_an_open_row_leaves_it_open() -> None:
+    js = (STATIC / "app.js").read_text()
+    press = re.search(r"function pressRow\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutOpen === t && ed.sel?.track === t.number) return;" in press
+    assert 'select(t.number, "start");' in press, "a row press arms no marker"
+
+
+def test_a_redraw_of_the_table_keeps_what_is_being_typed() -> None:
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    order = [
+        "typedInRows(tb)",
+        "cutRedrawing = true;",
+        "replaceChildren(...rows)",
+        "cutRedrawing = false;",
+        "putBackTyped(typed, tb)",
+    ]
+    places = [shown.index(part) for part in order]
+    assert places == sorted(places)
+    field = re.search(r"function trackField\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutRedrawing || input.value === input.dataset.saved) return;" in field
+    assert "onchange" not in field and "oninput" not in field
+
+
+def test_a_field_left_by_pressing_a_button_does_not_take_the_button_away() -> None:
+    """Leaving a field redraws the rows between press and release, and the click
+    then lands on nothing: Close and Remove did not answer."""
+    js = (STATIC / "app.js").read_text()
+    shown = re.search(r"function renderTracks\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (cutPressing) { cutRedrawOwed = true; return; }" in shown
+    wired = re.search(r"function wireTrackPresses\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert (
+        '"pointerdown"' in wired
+        and '"pointerup"' in wired
+        and '"pointercancel"' in wired
+    )
+    assert "setTimeout(" in wired
+
+
+def test_every_typed_boundary_is_the_person_s_and_an_unchanged_one_is_not() -> None:
+    js = (STATIC / "app.js").read_text()
+    typed = re.search(r"function typedEdge\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "setByHand(t)" in typed
+    assert "!Number.isFinite(v) || round2(v) === round2(t[edge])" in typed
+    assert "input.value === input.dataset.saved) return" in cut_table_code()
+
+
+def test_no_top_level_name_is_declared_twice() -> None:
+    """A second `boundaryWord` is a SyntaxError that stops the whole module, and
+    every page goes blank with nothing on screen to say why."""
+    for script in scripts():
+        names = re.findall(
+            r"^(?:async )?(?:function\*? |const |let |class )(\w+)",
+            script.read_text(),
+            re.M,
+        )
+        doubled = {n for n in names if names.count(n) > 1}
+        assert not doubled, f"{script.name}: {sorted(doubled)}"
+
+
+def test_the_first_pass_report_says_what_it_left_where_it_was() -> None:
+    """The status line clears behind the dialog, so the report is what gets read."""
+    js = (STATIC / "app.js").read_text()
+    assert "you set or checked left where" in js
+    assert '(kept ? `${kept}.\\n\\n` : "") + r.report' in js
+
+
+def test_a_plan_that_does_not_say_what_a_fit_rested_on_makes_no_claim_about_a_gap() -> (
+    None
+):
+    js = (STATIC / "app.js").read_text()
+    words = re.search(r"const PLACED_WORDS = .*", js).group(0)  # type: ignore[union-attr]
+    assert 'length: ["Placed by length", "quiet"]' in words
+    boundary = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'PLACED_WORDS[t.placed] ?? ["Fitted", "good"]' in boundary
+
+
+def test_a_track_placed_by_length_does_not_stop_cut() -> None:
+    js = (STATIC / "app.js").read_text()
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "placedByLength" not in cut and "length" not in cut.replace(".length", "")
+
+
+def test_a_first_pass_saves_first_so_it_cannot_fit_over_an_unsaved_boundary() -> None:
+    """The server holds what the saved plan marks, and a boundary moved since was not
+    in it: Run again took it, and reloading the page took the proof."""
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert run.index("if (S.dirty && !(await save())) return;") < run.index("runJob(")
+
+
+def test_starting_over_is_offered_unticked_and_names_how_many() -> None:
+    js = (STATIC / "app.js").read_text()
+    asked = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-over").checked = false' in asked
+    assert "also replace the boundaries I set, on ${counted(marks" in asked
+    assert 'start_over: $("#fp-over").checked' in js
+
+
+IMPORT_PANELS = (
+    "imp-fromplan",  # tag from the plan
+    "imp-mbid",
+    "imp-nocat",  # no release pinned
+    "imp-artist",
+    "imp-album",
+    "imp-search",
+    "imp-results",
+    "imp-relabel-wrap",
+    "imp-relabel",
+    "imp-stale-wrap",
+    "imp-stale-clear",
+    "imp-replace-wrap",  # already in the library
+    "imp-replace",
+    "imp-dupes",
+    "imp-go",
+    "imp-err",
+    "imp-done",
+    "imp-summary",
+    "imp-art-wrap",
+    "imp-art-fetch",
+    "imp-art-upload",
+    "imp-art-skip",
+    "imp-outwrap",  # the transcript
+    "imp-out",
+)
+
+
+def test_the_import_dialog_keeps_every_safety_panel_it_ever_had() -> None:
+    """The drawing it is styled from has none of them. ADR-048 holds regardless."""
+    start = markup().index('<dialog id="impdlg"')
+    dialog = markup()[start : markup().index("</dialog>", start)]
+    missing = [name for name in IMPORT_PANELS if f'id="{name}"' not in dialog]
+    assert not missing, missing
+    dupes = dialog[dialog.index('id="imp-dupes"') :]
+    for choice in ('value="replace"', 'value="keep"', 'value="merge"'):
+        assert choice in dupes
+
+
+def test_no_dialog_sets_a_floor_wider_than_a_phone() -> None:
+    """The import measured 704 px on a 390 screen, from min-widths set in rem."""
+    css = (STATIC / "style.css").read_text()
+    width = "width:min(var(--dlg),calc(100vw - 2rem))"
+    assert width in re.search(r"(?m)^dialog\{.*?\}", css, re.S).group(0)  # type: ignore[union-attr]
+    for rule in re.findall(r"#\w*dlg\{[^}]*\}", css):
+        assert "min-width" not in rule, rule
+    phone = css[css.index("@media (max-width:48rem)") :]
+    assert ".dlg-search{grid-template-columns:minmax(0,1fr)}" in phone
+
+
+def test_ci_has_to_parse_the_pages_scripts_and_make_check_tries_to() -> None:
+    """Passing with no node is fine as long as one job cannot. Issue #55."""
+    root = STATIC.parent.parent.parent
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "python scripts/check_js.py --require" in ci
+    assert "--require=needs_node" in ci
+    make = (root / "Makefile").read_text()
+    assert re.search(r"^check:.*\bjs\b", make, re.M)
+
+
+def test_a_split_takes_its_edges_from_the_rule_that_bounds_them() -> None:
+    js = (STATIC / "app.js").read_text()
+    split = re.search(r"function splitAtPlayhead\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "splitEdges(t, at," in split
+    assert "if (edges.refused) { status(edges.refused, true); return; }" in split
+    assert "g.lo" not in split, "the page has its own idea of a gap's edges again"
+
+
+def test_a_boundary_that_would_cross_its_neighbour_does_not_move_and_says_why() -> None:
+    """It used to save with no complaint and surface as a refusal at Cut, and after #54
+    stood where it was put. A drag, a nudge and a typed figure are all refused now."""
+    js = (STATIC / "app.js").read_text()
+    said = re.search(r"function refusedCrossing\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert (
+        "crossed(t, edge, at, sideOf(t))" in said and "Not moved: that overlaps" in said
+    )
+    for edge in ("t.start =", "t.end =", "t[edge] ="):
+        assert edge not in said, "a person's boundary is not moved for them"
+    for body, call in (
+        (r"function nudgeSelected\(", "refusedCrossing(t, ed.sel.edge,"),
+        (r"function typedEdge\(", "refusedCrossing(t, edge, at)"),
+    ):
+        fn = re.search(body + r".*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert call in fn
+    assert "if (refusedCrossing(tr, edge, t)) return;" in js
+    assert "Left where you put it" not in js
+
+
+def test_the_row_and_the_rail_say_a_track_overlaps() -> None:
+    js = (STATIC / "app.js").read_text()
+    boundary = re.search(r"function trackBoundary\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "Overlaps" in boundary
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '"Overlap"' in cut and "!!f.overlaps.length" in cut
+
+
+def test_a_warning_about_an_overlap_goes_when_the_overlap_does() -> None:
+    js = (STATIC / "app.js").read_text()
+    helper = re.search(r"function setByHand\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'else if (saidOverlap) status("no tracks overlap now");' in helper
+    assert "saidOverlap = !!over.length;" in helper
+
+
+def test_merge_is_not_offered_where_beets_has_nothing_to_merge_by() -> None:
+    """With no release, `M` made a second album entry under an option saying it added
+    to the one already there."""
+    js = (STATIC / "app.js").read_text()
+    state = js[js.index("function showCatalogueState()") :]
+    state = state[: state.index("\n}\n")]
+    assert "merge.disabled = noRelease" in state
+    assert '$("#imp-nomerge").hidden = !noRelease' in state
+    assert 'imp-dupes").value = "keep"' in state
+    dialog = markup()[markup().index('id="imp-nomerge"') :]
+    assert "another album entry" in dialog[: dialog.index("</p>")]
+
+
+def test_a_tick_on_the_replace_panel_does_not_outlive_the_files_it_was_given_for() -> (
+    None
+):
+    """Ticked for one release, it stayed ticked when the release changed, and Replace
+    then removed files the tick had never been about."""
+    js = (STATIC / "app.js").read_text()
+    offer = js[js.index("function showReplaceOffer") :]
+    offer = offer[: offer.index("\n}\n")]
+    assert (
+        'if (!keepTick || named !== offered) $("#imp-replace").checked = false' in offer
+    )
+
+
+def test_an_earlier_answer_about_the_library_cannot_overwrite_a_later_one() -> None:
+    """A library listing can outlast the release it was asked about. Import stays
+    shut while it runs, because unticked it files a second copy beside the first."""
+    js = (STATIC / "app.js").read_text()
+    check = js[js.index("async function checkExisting()") :]
+    check = check[: check.index("\n}\n")]
+    assert check.count("if (asked !== existingAsked) return;") == 2
+    assert '$("#imp-go").disabled = true;' in check
+    assert '$("#imp-err").textContent = "";' in check
+
+
+def test_the_replace_panel_names_what_goes_for_the_release_in_use() -> None:
+    js = (STATIC / "app.js").read_text()
+    offer = js[js.index("function showReplaceOffer") :]
+    offer = offer[: offer.index("\n}\n")]
+    for said in ("existing.artist", "existing.album", "existing.tracks"):
+        assert said in offer
+    assert "existing.refused" in offer
+    check = js[js.index("async function checkExisting()") :]
+    assert "encodeURIComponent(importMbid())" in check[: check.index("\n}\n")]
+    assert "the files named above" in markup()

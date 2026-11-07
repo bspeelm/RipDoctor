@@ -11,8 +11,21 @@ from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.core import gaps as G
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.naming import Unsafe, token
-from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec
+from ripdoctor.core.plan import (
+    GAP,
+    HAND,
+    LENGTH,
+    BadPlan,
+    OldFormat,
+    Plan,
+    PlanTrack,
+    Spec,
+    as_it_stands,
+    letter_of,
+    saved_over,
+)
 from ripdoctor.core.xcorr import AlignError
+from ripdoctor.store import archive as AR
 from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.store.files import SIDE
@@ -111,6 +124,8 @@ def add(app: App, service: Service) -> None:
             "sides": sides,
             "ready": ready,
             "recording": recording,
+            "seen": F.plan_seen(layout, slug),
+            "captures": _captures(layout, slug),
             "mbid": spec.mbid if spec else "",
             "album": album,
             "artist": artist,
@@ -120,7 +135,7 @@ def add(app: App, service: Service) -> None:
         plan_file = layout.plan_file(slug)
         if plan_file.is_file():
             try:
-                plan = F.read_plan(plan_file)
+                plan = as_it_stands(F.read_plan(plan_file), C.stamps_of(layout, slug))
             except (OldFormat, BadPlan) as e:
                 # Refusing the superseded format is deliberate, so say so with a
                 # status the browser can act on rather than a 500.
@@ -130,7 +145,7 @@ def add(app: App, service: Service) -> None:
             # not. Taking them raw here put the plan's empty strings back over
             # a record whose name only the spec still had.
             out["tracks_by_side"] = {
-                F.letter_of(side.file): [
+                letter_of(side.file): [
                     {
                         "number": t.number,
                         "title": t.title,
@@ -138,6 +153,8 @@ def add(app: App, service: Service) -> None:
                         "end": round(t.end, 2),
                         "cat": t.cat,
                         "forced": t.forced,
+                        "settled": t.settled,
+                        "placed": t.placed,
                     }
                     for t in side.tracks
                 ]
@@ -187,6 +204,23 @@ def add(app: App, service: Service) -> None:
         if job is None:
             raise H.HttpError(404, "no job")
         return H.ok(job.as_dict())
+
+    @app.route("GET", "/api/seen/([^/]+)")
+    def seen(r: H.Request) -> H.Response:
+        """What a page compares with what it loaded, to find a side or a plan that
+        changed without it. Cheap enough to ask every few seconds."""
+        slug = slug_of(r)
+        captures = _captures(layout, slug)
+        if not captures:
+            raise H.HttpError(404, f"no side files for {slug}")
+        return H.ok({"seen": F.plan_seen(layout, slug), "captures": captures})
+
+    @app.route("GET", "/api/align/([^/]+)")
+    def can_align(r: H.Request) -> H.Response:
+        """The sides Align can carry, so it is only offered and named where it can."""
+        slug = slug_of(r)
+        saved = _saved_plan_or_none(layout, slug)
+        return H.ok({"sides": AR.alignable(layout, slug, saved) if saved else []})
 
     @app.route("POST", "/api/align/([^/]+)")
     def align(r: H.Request) -> H.Response:
@@ -269,6 +303,22 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         body = r.json()
+        try:
+            with service.jobs.claim(slug, "a save", ("prepare",)):
+                return _saved(slug, body)
+        except Busy:
+            job = service.jobs.status(slug)
+            doing = job.op if job and not job.done else "a change"
+            said = f"{doing} is running on this record, and this saves when it ends"
+            return H.ok({"error": said, "busy": True}, 409)
+
+    def _saved(slug: str, body: dict[str, Any]) -> H.Response:
+        if "seen" in body and body["seen"] != F.plan_seen(layout, slug):
+            said = (
+                "the plan has changed since this page loaded it, in another tab or by "
+                "a job, and nothing was saved"
+            )
+            return H.ok({"error": said, "stale": True}, 409)
         # A name already on disk is never replaced by an empty one. The page
         # falls back to what it last loaded, so a record that opened badly
         # sends two empty strings - and saving then wiped what the record was
@@ -287,9 +337,22 @@ def add(app: App, service: Service) -> None:
         # it dropped every one of them.
         current = _saved_spec(layout, slug)
         mbid = str(body.get("mbid", "")) or (current.mbid if current else "")
+        before = _saved_plan_or_none(layout, slug)
+        stamps = C.stamps_of(layout, slug)
+        plan, released = saved_over(
+            F.with_unseen_sides(plan, before, stamps), before, stamps
+        )
         spec = replace(F.spec_of(plan, current), mbid=mbid)
         spec_path, plan_path = F.save(layout, slug, spec, plan)
-        return H.ok({"ok": True, "spec": spec_path.name, "plan": plan_path.name})
+        return H.ok(
+            {
+                "ok": True,
+                "spec": spec_path.name,
+                "plan": plan_path.name,
+                "seen": F.plan_seen(layout, slug),
+                "released": [t.track.number for t in released],
+            }
+        )
 
 
 def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
@@ -311,6 +374,14 @@ def named(layout: F.Layout, slug: str) -> tuple[str, str, str, bool]:
     except (BadPlan, OSError, ValueError):
         return album, artist, date, False
     return plan.album or album, plan.artist or artist, plan.date or date, False
+
+
+def _saved_plan_or_none(layout: F.Layout, slug: str) -> Plan | None:
+    """The plan a save replaces. One that cannot be read holds nothing to compare."""
+    try:
+        return F.read_plan(layout.plan_file(slug))
+    except (OldFormat, BadPlan, OSError, ValueError, KeyError):
+        return None
 
 
 def _saved_spec(layout: F.Layout, slug: str) -> Spec | None:
@@ -344,6 +415,10 @@ def _plan_from(slug: str, doc: dict[str, Any]) -> Plan:
     )
 
 
+def _captures(layout: F.Layout, slug: str) -> str:
+    return "|".join(f"{k}={v}" for k, v in sorted(C.stamps_of(layout, slug).items()))
+
+
 def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
     """Fit one side of a re-rip and move its boundaries onto it."""
     layout = service.layout
@@ -352,6 +427,21 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
     for where, what in ((old, "archived"), (new, "new")):
         if not where.is_file():
             raise FileNotFoundError(f"no {what} capture at {where.name}")
+    # The transform maps the archived capture onto the new one. Times already on
+    # the new one would be moved by it, a person's included.
+    saved = _saved_plan_or_none(layout, slug)
+    placed = (
+        next((s for s in saved.sides if letter_of(s.file) == side.letter), None)
+        if saved
+        else None
+    )
+    kept = {t.number: t for t in placed.tracks} if placed else {}
+    if placed and placed.audio == C.stamp_of(new):
+        raise AlignError(
+            f"side {side.letter}'s saved boundaries are on this capture, so there is "
+            "nothing to carry. If any are from the earlier capture, run First pass, or "
+            "listen and press Checked, or move the boundary"
+        )
 
     built = C.prepared(layout, slug, side.letter)
     duration = built.duration if built else true_duration(service.runner, str(new))
@@ -372,21 +462,34 @@ def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:
                 f"track {t.number} maps to {start:.2f}-{end:.2f}, outside the "
                 f"new side (0-{duration:.2f})"
             )
-        tracks.append(
-            {
-                "number": t.number,
-                "title": t.title,
-                "start": round(start, 2),
-                "end": round(end, 2),
-                "cat": t.cat,
-            }
-        )
+        tracks.append(_row(t, start, end, kept.get(t.number)))
     return {
         "side": side.letter,
         "offset": round(transform.offset, 3),
         "drift_ms_per_min": round(transform.drift_ms_per_min, 1),
         "check_miss": round(miss, 3),
         "tracks": tracks,
+    }
+
+
+def _row(t: Any, start: float, end: float, was: PlanTrack | None) -> dict[str, Any]:
+    """One track of an aligned side, saying only what is still true of it.
+
+    A person's boundary, carried, is theirs but not yet heard on this capture, so
+    a check by ear does not come across as one. `forced` and `length` are about
+    what its place rests on, which a transform does not change. The spec has no
+    word for either, so they come from the plan it was written with.
+    """
+    placed = was.placed if was and was.placed in (GAP, LENGTH) else ""
+    return {
+        "number": t.number,
+        "title": t.title,
+        "start": round(start, 2),
+        "end": round(end, 2),
+        "cat": t.cat,
+        **({"settled": HAND} if t.settled else {}),
+        **({"forced": True} if was and was.forced else {}),
+        **({"placed": placed} if placed else {}),
     }
 
 
