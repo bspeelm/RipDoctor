@@ -3,10 +3,6 @@
 Record a vinyl side, split it into tracks, tag them and file them in your music
 library.
 
-![The cut panel. A side's waveform in blue, the same side measured in 1-3 kHz in
-orange below it, the gap threshold as a dashed line, and the track boundaries as
-vertical markers.](docs/images/cut_panel.png)
-
 ## What it does
 
 - **Records** a side from a turntable attached to the machine, with a live meter
@@ -33,9 +29,6 @@ vertical markers.](docs/images/cut_panel.png)
 
 You drive it from a web page on the machine that holds the library, or from the
 command line.
-
-![The rip panel while a side is recording. Elapsed time, the music level, and a
-bar showing which zone the 1-3 kHz level is in.](docs/images/rip_panel.png)
 
 ## Why 1-3 kHz
 
@@ -109,12 +102,146 @@ and each step of a record from the needle drop to the archive.
 | [Command line](https://github.com/bspeelm/RipDoctor/wiki/Command-line) | all 15 commands and their options |
 | [Troubleshooting](https://github.com/bspeelm/RipDoctor/wiki/Troubleshooting) | errors, and what each one means |
 
+## A record's page
+
+**Cut** is one pipeline rail, one waveform and one table of tracks. The name in
+brackets after a claim is the test that proves it.
+
+The rail runs Rip, First pass, Check, Cut tracks, Import, Archive
+(`test_the_record_s_rail_runs_in_the_order_the_work_does`), each step holding its own
+buttons (`test_a_moved_button_keeps_its_id_on_its_step`) and saying what it waits on
+(`test_a_catalogue_placed_track_offers_review_and_the_rail_waits_on_it`). The waveform stays in view while the
+table scrolls (`test_the_waveform_stays_in_view_while_the_tables_scroll`), and on a phone
+the page collapses as a tape's does
+(`test_the_record_s_page_fits_a_phone_the_way_a_tape_s_does`).
+
+The **Boundary** column says who settled each track
+(`test_the_boundary_column_says_who_settled_a_track`):
+
+| It reads | Which means | Does Cut wait? |
+|---|---|---|
+| `Fitted to gap` | found on a measured gap (`test_tracks_found_on_gaps_say_so`) | no |
+| `Fitted` | a plan that does not say what the fit rested on (`test_a_plan_that_does_not_say_what_a_fit_rested_on_makes_no_claim_about_a_gap`) | no |
+| `Placed by length` | no gap near it, so placed from the catalogue's length (`test_a_track_with_no_gap_says_it_was_placed_by_length`) | no (`test_a_track_placed_by_length_does_not_stop_cut`) |
+| `From catalogue · check` | on a side the gaps would not fit, placed from the catalogue because you asked | yes (`test_a_track_placed_from_the_catalogue_blocks_the_cut_and_is_named`) |
+| `From an earlier capture` | a time on audio since captured again (`test_a_replaced_side_reads_as_from_an_earlier_capture_before_anything_is_run`) | yes (`test_a_cut_of_a_replaced_side_is_refused_by_name_before_anything_is_saved`) |
+| `Checked by ear` | you listened and pressed Checked | no |
+| `Set by you` | you moved it (`test_every_way_of_moving_a_boundary_marks_it_set_by_the_person`) | no |
+| `Overlaps 3` | it shares audio with track 3 (`test_the_row_and_the_rail_say_a_track_overlaps`) | yes |
+
+Checked keeps a boundary where it is and is offered only on a track in doubt
+(`test_checked_keeps_the_boundaries_and_only_a_track_in_doubt_offers_it`). What you set or
+checked is held by a later first pass (`test_fitting_again_never_moves_what_a_person_settled`),
+unless you tick the box that asks otherwise
+(`test_starting_over_is_offered_unticked_and_names_how_many`). Tick clips are never refused,
+because they are how a doubt gets heard
+(`test_tick_clips_are_how_a_doubt_is_heard_so_they_are_not_refused`).
+
+A marker has to be chosen before it moves. Selecting a track arms nothing, because a nudge
+sets a boundary for good (`test_selecting_a_track_does_not_arm_a_marker_for_the_arrow_keys`).
+Press the marker, its Start or End cell or button, or `E`
+(`test_a_marker_is_armed_only_when_it_was_asked_for`), and the readout says which is chosen
+(`test_the_readout_says_which_marker_is_chosen`). A move past the neighbouring track does not
+happen, and the status line names that track
+(`test_a_boundary_that_would_cross_its_neighbour_does_not_move_and_says_why`).
+
+The keys are shared with Tapes (`test_the_keys_are_the_same_on_a_record_and_a_tape`):
+
+| Key | Cut | Tapes |
+|---|---|---|
+| `A` | hear the boundary | hear the boundary |
+| `↵` | Checked | Accept |
+| `S` | split the track | nothing |
+| `X` | nothing | skip the song |
+| `E` | choose the marker, then swap it | the same |
+| `J` `K` | next and previous track | next and previous song |
+| `N` | next doubt, on either side (`shift` for the one before) | next doubt (`shift` for the one before) |
+| `,` `.` | move the chosen marker 0.05 s (`shift` for 0.5 s) | the same |
+
+Edits save by themselves, and there is nothing to press to keep one
+(`test_there_is_no_save_to_press_and_nothing_to_be_prompted_about`). A failed save stays on
+screen with its reason (`test_every_edit_saves_once_and_a_failure_stays_said`), and a page left
+open cannot overwrite a newer plan
+(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`). Moving a boundary back
+is the undo.
+
+**A side captured again.** Its times are positions on audio that has gone, so its rows read
+`From an earlier capture` and Cut refuses them. A first pass lets them go and fits afresh
+(`test_a_first_pass_after_a_re_rip_does_not_hold_times_on_the_audio_that_went`), and Checked
+after listening clears a row (`test_checked_on_a_row_from_an_earlier_capture_is_a_way_out`).
+**Align from archive** carries the old boundaries onto the new capture until you move or check
+a boundary on that side, which ends the offer. Editing a title or an album field does not. A
+side no longer on the archived capture is not offered Align, and is told what remains
+(`test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain`).
+
+**When the album is already filed**, the import asks what to do with it, and stays disabled until
+you tick that you know (`test_nothing_is_deleted_without_the_acknowledgement`). An album that
+arrived cut defaults to Keep both, and Replace there needs a tick too. An import is refused while
+that record is recording or encoding.
+
+- **Replace** takes that exact album or release and nothing else: the whole release id, or with
+  none the album artist and album
+  (`test_a_replace_once_deleted_every_album_whose_title_held_this_one`,
+  `test_part_of_a_release_id_once_deleted_an_album_it_was_part_of`). Nothing exact is refused with
+  nothing touched (`test_a_replace_of_nothing_exact_is_refused_with_nothing_touched`), and so are
+  two releases under one name (`test_a_replace_of_two_releases_under_one_name_is_refused`). The old
+  copy is moved aside, and deleted only once the new one is proved: its audio
+  (`test_replacing_removes_the_filed_audio_not_only_the_rows`), the replaced album row's own covers,
+  and then the folders that leaves empty (`test_replacing_once_left_the_folders_it_had_emptied`). A
+  folder holding anything else stays (`test_a_folder_holding_anything_else_stays`).
+- **Keep both** leaves the filed copy where it is.
+- **Merge** needs a release and is not offered without one
+  (`test_merge_is_not_offered_where_beets_has_nothing_to_merge_by`). With every row of the album
+  on that release, beets rematches them, which rewrites their tags, and says so
+  (`test_merge_once_stopped_at_the_second_apply_and_now_answers_it`). Beside another edition it
+  joins that release's own row and leaves the edition alone
+  (`test_merge_beside_another_edition_joins_its_row_and_names_no_other`). With only another edition
+  held it refuses before anything runs, and Keep both is the way in
+  (`test_merge_never_runs_where_another_edition_would_be_rewritten`).
+
+An empty library root with beets rows under it is a library off its mount, so nothing is filed
+there, on a record (`test_a_record_is_refused_where_the_library_is_empty_and_beets_says_otherwise`),
+an album that arrived cut (`test_an_album_that_arrived_cut_is_refused_the_same_way`) or a tape
+(`test_filing_onto_an_empty_mount_point_once_said_filed_and_wrote_a_playlist`). A truly empty
+library still files its first album
+(`test_a_library_with_nothing_in_it_and_no_rows_is_new_and_not_gone`).
+
+There is no Archive button. Archiving is the last step of an import, or of File and Playlist on a
+tape, when every check passes. If it can't complete, the import still stands, the reason is shown,
+and only then does **Archive again** appear. A side captured again is not archived until that
+capture has been cut and imported
+(`test_a_re_rip_the_library_was_not_cut_from_cannot_cost_the_earlier_capture`). Once the new side
+reads back, the archived side it replaces is removed
+(`test_the_earlier_take_is_gone_once_the_new_one_reads_back`), or kept with `keep_superseded`
+(`test_the_earlier_take_is_kept_when_asked_for`).
+
+## The meter
+
+While a capture runs, two bars share one scale, from -100 dB to 0
+(`test_the_scale_is_straight_and_ends_where_it_says`). The 1-3 kHz bar is the one to watch, and
+the needle goes down when it sits in `silent groove`. The zones, in dB
+(`test_the_meter_says_what_the_chain_measures_and_nothing_a_mock_drew`):
+
+| Full band | | 1-3 kHz | |
+|---|---|---|---|
+| below -68 | dead air / needle up | below -92 | dead air |
+| -68 to -60 | groove | -92 to -72 | silent groove |
+| -60 to -45 | quiet music | -72 to -58 | arm-up rumble |
+| -45 and up | music | -58 to -44 | quiet music |
+| | | -44 and up | music |
+
+Beneath them is the 1-3 kHz level over the last 30 seconds, on the same scale and zones
+(`test_the_history_forgets_what_has_left_its_window`). A stretch with no readings is left empty
+(`test_a_stretch_with_no_readings_is_drawn_as_nothing`), and a reading the capture has stopped
+replacing is not shown as a level
+(`test_a_reading_the_capture_loop_stopped_replacing_is_not_a_level`).
+
 ## Tapes
 
 A tape is one uncut recording of songs that belong to different albums, such as a
 mixtape in a single file. Its steps are the same as a record's, and only tagging
 and filing work per song. The [Tapes wiki page](https://github.com/bspeelm/RipDoctor/wiki/Tapes)
-walks through it. The name in brackets after each claim is the test that proves it.
+walks through it.
 
 Its boundaries are checked on the same waveform editor a record's are
 (`test_a_tape_s_waveform_is_the_rip_s_editor_and_player_and_not_a_copy_of_them`).
@@ -236,7 +363,11 @@ A song from an album you hold in another version goes in as its own album entry 
 leaves your tracks unchanged
 (`test_merging_into_another_edition_once_rewrote_an_owned_album_so_it_keeps_both`), with the
 folder it lands in said only as far as your beets paths promise it
-(`test_a_note_promised_the_album_s_folder_where_paths_give_it_a_folder_of_its_own`).
+(`test_a_note_promised_the_album_s_folder_where_paths_give_it_a_folder_of_its_own`). A later song
+of that version joins that entry
+(`test_a_later_song_of_a_held_edition_once_made_another_row_and_cover_and_now_joins`), unless your
+paths give each entry a folder of its own, when it goes beside
+(`test_paths_that_give_each_row_a_folder_go_beside_with_their_own_art`).
 
 Filing a tape merges songs into albums, and beets crashes doing that when a library
 row holds a relative path, which an older library can. `ripdoctor doctor` counts
@@ -265,9 +396,15 @@ arrived.
 ## Development
 
 ```
-make check     # lint, types, tests, budgets
+make check     # lint, types, scripts, tests, budgets
 make test
 ```
+
+The page has no build step, so a syntax error in a script blanks it and Python cannot see
+that. `make check` parses every script the page loads, as a module, with `scripts/check_js.py`
+(`test_the_real_scripts_parse`). With no node on the machine that step says so and steps aside;
+CI's `with-tools` job runs it with `--require`, so it always runs somewhere
+(`test_ci_has_to_parse_the_pages_scripts_and_make_check_tries_to`).
 
 The core layer computes over decibel envelopes and touches nothing - no
 subprocess, no filesystem, no clock - so the whole algorithm is testable without
