@@ -1,6 +1,6 @@
 import { Editor, fmt, fmtLong } from "/editor.js";
 import { Player } from "/audio.js";
-import { canCheck, crossed, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
+import { autosaver, canCheck, crossed, drawHistory, drawMeter, fromEarlier, historyAfter, liveLevels, overlapping, slugify, splitEdges } from "/ripui.js";
 
 const $ = (s) => {
   const e = document.querySelector(s);
@@ -67,54 +67,17 @@ function setLogCollapsed(c) {
   $("#logtoggle").textContent = c ? "show" : "hide";
   try { localStorage.setItem("ripdoctor:log:collapsed", c ? "1" : ""); } catch {}
 }
-// Every edit saves itself. `settle` is how long to wait for the next one, so a held key is
-// not a save a press; null leaves the save to whoever finishes the edit, as a drag does.
 const NUDGE_SETTLE = 500;
-let saveTimer = null;
-let saveRun = null;                   // the one save in flight, so they stay in order
-let saveEdits = 0;
-let saveFail = null;                  // {why, stale, busy}, on screen until a save lands
-
-function markDirty(d = true, settle = 0) {
-  S.dirty = d;
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  if (d) {
-    saveEdits += 1;
-    if (settle != null) saveTimer = setTimeout(flushSave, settle);
-  } else saveFail = null;
-  showCutRail();
-}
-
-function flushSave() {
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  saveRun ??= saveLoop().finally(() => { saveRun = null; showCutRail(); });
-  return saveRun;
-}
-
-// One at a time, from what is on screen when it goes, and again if anything changed while
-// it went: the last state always lands. What was typed is not touched by a failure.
-async function saveLoop() {
-  while (S.dirty && S.slug && !saveTimer) {
-    const edits = saveEdits, alignWas = !$("#realign").hidden;
-    showCutRail();
-    try {
-      const { released, seen } = await postJSON(`/api/plan/${S.slug}`, { ...buildDoc(), seen: S.meta.seen });
-      S.meta.seen = seen;
-      saveFail = null;
-      if (edits === saveEdits) S.dirty = false;
-      saidSaved(released, alignWas);
-      refreshCutRail();
-    } catch (e) {
-      saveFail = { why: e.status ? e.message : "The server could not be reached. This tries again by itself.", stale: e.stale, busy: e.busy };
-      // A job ending and a connection coming back are not things a person should have to watch for.
-      if (e.busy || !e.status) saveTimer = setTimeout(flushSave, e.busy ? 2000 : 5000);
-      return false;
-    }
-  }
-  return !saveFail;
-}
+const saver = autosaver({
+  state: S,
+  doc: () => buildDoc(),
+  post: (slug, body) => postJSON(`/api/plan/${slug}`, body),
+  changed: () => showCutRail(),
+  saving: () => { const alignWas = !$("#realign").hidden; showCutRail(); return alignWas; },
+  saved: (released, alignWas) => { saidSaved(released, alignWas); refreshCutRail(); },
+  refused: (why) => status(`Not saved: ${why}`, true),
+});
+const { markDirty, flushSave, save } = saver;
 
 async function saidSaved(released, alignWas) {
   await refreshAlignButton();
@@ -129,7 +92,7 @@ async function saidSaved(released, alignWas) {
 // flight this page's digest is out of date, and it is the same page's work that moved it.
 function saveOnLeaving() {
   if (!S.dirty || !S.slug) return;
-  const doc = saveRun ? buildDoc() : { ...buildDoc(), seen: S.meta.seen };
+  const doc = saver.running() ? buildDoc() : { ...buildDoc(), seen: S.meta.seen };
   fetch(`/api/plan/${S.slug}`, { method: "POST", keepalive: true, credentials: "same-origin",
                                  headers: { "content-type": "application/json" }, body: JSON.stringify(doc) });
 }
@@ -139,7 +102,7 @@ function saveOnLeaving() {
 // its own save.
 async function noticeDisk() {
   const typing = document.activeElement?.closest?.("#cutview input, #cutview textarea");
-  if (!S.slug || !S.meta || S.dirty || saveRun || S.job || cutOpening || typing || player?.playing
+  if (!S.slug || !S.meta || S.dirty || saver.running() || S.job || cutOpening || typing || player?.playing
       || document.hidden || document.querySelector("dialog[open]")
       || (document.body.dataset.mode ?? "cut") !== "cut") return;
   const slug = S.slug;
@@ -420,15 +383,16 @@ function showCutHead(f) {
     ? (artist && album ? `${artist} \u2014 ${album}` : artist || album || S.slug)
     : "No record open";
   const pill = $("#cut-saved");
-  const failed = saveFail && !saveFail.busy;
-  pill.hidden = !S.dirty && !saveFail && !f.tracks.length && !f.archived;
+  const fail = saver.failure();
+  const failed = fail && !fail.busy;
+  pill.hidden = !S.dirty && !fail && !f.tracks.length && !f.archived;
   pill.dataset.kind = failed ? "bad" : S.dirty ? "todo" : "done";
   pill.querySelector("span").textContent = failed ? "Not saved"
-    : saveFail ? "Waiting to save" : S.dirty ? "Saving" : f.archived ? "Archived" : "Saved";
-  $("#cut-save-why").hidden = !saveFail;
-  $("#cut-save-why").firstChild.textContent = saveFail ? `${saveFail.why} ` : "";
+    : fail ? "Waiting to save" : S.dirty ? "Saving" : f.archived ? "Archived" : "Saved";
+  $("#cut-save-why").hidden = !fail;
+  $("#cut-save-why").firstChild.textContent = fail ? `${fail.why} ` : "";
   $("#cut-save-retry").hidden = !failed;
-  $("#cut-save-retry").textContent = saveFail?.stale ? "Load what is saved" : "Retry";
+  $("#cut-save-retry").textContent = fail?.stale ? "Load what is saved" : "Retry";
 }
 
 function showCutRail() {
@@ -1135,15 +1099,6 @@ function buildDoc() {
       tracks: (S.bySide[letter] || []).slice().sort((a, b) => a.start - b.start),
     })).filter((s) => s.tracks.length),
   };
-}
-
-// Waits for what is on screen to be on disk, and reports whether it got there, so a caller
-// that must not proceed on a stale plan can stop.
-async function save() {
-  let landed = await flushSave();
-  while (landed && S.dirty) landed = await flushSave();
-  if (!landed) status(`Not saved: ${saveFail?.why}`, true);
-  return landed;
 }
 
 async function split() {
@@ -4726,7 +4681,7 @@ function wire() {
   $("#help-close").onclick = () => $("#helpdlg").close();
 
   $("#cut-save-retry").onclick = () => {
-    if (!saveFail?.stale) { flushSave(); return; }
+    if (!saver.failure()?.stale) { flushSave(); return; }
     if (!confirm("Load what is saved? What this page shows and could not save goes.")) return;
     markDirty(false);
     S.sideData = {};

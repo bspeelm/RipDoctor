@@ -2885,7 +2885,9 @@ says what it is, and moving it back is the undo. A cut, an import and an archive
 **A save cannot look like it landed.** The pill reads `Saving`, `Saved` or `Not saved`, and a failed
 one stays on screen with its reason and a retry, what was typed stays where it is, and Cut, First
 pass and Import stop rather than read a plan behind the page. Saves go one at a time, and whatever
-changed during one goes next, so the last state lands.
+changed during one goes next, so the last state lands
+(`test_a_failed_save_keeps_the_edit_says_why_and_stops_a_caller`,
+`test_saves_go_one_at_a_time_and_the_last_state_lands`).
 
 **A job in progress.** Whatever it is reading must not move under it, so a boundary, a track added
 or removed and a check are refused while it runs, and say so. Text waits: the server answers a save
