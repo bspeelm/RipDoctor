@@ -78,9 +78,10 @@ class Stale:
         s = "" if self.tracks == 1 else "s"
         return (
             f"beets still has {self.tracks} row{s} registered at {self.where}, but "
-            "none of those files exist any more - they were deleted outside beets. "
-            "It will treat this import as a duplicate and stop part-way. Clear the "
-            "stale rows first; that removes database rows only, never files."
+            "none of those files exist any more - they were deleted outside beets, "
+            "or the library is off its mount. It will treat this import as a duplicate "
+            "and stop part-way. Clear the stale rows first; that removes database rows "
+            "only, never files."
         )
 
 
@@ -1222,8 +1223,10 @@ class Beets:
         """Drop the rows, never the files, and only once every path is gone.
 
         `beet remove` without `-d` leaves files alone, which is right here
-        because there are none left to leave. ADR-050.
+        because there are none left to leave. A library off its mount has lost
+        none of them, so nothing is cleared there. ADR-050.
         """
+        self._refuse_off_its_mount(runner, library)
         rows = self._filed_rows(runner, library, artist, album, mbid)
         if not rows or any(Path(r.path).exists() for r in rows):
             raise ImportFailed(

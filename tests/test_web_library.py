@@ -27,6 +27,7 @@ from ripdoctor.web.routes import build
 from ripdoctor.web.routes.library import spec_from
 from ripdoctor.web.service import Service
 from ripdoctor.work import capture as W
+from tests.beets_double import Library
 from tests.pool import a_layout, a_runner, quiet_then_loud
 from tests.test_web_routes import a_service, get, post
 
@@ -1773,3 +1774,22 @@ def test_a_capture_of_another_record_stops_nothing_here(tmp_path: Path) -> None:
     service, _library = arrived(tmp_path)
     service.recorder.live = capture_of("another")
     assert get(build(service), "/api/archive/album", service).json()["ready"]
+
+
+def test_clearing_stale_rows_asks_about_the_release_the_page_showed(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    (tmp_path / "keep").mkdir()
+    (tmp_path / "keep" / "x.flac").write_bytes(b"x")
+    service.settings = replace(
+        service.settings, importer="beets", library=str(tmp_path / "keep")
+    )
+    gone = tmp_path / "keep" / "gone.flac"
+    fake = Library(tmp_path / "keep", tmp_path, installed={"beet"})
+    fake.add(gone, albumartist="Another Name", album="Other", mb_albumid="rel")
+    gone.unlink()
+    service.runner = fake
+    r = post(build(service), "/api/library/clear-stale/album", service, {"mbid": "rel"})
+    assert r.status == 200 and r.json()["cleared"] == 1
+    assert not fake.recs

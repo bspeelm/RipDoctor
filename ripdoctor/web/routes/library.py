@@ -289,13 +289,20 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/library/clear-stale/([^/]+)")
     def clear_stale(r: H.Request) -> H.Response:
         """Remove rows whose files are gone. Refuses if any of them is there."""
-        plan = _plan_of(service, slug_of(r))
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
         importer = IMP.choose(
             service.runner, service.settings.importer, service.state_dir
         )
+        # The release the page asked about, as `existing` does: the rows it showed.
+        mbid = str(r.json().get("mbid", _spec_mbid(service, slug)))
         try:
             cleared = importer.clear_stale(
-                service.runner, service.settings.library, plan.artist, plan.album
+                service.runner,
+                service.settings.library,
+                plan.artist,
+                plan.album,
+                mbid=mbid,
             )
         except IMP.ImportFailed as e:
             raise H.HttpError(409, str(e)) from e

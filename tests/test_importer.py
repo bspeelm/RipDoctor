@@ -445,7 +445,8 @@ def test_clearing_removes_rows_and_leaves_files_alone(tmp_path: Path) -> None:
             return super().run(argv, stdin=stdin, timeout=timeout)
 
     fake = Once(installed={"beet"}).expect("ls", stdout=_rows(tmp_path, "01.flac"))
-    cleared = I.Beets().clear_stale(fake, "/music", "A Band", "A Record")
+    (tmp_path / "another.flac").write_bytes(b"fLaC")
+    cleared = I.Beets().clear_stale(fake, str(tmp_path), "A Band", "A Record")
     assert cleared.tracks == 1
     removed = [c for c in fake.calls if "remove" in c]
     assert removed and "-d" not in removed[0], "it must never delete files"
@@ -1890,3 +1891,20 @@ def test_fewer_arriving_than_are_filed_may_not_replace_the_release(
         )
     assert (library / "Band A" / "Blue" / "02 Old.flac").is_file()
     assert not [c for c in fake.calls if "import" in c]
+
+
+def test_clearing_stale_rows_is_refused_with_the_library_off_its_mount(
+    tmp_path: Path,
+) -> None:
+    library = tmp_path / "lib"
+    library.mkdir()
+    fake = FakeRunner(installed={"beet"}).expect(
+        "ls", stdout=rows_at(library, "A Band/A Record/01.flac")
+    )
+    with pytest.raises(I.ImportFailed, match="off its mount"):
+        I.Beets().clear_stale(fake, str(library), "A Band", "A Record")
+    assert not [c for c in fake.calls if "remove" in c]
+
+
+def test_the_stale_note_allows_for_a_library_off_its_mount() -> None:
+    assert "off its mount" in I.Stale(1, Path("/x")).note()

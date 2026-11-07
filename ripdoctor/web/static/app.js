@@ -3929,7 +3929,7 @@ async function clearStale() {
   const was = b.textContent;
   b.disabled = true; b.textContent = "clearing\u2026";
   try {
-    const r = await postJSON(`/api/library/clear-stale/${S.slug}`, {});
+    const r = await postJSON(`/api/library/clear-stale/${S.slug}`, { mbid: importMbid() });
     status(`cleared ${r.cleared} stale rows`);
     await checkExisting();
   } catch (e) {
