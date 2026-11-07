@@ -2014,3 +2014,35 @@ def test_nothing_above_the_library_root_is_a_cover_of_this_row(tmp_path: Path) -
         rec.artpath = str(outside)
     replaces(fake, review, library)
     assert outside.is_file()
+
+
+def test_a_relative_row_once_outlived_the_file_a_replace_deleted(
+    tmp_path: Path,
+) -> None:
+    class Keeps(Library):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            if "remove" in [str(a) for a in argv]:
+                return FakeRunner.run(self, argv, stdin=stdin, timeout=timeout)
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = Keeps(Path(library), review)
+    for line in said.decode().split("\n"):
+        fake.add(Path(line.split(SEP)[4]), mb_albumid="x")
+    with pytest.raises(I.ImportFailed, match="still holds 2 rows"):
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    assert len(list((Path(library) / A.WHERE).rglob("[01]"))) == 2, "a file was deleted"
+
+
+def test_stale_rows_are_forgotten_by_their_id_where_beets_gave_one(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "another.flac").write_bytes(b"fLaC")
+    fake = Library(tmp_path, tmp_path)
+    gone = tmp_path / "A Band" / "A Record" / "01.flac"
+    fake.add(gone)
+    gone.unlink()
+    I.Beets().clear_stale(fake, str(tmp_path), "A Band", "A Record")
+    assert any("id:1" in c for c in fake.calls if "remove" in c)
+    assert not fake.recs

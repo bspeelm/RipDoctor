@@ -1147,7 +1147,7 @@ class Beets:
         old rows are gone, `%aunique` no longer has reason to keep the new copy in a
         folder of its own, and `move` says where it belongs. It is filed either way."""
         settled = A.proved(held)
-        self._forget_ids(runner, settled.rows)
+        self._forget_held(runner, library, settled)
         A.drop(settled)
         removed = [Path(p) for p in settled.files]
         folders = _clear_emptied(library, [Path(p) for p in settled.everything])
@@ -1194,7 +1194,7 @@ class Beets:
             if held.rows == ("?",):
                 said.append(f"{held.where} cannot be read and was left where it is")
             elif held.proved:
-                self._forget_ids(runner, held.rows)
+                self._forget_held(runner, library, held)
                 A.drop(held)
                 said.append(f"finished replacing {held.album or held.mbid}")
             else:
@@ -1223,11 +1223,27 @@ class Beets:
             why = TapeRun(result.returncode, result.err).why()
             raise ImportFailed(f"beets could not clear those rows: {why}")
 
+    def _forget_held(self, runner: Runner, library: str, held: A.Held) -> None:
+        """Listed again after, since a row that stayed would name a file about to go.
+        What cannot be forgotten is raised with every file still held."""
+        self._forget_ids(runner, held.rows)
+        left = {r.row for r in self._copies(runner, library, [])} & set(held.rows)
+        if left:
+            raise ImportFailed(
+                f"beets still holds {len(left)} rows of the copy being replaced, so "
+                f"its files stay in {held.where}"
+            )
+
     def _forget_rows(self, runner: Runner, rows: Collection[Row]) -> None:
-        """By each exact path, in one command, and with no `-d`, so no file goes."""
+        """By id where beets gave one, since a relative row is never found by the path
+        it was rooted to, and with no `-d`, so no file goes."""
         if not rows:  # with no query at all, beets would take the whole library
             return
-        terms = [part for r in rows for part in (",", _one_file(r.path))][1:]
+        terms = [
+            part
+            for r in rows
+            for part in (",", f"id:{r.row}" if r.row else _one_file(r.path))
+        ][1:]
         result = runner.run(self._argv(["remove", "-f", *terms]), timeout=600)
         if not result.ok:
             why = TapeRun(result.returncode, result.err).why()
