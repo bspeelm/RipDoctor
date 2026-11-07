@@ -1581,7 +1581,13 @@ def test_an_album_that_arrived_cut_replaces_its_release_and_no_other_edition(
     (waiting / "01 New.flac").write_bytes(b"fLaC")
     fake = replacing(str(library), rows, waiting, who="Band A", what="Blue")
     done = I.Beets().take(
-        fake, str(waiting), str(library), mbid="rel", tracks=("01 New.flac",)
+        fake,
+        str(waiting),
+        str(library),
+        mbid="rel",
+        tracks=("01 New.flac",),
+        duplicates="replace",
+        replacing=True,
     )
     assert not mine.exists() and other.is_file()
     assert any("removed 1 files" in n for n in done.notes)
@@ -1598,7 +1604,15 @@ def test_an_album_that_arrived_cut_with_none_of_its_release_there_is_not_refused
     fake = FakeRunner(installed={"beet"}).expect(
         "ls", stdout=listing(("Band A", "Blue", other, "rel-other"))
     )
-    I.Beets().take(fake, str(tmp_path), str(library), mbid="rel", tracks=())
+    I.Beets().take(
+        fake,
+        str(tmp_path),
+        str(library),
+        mbid="rel",
+        tracks=(),
+        duplicates="replace",
+        replacing=True,
+    )
     assert other.is_file()
     assert not [c for c in fake.calls if "remove" in c]
     assert [c for c in fake.calls if "import" in c]
@@ -1831,3 +1845,48 @@ def test_fewer_in_the_library_than_were_cut_is_a_failure_and_not_a_success(
     review = Path(a_review(tmp_path))
     with pytest.raises(I.ImportFailed, match="holds 1 of 2"):
         I.Beets().apply(moving_beets(review, listed=1), a_plan(), str(review), "/music")
+
+
+def filed_release(library: Path, waiting: Path, *names: str) -> Library:
+    waiting.mkdir()
+    fake = Library(library, waiting, who="Band A", what="Blue")
+    for name in names:
+        fake.add(library / "Band A" / "Blue" / name, mb_albumid="rel")
+    return fake
+
+
+def test_an_album_that_arrived_cut_keeps_both_unless_replace_was_ticked(
+    tmp_path: Path,
+) -> None:
+    library = tmp_path / "lib"
+    fake = filed_release(library, tmp_path / "w", "01 Old.flac")
+    (tmp_path / "w" / "01 New.flac").write_bytes(b"fLaC")
+    I.Beets().take(
+        fake,
+        str(tmp_path / "w"),
+        str(library),
+        mbid="rel",
+        tracks=("01 New.flac",),
+        duplicates="replace",
+    )
+    assert (library / "Band A" / "Blue" / "01 Old.flac").is_file()
+
+
+def test_fewer_arriving_than_are_filed_may_not_replace_the_release(
+    tmp_path: Path,
+) -> None:
+    library = tmp_path / "lib"
+    fake = filed_release(library, tmp_path / "w", "01 Old.flac", "02 Old.flac")
+    (tmp_path / "w" / "01 New.flac").write_bytes(b"fLaC")
+    with pytest.raises(I.ImportFailed, match="would lose the rest"):
+        I.Beets().take(
+            fake,
+            str(tmp_path / "w"),
+            str(library),
+            mbid="rel",
+            tracks=("01 New.flac",),
+            duplicates="replace",
+            replacing=True,
+        )
+    assert (library / "Band A" / "Blue" / "02 Old.flac").is_file()
+    assert not [c for c in fake.calls if "import" in c]

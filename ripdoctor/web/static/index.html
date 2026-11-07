@@ -305,11 +305,16 @@
       <input type="file" id="pc-file" accept=".zip,application/zip" hidden>
       <label id="pc-duprow" hidden>If it is already in the library
         <select id="pc-dup">
-          <option value="replace">Replace this release if it is there</option>
           <option value="keep">Keep both</option>
+          <option value="replace">Replace this release if it is there</option>
           <option value="skip">Skip it</option>
           <option value="merge">Merge them</option>
         </select></label>
+      <div id="pc-replace-wrap" class="warn" hidden>
+        <p class="mono" id="pc-replace-what"></p>
+        <label class="inline"><input type="checkbox" id="pc-replace">
+          I know these files are removed once the new ones are in the library</label>
+      </div>
       <button type="button" id="pc-import" hidden>Import this release</button>
       <p class="err" id="pc-err"></p>
     </div>

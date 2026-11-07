@@ -15,6 +15,7 @@ from ripdoctor.config.settings import Settings
 from ripdoctor.integrations.importer import PREVIEW_FILE
 from ripdoctor.store import incoming as IN
 from ripdoctor.web import http as H
+from ripdoctor.web import routes as R
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.precut import CHUNK, HELD
 from ripdoctor.web.service import Service
@@ -231,3 +232,23 @@ def test_nothing_is_waiting_on_a_clean_pool(tmp_path: Path) -> None:
     service = a_precut_service(tmp_path)
     got = get(build(service), "/api/precut", service).json()
     assert got["upload"] is None and got["staged"] == []
+
+
+def test_replace_on_an_album_that_arrived_cut_needs_the_tick(tmp_path: Path) -> None:
+    service = a_precut_service(tmp_path)
+    service.runner = FakeRunner(installed={"beet"})
+    r = post(
+        build(service),
+        "/api/precut/take",
+        service,
+        {"mbid": MBID, "duplicates": "replace"},
+    )
+    assert r.status == 409 and "ticked" in r.json()["error"]
+    assert not [c for c in service.runner.calls if "import" in c]
+
+
+def test_keep_both_is_what_an_album_that_arrived_cut_starts_on() -> None:
+    page = (Path(R.__file__).parent.parent / "static" / "index.html").read_text()
+    choices = page[page.index('id="pc-dup"') :]
+    assert choices.index('value="keep"') < choices.index('value="replace"')
+    assert 'id="pc-replace"' in page

@@ -1637,13 +1637,29 @@ async function sendPrecut(file) {
   }
 }
 
+// Replace removes what is filed, so it says how much and waits for a tick, as a record does.
+async function showPrecutReplace() {
+  const replacing = $("#pc-dup").value === "replace";
+  $("#pc-replace").checked = false;
+  $("#pc-replace-wrap").hidden = !replacing;
+  $("#pc-import").disabled = replacing;
+  if (!replacing) return;
+  try {
+    const { tracks, where, refused } = await api(`/api/precut/filed?mbid=${encodeURIComponent(pcMbid)}`);
+    $("#pc-replace-what").textContent = refused
+      || (tracks ? `${counted(tracks, "track", "tracks")} of this release at ${where}` : "None of this release is filed, so nothing is removed.");
+  } catch (e) {
+    $("#pc-replace-what").textContent = e.message;
+  }
+}
+
 async function takePrecut() {
   $("#pc-err").textContent = "";
   $("#pc-import").disabled = true;
   $("#pc-state").textContent = "importing…";
   try {
     const done = await runJob("precut", "/api/precut/take",
-      { mbid: pcMbid, duplicates: $("#pc-dup").value }, "importing");
+      { mbid: pcMbid, duplicates: $("#pc-dup").value, replace: $("#pc-replace").checked }, "importing");
     $("#pc-state").textContent = "";
     $("#pc-done").textContent = `${done.tracks} tracks filed`
       + (done.library ? ` at ${done.library}` : "")
@@ -4853,6 +4869,8 @@ function wire() {
   $("#imp-fromplan").onchange = () => { showCatalogueState(); checkExisting(); };
   $("#imp-go").onclick = runImport;
   $("#imp-close").onclick = () => $("#impdlg").close();
+  $("#pc-dup").onchange = showPrecutReplace;
+  $("#pc-replace").onchange = () => { $("#pc-import").disabled = !$("#pc-replace").checked; };
   $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };
   $("#archive").onclick = openArchive;
   $("#arc-go").onclick = archiveRun;

@@ -670,7 +670,8 @@ class Beets:
         *,
         mbid: str,
         tracks: tuple[str, ...],
-        duplicates: str = "replace",
+        duplicates: str = "keep",
+        replacing: bool = False,
         file_mode: int = 0o664,
         dir_mode: int = 0o775,
     ) -> Outcome:
@@ -682,9 +683,16 @@ class Beets:
         # Nothing asked first here, so finding none of this release is the usual case.
         held = (
             self._hold_filed(
-                runner, library, "", "", mbid, directory, none_is_fine=True
+                runner,
+                library,
+                "",
+                "",
+                mbid,
+                directory,
+                none_is_fine=True,
+                at_least=len(tracks),
             )
-            if duplicates == "replace"
+            if replacing and duplicates == "replace"
             else None
         )
         try:
@@ -1039,6 +1047,7 @@ class Beets:
         directory: str,
         *,
         none_is_fine: bool = False,
+        at_least: int | None = None,
     ) -> A.Held | None:
         """Exactly `filed`'s files moved aside, or a plain refusal with nothing moved.
         Every row is proved first, since these paths come from another program. Their
@@ -1050,6 +1059,10 @@ class Beets:
         refused = replace_refusal(rows, artist, album, mbid)
         if refused:
             raise ImportFailed(refused)
+        # An album that arrived cut has no plan to count against. Fewer than are filed
+        # would lose the rest; more completes a copy that was short, and is allowed.
+        if at_least is not None and at_least < len(rows):
+            raise ImportFailed(partial_cut(at_least, len(rows)))
         root = Path(library).resolve()
         for r in rows:
             if not contains(root, r.path):
