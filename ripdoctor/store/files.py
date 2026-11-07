@@ -13,6 +13,7 @@ from typing import Any
 from ripdoctor.core.plan import (
     LEAD,
     TAIL,
+    OldFormat,
     Plan,
     Spec,
     SpecSide,
@@ -157,6 +158,42 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=1) + "\n")
     os.replace(tmp, path)
+
+
+def with_unseen_sides(plan: Plan, before: Plan | None, on_disk: dict[str, str]) -> Plan:
+    """A plan being saved, with the saved sides a page cannot show. It lists what is on
+    disk, so a side away for the moment would lose its times and marks to a save about
+    something else. Taking one out is `forget_side`, and is asked for by name."""
+    named = {s.file for s in plan.sides}
+    kept = [
+        s
+        for s in (before.sides if before else ())
+        if s.file not in named and s.file not in on_disk
+    ]
+    if not kept:
+        return plan
+    return replace(
+        plan, sides=tuple(sorted((*plan.sides, *kept), key=lambda s: s.file))
+    )
+
+
+def forget_side(layout: Layout, slug: str, file: str) -> None:
+    """A side somebody discarded goes from both documents, as its dialog promises. A
+    record with no readable documents has nothing to take it out of."""
+    try:
+        plan = read_plan(layout.plan_file(slug))
+        spec = read_spec(layout.spec_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return
+    if all(s.file != file for s in plan.sides):
+        return
+    letter = letter_of(file)
+    save(
+        layout,
+        slug,
+        replace(spec, sides=tuple(s for s in spec.sides if s.letter != letter)),
+        replace(plan, sides=tuple(s for s in plan.sides if s.file != file)),
+    )
 
 
 def plan_seen(layout: Layout, slug: str) -> str:

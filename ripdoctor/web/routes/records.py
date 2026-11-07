@@ -337,8 +337,10 @@ def add(app: App, service: Service) -> None:
         # it dropped every one of them.
         current = _saved_spec(layout, slug)
         mbid = str(body.get("mbid", "")) or (current.mbid if current else "")
+        before = _saved_plan_or_none(layout, slug)
+        stamps = C.stamps_of(layout, slug)
         plan, released = saved_over(
-            plan, _saved_plan_or_none(layout, slug), C.stamps_of(layout, slug)
+            F.with_unseen_sides(plan, before, stamps), before, stamps
         )
         spec = replace(F.spec_of(plan, current), mbid=mbid)
         spec_path, plan_path = F.save(layout, slug, spec, plan)

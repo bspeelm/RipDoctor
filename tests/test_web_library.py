@@ -1950,3 +1950,30 @@ def test_a_record_with_no_release_does_not_open_the_gate_on_an_edition(
     service.settings = replace(service.settings, importer="beets")
     gate = get(build(service), "/api/archive/album", service).json()
     assert not gate["ready"] and "another release" in gate["why"]
+
+
+def test_a_save_once_forgot_a_side_the_page_was_not_showing(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    (service.layout.raw / "album" / "side-b.flac").unlink()
+    saved_b = F.read_plan(service.layout.plan_file("album")).sides[1]
+    assert page_saves(service)["ok"]
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert [s.file for s in plan.sides] == ["side-a.flac", "side-b.flac"]
+    assert plan.sides[1].tracks == saved_b.tracks
+
+
+def test_discarding_a_side_takes_it_out_of_both_documents(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    r = post(
+        build(service),
+        "/api/rip/discard-side",
+        service,
+        {"slug": "album", "side": "b"},
+    )
+    assert r.status == 200, r.json()
+    assert [s.file for s in F.read_plan(service.layout.plan_file("album")).sides] == [
+        "side-a.flac"
+    ]
+    assert [s.letter for s in F.read_spec(service.layout.spec_file("album")).sides] == [
+        "a"
+    ]
