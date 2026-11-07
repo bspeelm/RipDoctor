@@ -95,13 +95,10 @@ def note_filed(layout: Layout, slug: str, captures: dict[str, str]) -> None:
 
 def _filed_captures(layout: Layout, slug: str) -> dict[str, str]:
     where = layout.filed_file(slug)
-    try:
+    # No proof reads as no proof, and the gate asks for one.
+    with suppress(OSError, ValueError):
         return dict(json.loads(where.read_text()))
-    except (
-        OSError,
-        ValueError,
-    ):  # no proof reads as no proof, and the gate asks for one
-        return {}
+    return {}
 
 
 def _capture_doubt(layout: Layout, slug: str) -> str:

@@ -210,9 +210,10 @@ def add(app: App, service: Service) -> None:
         """What a page compares with what it loaded, to find a side or a plan that
         changed without it. Cheap enough to ask every few seconds."""
         slug = slug_of(r)
-        return H.ok(
-            {"seen": F.plan_seen(layout, slug), "captures": _captures(layout, slug)}
-        )
+        captures = _captures(layout, slug)
+        if not captures:
+            raise H.HttpError(404, f"no side files for {slug}")
+        return H.ok({"seen": F.plan_seen(layout, slug), "captures": captures})
 
     @app.route("GET", "/api/align/([^/]+)")
     def can_align(r: H.Request) -> H.Response:

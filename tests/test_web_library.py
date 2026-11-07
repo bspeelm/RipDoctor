@@ -1438,6 +1438,11 @@ def test_a_save_during_a_job_waits_and_one_during_a_prepare_does_not(
     assert post(app, "/api/plan/album", service, doc).status == 200
 
 
+def test_asking_what_changed_about_a_record_that_went_is_a_404(tmp_path: Path) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    assert get(build(service), "/api/seen/nothing-here", service).status == 404
+
+
 def test_a_cut_older_than_the_plan_is_said_to_be(tmp_path: Path) -> None:
     """With no unsaved state left, this is what says the page has moved on from it."""
     service, _plain = a_fit_with_a_mark(tmp_path)

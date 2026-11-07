@@ -136,7 +136,7 @@ function saveOnLeaving() {
 
 // What was saved, when this page did not save it: a side finished by a rip, or a tab
 // beside this one. A page with something of its own in hand is left alone, and is told at
-// its own save. A press used to be how this reached the screen.
+// its own save.
 async function noticeDisk() {
   const typing = document.activeElement?.closest?.("#cutview input, #cutview textarea");
   if (!S.slug || !S.meta || S.dirty || saveRun || S.job || cutOpening || typing || player?.playing
