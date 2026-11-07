@@ -2046,3 +2046,21 @@ def test_stale_rows_are_forgotten_by_their_id_where_beets_gave_one(
     I.Beets().clear_stale(fake, str(tmp_path), "A Band", "A Record")
     assert any("id:1" in c for c in fake.calls if "remove" in c)
     assert not fake.recs
+
+
+def test_the_override_is_never_rewritten_in_place_and_left_alone_when_it_is_right(
+    tmp_path: Path,
+) -> None:
+    beets = I.Beets.with_override(tmp_path)
+    where = Path(beets.config)
+    was = where.stat()
+    I.Beets.with_override(tmp_path)
+    assert where.stat().st_mtime_ns == was.st_mtime_ns
+    where.write_text("something older")
+    held = where.stat().st_ino
+    other = tmp_path / "other"
+    other.hardlink_to(where)
+    I.Beets.with_override(tmp_path)
+    assert where.read_text() == I.OVERRIDE
+    assert where.stat().st_ino != held and other.read_text() == "something older"
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".")]

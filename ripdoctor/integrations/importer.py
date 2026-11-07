@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from collections.abc import Collection, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -394,14 +396,14 @@ class Beets:
         """Write the override beside this project's other state, and use it."""
         where = Path(state_dir) / OVERRIDE_FILE
         where.parent.mkdir(parents=True, exist_ok=True)
-        where.write_text(OVERRIDE)
+        _written(where, OVERRIDE)
         db = where.parent / PREVIEW_DB
         look = where.parent / PREVIEW_FILE
-        look.write_text(
-            PREVIEW.format(db=db, files=where.parent / "beets-preview-files")
+        _written(
+            look, PREVIEW.format(db=db, files=where.parent / "beets-preview-files")
         )
         no_art = where.parent / NO_ART_FILE
-        no_art.write_text(NO_ART)
+        _written(no_art, NO_ART)
         return cls(
             config=str(where),
             preview_config=str(look),
@@ -1359,6 +1361,20 @@ def _merge_answers(how: str) -> bytes:
     if not how:
         return b""
     return SKIP_ANY_OTHER if how == NEW_ALBUM else PINNED_ANSWERS[how]
+
+
+def _written(where: Path, text: str) -> None:
+    """Only if it differs, and whole. Every request builds this, and a beet starting
+    while the file was being truncated read no override at all, so it moved nothing
+    the way it was told and answered nothing it was asked."""
+    with suppress(OSError):  # not there, or unreadable: either way it is written below
+        if where.read_text() == text:
+            return
+    handle, tmp = tempfile.mkstemp(dir=where.parent, prefix=f".{where.name}.")
+    with os.fdopen(handle, "w") as f:
+        f.write(text)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, where)
 
 
 _NUMBERED = re.compile(r"\.\d+$")
