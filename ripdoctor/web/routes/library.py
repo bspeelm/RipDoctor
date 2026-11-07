@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -371,18 +372,50 @@ def add(app: App, service: Service) -> None:
                     )
                 except IMP.ImportFailed as e:  # written for the person; see `Jobs`
                     raise ValueError(str(e)) from e
-            AR.note_filed(layout, slug, captures)
+            AR.note_filed(layout, slug, captures, merged=duplicates == "merge")
             job.finished = done.tracks
             notes = [*done.notes, *after_import(service)]
-            return {**done.as_dict(), "importer": importer.name, "notes": notes}
+            filed = {**done.as_dict(), "importer": importer.name, "notes": notes}
+            return {**filed, "archive": _archive_after(job, slug, mbid)}
 
         try:
             return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    def _survey(r: H.Request, read: bool) -> dict[str, Any]:
-        slug = slug_of(r)
+    def _archive_after(job: Job, slug: str, mbid: str) -> dict[str, Any]:
+        """The last step of an import. The import stands whatever happens here, so
+        every failure is said and none is raised over the job reporting it."""
+        try:
+            state = _survey(slug, read=False, mbid=mbid)
+            if not state["ready"]:
+                return {"archived": False, "why": state["why"]}
+            return {"archived": True, **_put_away(job, slug, state)}
+        except Exception as e:
+            why = f"the import stands, and archiving failed: {e}"
+            with suppress(OSError):  # the reason still reaches the page in this reply
+                AR.note_failed(layout, slug, why)
+            return {"archived": False, "why": why, "failed": True}
+
+    def _put_away(job: Job, slug: str, state: dict[str, Any]) -> dict[str, Any]:
+        """An earlier capture is always moved aside and kept here: nobody is asked
+        before this runs, so nothing it does may be final. ADR-065."""
+        job.total = len(state["sides"])
+        job.finished = 0
+
+        def step(name: str, what: str) -> None:
+            job.step(name, what)
+            job.finished += 1
+
+        return AR.put_away(
+            service.runner,
+            layout,
+            slug,
+            keep_superseded=True,
+            progress=step,
+        )
+
+    def _survey(slug: str, *, read: bool, mbid: str | None = None) -> dict[str, Any]:
         plan = _maybe_plan(service, slug)
         if plan is None:
             # A record that has been captured and not yet cut is the ordinary
@@ -421,42 +454,39 @@ def add(app: App, service: Service) -> None:
             plan.album,
             sum(len(s.tracks) for s in plan.sides),
             read=read,
-            mbid=_spec_mbid(service, slug),
+            mbid=_spec_mbid(service, slug) if mbid is None else mbid,
         )
 
     @app.route("GET", "/api/archive/([^/]+)")
     def archive_gate(r: H.Request) -> H.Response:
         """Whether the raw sides are safe to clear, and why not if they are not.
 
+        An import asks this itself, as its last step. The page asks to say the outcome.
+
         The gate is the whole point: it is what stops twenty minutes a side
         being cleared before the record is provably somewhere else. `verify=1`
         reads every side back, which takes seconds each - worth it before the
         irreversible step, not worth it for a button's tooltip.
         """
-        return H.ok(_survey(r, read=r.query.get("verify") == "1"))
+        return H.ok(_survey(slug_of(r), read=r.query.get("verify") == "1"))
 
     @app.route("POST", "/api/archive/([^/]+)")
     def archive(r: H.Request) -> H.Response:
+        """Archive again, after an import that could not. Same gate, same refusals."""
         slug = slug_of(r)
         _refuse_while_capturing(service, slug)
-        state = _survey(r, read=False)
+        state = _survey(slug, read=False)
         if not state["ready"]:
             raise H.HttpError(409, state["why"])
 
         def work(job: Job) -> dict[str, Any]:
-            job.total = len(state["sides"])
-
-            def step(name: str, what: str) -> None:
-                job.step(name, what)
-                job.finished += 1
-
-            return AR.put_away(
-                service.runner,
-                layout,
-                slug,
-                keep_superseded=service.settings.keep_superseded,
-                progress=step,
-            )
+            try:
+                return _put_away(job, slug, state)
+            except Exception as e:
+                # Raised for the job to report, and kept for whoever opens this next.
+                with suppress(OSError):  # that report is the one that matters
+                    AR.note_failed(layout, slug, f"archiving failed: {e}")
+                raise
 
         try:
             return H.ok(service.jobs.start(slug, "archive", work).as_dict(), 202)

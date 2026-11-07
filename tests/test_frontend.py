@@ -1334,7 +1334,7 @@ def test_the_record_s_rail_runs_in_the_order_the_work_does() -> None:
         ("check", ["cut-review"]),
         ("cut", ["split"]),
         ("import", ["import"]),
-        ("archive", ["archive"]),
+        ("archive", ["archive-again"]),
     ],
 )
 def test_a_moved_button_keeps_its_id_on_its_step(step: str, buttons: list[str]) -> None:
@@ -1375,7 +1375,8 @@ def test_cut_saves_for_itself_and_no_rail_state_waits_on_a_save() -> None:
 def test_the_rail_says_why_the_archive_gate_is_shut() -> None:
     js = (STATIC / "app.js").read_text()
     step = re.search(r"function railArchive\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "f.arc?.why" in step
+    assert "f.arc.why" in step and "f.arc.archive_failed" in step
+    assert "Not archived" in step
 
 
 def test_a_catalogue_placed_track_offers_review_and_the_rail_waits_on_it() -> None:
@@ -1756,7 +1757,6 @@ IMPORT_PANELS = (
     "imp-replace",
     "imp-dupes",
     "imp-go",
-    "imp-next",
     "imp-err",
     "imp-done",
     "imp-summary",

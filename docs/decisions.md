@@ -2932,3 +2932,32 @@ kept; the import runs; the new rows and files are proved; and only then are the 
 by id and deleted. Any failure puts them back, and a manifest lets a restart finish or undo what a
 kill interrupted. A copy that cannot go back stops the next import rather than being written over.
 The ceiling moves 13,200 → 14,000 for this and what follows in this section.
+
+### An import archives, as its last step
+
+There is no Archive button and no dialog. Every side is recorded before any import, so archiving
+only ever belongs there. The job that files a record then runs the same gate and the same verified
+`put_away`, and says both outcomes. What gets past the gate gets archived, and what does not stays
+in raw with the reason on the rail's last step. An import that stands is never rolled back, whatever
+archiving does. Only then does one action show, `Archive again`, which goes through the same route
+and refusals, and which is also how a record filed before this reaches the archive. Import and that
+route are refused while the recorder holds this record, since raw is what archiving clears.
+
+**The argument against: a wrong import now moves raw straight away,** with no moment to notice. What
+makes that acceptable is that nothing is lost by it: the sides sit in the archive, read back, and a
+record can be cut again from there and replaced. That recovery is not yet proved by a run.
+
+**An earlier capture is moved aside and kept here, in `_superseded/`.** ADR-055 unlinked it after
+read-back because a person had pressed Archive, having seen it named. Nobody presses anything now,
+so nothing this does may be final. That costs the doubled archive ADR-055 set out to avoid, on
+re-rips, and `keep_superseded` no longer changes what happens. Cuts from an earlier capture do not
+archive at all: the proof written at import is the gate's, as ADR-055 has it
+(`test_cuts_from_an_earlier_capture_never_archive_over_it`).
+
+**A tape does the same.** The job that files or writes its playlist archives it if every song is
+resolved, reading the uncut file back before anything clears. A skipped song holds nothing up, and
+one not resolved stays named in the step. Filing writes the playlist already, so most tapes archive
+in the File job. An archived tape stays as it is, so the chance to change anything ends there.
+
+A merge holds more rows than its plan, which is expected, so the proof says it was one and the gate
+lets that through.

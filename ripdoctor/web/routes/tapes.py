@@ -798,7 +798,10 @@ def add(app: App, service: Service) -> None:
                 )
                 # Set here because a raise leaves no return value for the job to keep.
                 job.result = {"notes": notes}
-            return {**done, "notes": notes}
+            finished = TX.archive_if_resolved(
+                _place(service), importer, tape.id, job, service.now()
+            )
+            return {**done, "notes": notes, "archive": finished}
 
         return started(tape.id, "file", work)
 
@@ -814,13 +817,17 @@ def add(app: App, service: Service) -> None:
             job.step(tape.name, "asking which albums have a cover")
             library = service.settings.library
             TJ.covers_known(service.runner, importer, layout, tape.id, library)
-            return state.to_dict()
+            finished = TX.archive_if_resolved(
+                _place(service), importer, tape.id, job, service.now()
+            )
+            return {**state.to_dict(), "archive": finished}
 
         return started(tape.id, "playlist", work)
 
     @app.route("POST", "/api/tapes/([^/]+)/archive")
     def archive(r: H.Request) -> H.Response:
-        """Refused with every reason, and asked again of the library once running."""
+        """Archive again, after a job that could not. Refused with every reason, and
+        asked again of the library once running."""
         tape = held(r)
         refusal = TX.refusal(_place(service), tape, PS.read(layout, tape.id))
         if refusal:

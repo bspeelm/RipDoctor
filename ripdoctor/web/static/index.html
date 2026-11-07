@@ -130,13 +130,13 @@
           <div class="step-acts"><button type="button" id="tp-playlist">Write playlist</button></div>
         </div>
       </section>
-      <section class="step" id="tp-st-archive" title="The uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.">
+      <section class="step" id="tp-st-archive" title="Once every song is resolved, the uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.">
         <i class="step-mark"></i>
         <div class="step-body">
           <div class="step-head"><b>Archive</b><span class="step-state"></span></div>
           <p class="step-detail"></p>
           <details class="step-why" hidden><summary>Why</summary><p></p></details>
-          <div class="step-acts"><button type="button" id="tp-archive">Archive</button></div>
+          <div class="step-acts"><button type="button" id="tp-archive" hidden>Archive again</button></div>
         </div>
       </section>
       <input type="file" id="tp-cover-file" accept="image/*" hidden>
@@ -495,14 +495,14 @@
           </div>
         </div>
       </section>
-      <section class="step" id="cut-st-archive" title="Puts the raw sides away and clears the working copies, once the album is proved to be in the library.">
+      <section class="step" id="cut-st-archive" title="The import does this as its last step: the raw sides are read back from the archive, then the working copies go.">
         <i class="step-mark"></i>
         <div class="step-body">
           <div class="step-head"><b>Archive</b><span class="step-state"></span></div>
           <p class="step-detail"></p>
           <details class="step-why" hidden><summary>Why</summary><p></p></details>
           <div class="step-acts">
-            <button type="button" id="archive" class="ghost" disabled title="archive the raw sides and clean up — enabled once the album is in the library">Archive rip&hellip;</button>
+            <button type="button" id="archive-again" class="ghost" hidden title="try again what the import could not finish">Archive again</button>
           </div>
         </div>
       </section>
@@ -727,6 +727,7 @@
         <div id="imp-done-box">
           <h4>Imported</h4>
           <p id="imp-summary"></p>
+          <p id="imp-archived"></p>
         </div>
         <div id="imp-art-wrap" class="warn" hidden>
           <b>This album went into the library with no cover art.</b>
@@ -741,17 +742,13 @@
           </div>
           <p class="err" id="imp-art-err"></p>
         </div>
-        <p class="dim">Whatever watches the library will see it. The raw sides are
-          still in <code>raw/</code> and the cut files have moved out of
-          <code>review/</code> &mdash; archiving puts the sides safely away and
-          clears the working copies.</p>
+        <p class="dim">Whatever watches the library will see it.</p>
       </div>
       <details id="imp-outwrap" hidden><summary>details</summary>
         <pre id="imp-out" class="dlg-pre"></pre></details>
       <div class="row dlg-acts">
         <button type="button" class="ghost" id="imp-close">Close</button>
         <button type="button" id="imp-go">Import into the library</button>
-        <button type="button" id="imp-next" hidden>Archive rip &rarr;</button>
       </div>
     </form>
   </dialog>
@@ -769,23 +766,6 @@
     </div>
   </dialog>
 
-  <dialog id="arcdlg">
-    <form method="dialog" id="arcform">
-      <h3>Archive rip</h3>
-      <p class="dim">Puts the raw sides in <code>archive/</code> — re-encoding any
-        that are truncated, since a capture ended with Ctrl-C is not a valid FLAC —
-        verifies every one, and only then removes <code>raw/</code>, the review
-        folder and the analysis cache. <b>Nothing in <code>archive/</code> is ever
-        deleted</b>: the raw sides are what make a re-split possible without
-        playing the record again.</p>
-      <pre id="arc-plan" class="dlg-pre"></pre>
-      <p class="err" id="arc-err"></p>
-      <div class="row dlg-acts">
-        <button type="button" class="ghost" id="arc-close">Close</button>
-        <button type="button" id="arc-go">Archive and clean up</button>
-      </div>
-    </form>
-  </dialog>
 
 </div>
 <script type="module" src="/app.js"></script>

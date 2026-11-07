@@ -272,7 +272,7 @@ function clearAlbum(message) {
   // per-album, and loadRipSides only runs from openAlbum - so without this it
   // keeps listing captures for a record that is no longer loaded
   $("#ripsides").hidden = true;
-  for (const id of ["#split", "#import", "#archive", "#firstpass", "#addtrack", "#splittrack"])
+  for (const id of ["#split", "#import", "#firstpass", "#addtrack", "#splittrack"])
     $(id).disabled = true;
   cutAsked = { review: null, arc: null };
   markDirty(false);
@@ -401,16 +401,17 @@ function railImport(f) {
 }
 
 function railArchive(f) {
-  blue("#archive", !!f.arc?.ready);
+  const stuck = !f.archived && f.imported && !!f.arc?.sides?.length && !f.arc?.capturing;
+  $("#archive-again").hidden = !stuck;
+  blue("#archive-again", !!f.arc?.ready);
   if (f.archived) return cutStep("archive", "done", "Archived", "The raw sides are in the archive.");
-  if (f.arc?.ready) {
-    const going = (f.arc.will_replace || []).map((n) => n.replace(/^side-|\.flac$/g, ""));
-    const replacing = going.length ? ` Side ${going.join(" and ")} replaces the earlier capture in the archive, which goes once the new one reads back.` : "";
-    const unfiled = f.review ? ` The ${counted(f.review, "cut track", "cut tracks")} in review/ are cleared unfiled, and can be cut again.` : "";
-    return cutStep("archive", "ready", "Ready", `Put the raw sides away and clean up.${replacing}${unfiled}`);
+  if (stuck) {
+    const why = f.arc.archive_failed || f.arc.why || "The record is filed, and its raw sides have not been put away";
+    return cutStep("archive", "todo", "Not archived", `${why[0].toUpperCase()}${why.slice(1).replace(/\.$/, "")}.`);
   }
-  const why = f.arc?.why || (f.overlaps.length ? "Waiting on the overlapping tracks" : "Enabled once the album is in the library");
-  return cutStep("archive", "wait", "Waiting", `${why[0].toUpperCase()}${why.slice(1).replace(/\.$/, "")}.`);
+  if (f.arc?.capturing) return cutStep("archive", "wait", "Waiting", f.arc.why);
+  if (f.overlaps.length) return cutStep("archive", "wait", "Waiting", "Waiting on the overlapping tracks.");
+  return cutStep("archive", "wait", "Waiting", "The import does this as its last step, once the record is proved to be in the library.");
 }
 
 // The names are read from the fields, so the heading says what a save would write.
@@ -599,7 +600,6 @@ async function openedAlbum(slug) {
   else status(`every side of ${slug} is still recording`, true);
   loadReview();
   refreshAlignButton();
-  refreshArchiveButton();
   refreshCutRail();             // the encode may have taken minutes
   markDirty(false);
   status(unprepared ? `${slug} is open, but its waveform is not: ${unprepared}` : "",
@@ -1172,84 +1172,34 @@ async function split() {
 
 // ----------------------------------------------------------------- archive
 
-async function refreshArchiveButton() {
-  const b = $("#archive");
-  b.disabled = true;
-  if (!S.slug) return;
-  try {
-    const st = await api(`/api/archive/${S.slug}?album=${encodeURIComponent(S.meta.album || "")}`);
-    b.disabled = !st.ready;
-    b.title = st.ready
-      ? `archive ${st.sides.length} raw sides and clean up`
-      : (st.why || "not ready");
-  } catch { /* leave it disabled */ }
-}
-
-async function openArchive() {
-  $("#arc-err").textContent = "";
-  $("#arc-plan").textContent = "checking…";
-  $("#arcdlg").showModal();
-  try {
-    const st = await api(`/api/archive/${S.slug}?verify=1&album=${encodeURIComponent(S.meta.album || "")}`);
-    const lines = [];
-    lines.push(`library: ${st.library_path || "(not found)"}  — ${st.library_tracks} tracks`);
-    lines.push("");
-    lines.push("archive to " + st.will_archive_to + ":");
-    for (const sd of st.sides)
-      lines.push(`  ${sd.name.padEnd(22)} ${(sd.bytes / 1e6).toFixed(0)} MB   `
-        + (sd.valid === null ? "" : sd.valid ? "valid — copy as-is" : "TRUNCATED — re-encode"));
-    if ((st.will_replace || []).length) {
-      lines.push("");
-      lines.push("replacing in the archive (the earlier take goes):");
-      for (const name of st.will_replace) lines.push("  " + name);
-    }
-    lines.push("");
-    lines.push("then remove:");
-    for (const d of st.will_remove) lines.push("  " + d);
-    if (!st.ready) lines.push("\nNOT READY: " + st.why);
-    lastSurvey = st;
-    $("#arc-plan").textContent = lines.join("\n");
-    $("#arc-go").disabled = !st.ready;
-  } catch (e) {
-    $("#arc-plan").textContent = "";
-    $("#arc-err").textContent = e.message;
-  }
-}
-
-let lastSurvey = {};
-
-async function archiveRun() {
-  // S.slug moves when the picker is rebuilt below, so remember what was archived
+// An import archives as its last step. This is only for one that could not, and for a
+// record filed before that was so.
+async function archiveAgain() {
   const done = S.slug;
-  const replacing = (lastSurvey.will_replace || []).length;
-  if (!confirm("Archive the raw sides and delete raw/, review/ and the cache?\n\n"
-             + "Each side is verified in archive/ before anything is removed."
-             + (replacing
-                ? `\n\n${replacing} archived side(s) are being replaced. The earlier `
-                  + `take is kept until the new one reads back, then goes.`
-                : ""))) return;
-  $("#arc-err").textContent = "";
-  $("#arc-go").disabled = true;
-  $("#arc-plan").textContent = "archiving — re-encoding truncated sides, this takes a minute…";
+  const b = $("#archive-again");
+  b.disabled = true;
+  status("archiving\u2026");
   try {
-    const r = await runJob(S.slug, `/api/archive/${S.slug}`,
-                             { album: S.meta.album }, "archiving");
-    const lines = ["archived to " + r.archive_dir, ""];
-    for (const a of r.archived) lines.push(`  ${a.side.padEnd(22)} ${a.seconds}s  ${(a.bytes / 1e6).toFixed(0)} MB  verified`);
-    lines.push("", ...r.notes.map((n) => "  " + n), "", "removed:", ...r.removed.map((d) => "  " + d));
-    $("#arc-plan").textContent = lines.join("\n");
-    await refreshCutRail();
-    $("#arcdlg").close();
-    resetCaptureAfterArchive(done);
-    await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
-
-    await loadOrphans();
-    status("archived and cleaned up");   // last, since opening the picker's choice clears it
+    await runJob(done, `/api/archive/${done}`, {}, "archiving");
+    await finishArchived(done);
+    status("archived");
   } catch (e) {
-    $("#arc-err").textContent = e.message;
-    $("#arc-go").disabled = false;
+    status(e.message, true);
+    logline(e.message, true);
+    await refreshCutRail();
+  } finally {
+    b.disabled = false;
   }
 }
+
+async function finishArchived(slug) {
+  resetCaptureAfterArchive(slug);
+  await refreshAlbums(NEW_ALBUM);   // that record is finished; start clean
+  await loadOrphans();
+}
+
+// Waiting for the import dialog to close, since the art panel in it still uses the record.
+let archivedWithImport = "";
 
 // ------------------------------------------------------------------ import
 
@@ -1286,7 +1236,6 @@ function openImport() {
   $("#imp-done").hidden = true;
   $("#imp-pick").hidden = false;
   $("#imp-go").hidden = true;
-  $("#imp-next").hidden = true;
   $("#imp-go").hidden = false;
   $("#imp-close").textContent = "Close";
   $("#imp-results").innerHTML = "";
@@ -1423,18 +1372,25 @@ async function runImport() {
                              replace: $("#imp-replace").checked },
                            "importing");
     $("#imp-summary").textContent = `${r.tracks} tracks \u2192 ${r.library}`;
+    $("#imp-archived").textContent = r.archive?.archived
+      ? `Archived: the raw sides are in ${r.archive.archive_dir}, read back.`
+      : `Not archived: ${r.archive?.why || "the import did not say why"}.`;
+    $("#imp-archived").classList.toggle("err", !r.archive?.archived);
+    if (r.archive?.archived) {
+      archivedWithImport = S.slug;
+      const held = albumsHeld.find((a) => a.slug === S.slug);
+      if (held) held.where = "archive";
+    }
     $("#imp-done").hidden = false;
     $("#imp-pick").hidden = true;      // every choice in it has been acted on
     showTranscript(r);   // collected all along, and hidden on every path
     $("#imp-go").hidden = true;
-    $("#imp-close").textContent = "Not yet";
+    $("#imp-close").textContent = "Close";
     await loadArtState();
     await loadReview();
-    await refreshArchiveButton();
     await refreshCutRail();
     offerArt();
-    $("#imp-next").hidden = $("#archive").disabled;
-    status("imported into the library");
+    status(r.archive?.archived ? "imported and archived" : "imported, and not archived - the rail says why", !r.archive?.archived);
   } catch (e) {
     $("#imp-err").textContent = e.message;
     $("#imp-outwrap").hidden = true;
@@ -2131,11 +2087,14 @@ function stepPlaylist(t) {
 function stepArchive(t) {
   const p = t.playlist;
   const unfiled = t.filing.every((o) => o.state === "pending" || o.state === "skipped");
-  tpAction("#tp-archive", !p.done, !p.archive_refusal, !!p.archive_refusal);
+  // Only where it can do something: a resolved tape archives in the job that resolved it.
+  const again = !p.done && !p.archive_refusal && !!p.outcome;
+  tpAction("#tp-archive", again, true, false);
   if (p.done) return tpStep("archive", "done", "Archived", "Copied and read back. The song list stays.", p.archived.file);
   if (unfiled) return tpStep("archive", "wait", "Waiting", "Waits until the songs are filed.");
   if (p.archive_refusal) return tpStep("archive", "wait", "Waiting", "Waits until every song is proved in the library.", p.archive_refusal);
-  return tpStep("archive", "ready", "Ready", "Puts the uncut file away, once it is read back.");
+  if (again) return tpStep("archive", "fail", "Not archived", p.archive_failed || "Every song is resolved, and the uncut file has not been put away.", p.archive_failed);
+  return tpStep("archive", "wait", "Waiting", "This happens by itself once every song is resolved.");
 }
 
 // What is next is the first step not done, and the thing to press is its blue button.
@@ -3432,8 +3391,7 @@ function cutTape() {
 const fileTape = () => startTapeJob(`/api/tapes/${tape.id}/file`, {});
 const writePlaylist = () => startTapeJob(`/api/tapes/${tape.id}/playlist`, {});
 function archiveTape() {
-  if (confirm(`Archive ${tape.name}? Its uncut file is copied and read back, then this copy and its cuts are cleared. The song list stays.`))
-    startTapeJob(`/api/tapes/${tape.id}/archive`, {});
+  startTapeJob(`/api/tapes/${tape.id}/archive`, {});
 }
 
 async function sendTapeList(file) {
@@ -4871,10 +4829,13 @@ function wire() {
   $("#imp-close").onclick = () => $("#impdlg").close();
   $("#pc-dup").onchange = showPrecutReplace;
   $("#pc-replace").onchange = () => { $("#pc-import").disabled = !$("#pc-replace").checked; };
-  $("#imp-next").onclick = () => { $("#impdlg").close(); openArchive(); };
-  $("#archive").onclick = openArchive;
-  $("#arc-go").onclick = archiveRun;
-  $("#arc-close").onclick = () => $("#arcdlg").close();
+  $("#archive-again").onclick = archiveAgain;
+  $("#impdlg").addEventListener("close", () => {
+    if (!archivedWithImport) return;
+    const slug = archivedWithImport;
+    archivedWithImport = "";
+    finishArchived(slug);
+  });
   $("#fp-search").onclick = fpSearch;
   $("#fp-cancel").onclick = () => $("#fpdlg").close();
   $("#fp-done").onclick = () => $("#fpdlg").close();

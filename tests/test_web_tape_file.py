@@ -22,6 +22,7 @@ from ripdoctor.store import tapes as T
 from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.service import Service
+from ripdoctor.work import tape_finish as TX
 from ripdoctor.work import tape_jobs as TJ
 from ripdoctor.work.jobs import Job
 from tests.test_web_routes import a_service, get, post, signed_in
@@ -35,6 +36,16 @@ from tests.test_web_tape_cut import (
     settle_all,
 )
 from tests.test_web_tapes import a_tape_runner, save_list, seeing, send_csv
+
+
+@pytest.fixture(autouse=True)
+def tape_stays_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These are about a tape before it archives, so its last step is left out here.
+    `tests/test_web_tape_archive.py` is about that step."""
+    monkeypatch.setattr(
+        TX, "archive_if_resolved", lambda *_a, **_k: {"archived": False, "why": ""}
+    )
+
 
 TG_TITLE = "TITLE"
 

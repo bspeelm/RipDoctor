@@ -448,10 +448,11 @@ def test_an_import_records_the_capture_its_tracks_came_from(tmp_path: Path) -> N
     doc = a_plan_dict()
     doc["sides"][0]["audio"] = C.stamp_of(raw)
     F.write_json(service.layout.plan_file("album"), doc)
+    stamp = C.stamp_of(raw)
     r = post(build(service), "/api/import/album", service, {})
     assert not r.json()["error"], r.json()["error"]
     assert json.loads(service.layout.filed_file("album").read_text()) == {
-        "side-a.flac": C.stamp_of(raw)
+        "side-a.flac": stamp
     }
 
 
@@ -470,12 +471,11 @@ def test_a_cut_older_than_the_capture_proves_nothing_about_it(tmp_path: Path) ->
     assert AR.cut_captures(service.layout, "album", plan) == {}
 
 
-def test_a_replacing_side_is_said_on_the_rail() -> None:
+def test_the_rail_says_why_a_record_was_not_archived_and_offers_one_press() -> None:
     js = STATIC_JS.read_text()
     step = js[js.index("function railArchive(") :]
     step = step[: step.index("\n}\n")]
-    assert "f.arc.will_replace" in step and "replaces the earlier capture" in step
-    assert "are cleared unfiled" in step
+    assert "archive_failed" in step and "are cleared unfiled" not in step
     cut = js[js.index("function railCut(") :]
     assert "f.arc?.captured_again" in cut[: cut.index("\n}\n")]
     assert '.replace(/\\.$/, "")' in step
@@ -493,15 +493,15 @@ def test_a_record_that_was_archived_before_can_be_archived_again(
     assert (service.layout.archive / "album" / "side-a.flac").read_bytes() != first
 
 
-def test_the_earlier_take_goes_once_the_new_one_has_read_back(
+def test_the_earlier_take_is_moved_aside_once_the_new_one_has_read_back(
     tmp_path: Path,
 ) -> None:
-    """By then it has been cut, tagged, filed and read back. ADR-055."""
+    """Nobody is asked before an import archives, so nothing is final. ADR-065."""
     service, _library = arrived(tmp_path)
-    rerip(service)
-    body = post(build(service), "/api/archive/album", service).json()
-    assert not (service.layout.archive / "album" / "_superseded").exists()
-    assert any("replaced" in n for n in body["result"]["notes"])
+    first = rerip(service)
+    post(build(service), "/api/archive/album", service).json()
+    aside = list((service.layout.archive / "album" / "_superseded").iterdir())
+    assert [p.read_bytes() for p in aside] == [first]
 
 
 def test_the_earlier_take_is_kept_when_the_setting_asks_for_it(
@@ -1793,3 +1793,117 @@ def test_clearing_stale_rows_asks_about_the_release_the_page_showed(
     r = post(build(service), "/api/library/clear-stale/album", service, {"mbid": "rel"})
     assert r.status == 200 and r.json()["cleared"] == 1
     assert not fake.recs
+
+
+# ------------------------------------------------- archiving as an import's last step
+
+
+def cut_and_captured(tmp_path: Path) -> tuple[Service, Path]:
+    """Cut from the capture in raw, with a plan on that capture, and nothing filed."""
+    service, library = ready_to_import(tmp_path)
+    service.runner = Archiving()
+    raw = service.layout.raw / "album" / "side-a.flac"
+    raw.write_bytes(b"fLaC")
+    os.utime(raw, (1000, 1000))
+    doc = a_plan_dict()
+    doc["sides"][0]["audio"] = C.stamp_of(raw)
+    F.write_json(service.layout.plan_file("album"), doc)
+    return service, library
+
+
+def test_an_import_archives_as_its_last_step_and_says_both(tmp_path: Path) -> None:
+    service, _library = cut_and_captured(tmp_path)
+    r = post(build(service), "/api/import/album", service, {})
+    result = r.json()["result"]
+    assert result["tracks"] == 1 and result["archive"]["archived"]
+    assert (service.layout.archive / "album" / "side-a.flac").is_file()
+    assert not (service.layout.raw / "album").exists()
+
+
+def test_an_import_short_of_the_gate_stands_says_why_and_clears_nothing(
+    tmp_path: Path,
+) -> None:
+    service, library = cut_and_captured(tmp_path)
+    placed = library / "A Band" / "A Record"
+    placed.mkdir(parents=True)
+    (placed / "00 Earlier.flac").write_bytes(b"fLaC")
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "not replaced" in archive["why"]
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+    assert (placed / "01 One.flac").is_file()
+
+
+def test_archiving_that_fails_leaves_the_import_standing_and_can_be_pressed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, library = cut_and_captured(tmp_path)
+    real = AR.put_away
+
+    def full(*_a: object, **_k: object) -> dict[str, object]:
+        raise OSError("the archive cannot be written")
+
+    monkeypatch.setattr(AR, "put_away", full)
+    r = post(build(service), "/api/import/album", service, {})
+    assert not r.json()["error"], r.json()["error"]
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "cannot be written" in archive["why"]
+    assert list(library.rglob("*.flac")), "the import was rolled back"
+    assert (service.layout.raw / "album" / "side-a.flac").is_file()
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert "cannot be written" in gate["archive_failed"] and gate["ready"]
+
+    monkeypatch.setattr(AR, "put_away", real)
+    again = post(build(service), "/api/archive/album", service).json()
+    assert not again["error"], again["error"]
+    assert (service.layout.archive / "album" / "side-a.flac").is_file()
+    assert (
+        not get(build(service), "/api/albums?archive=1", service)
+        .json()["albums"][0]
+        .get("archive_failed")
+    )
+
+
+def test_cuts_from_an_earlier_capture_never_archive_over_it(tmp_path: Path) -> None:
+    """Cut, captured again, then imported: the new capture was never cut, and the
+    archived one is what the tracks came from."""
+    service, _library = cut_and_captured(tmp_path)
+    archived = service.layout.archive / "album" / "side-a.flac"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(b"the earlier capture")
+    raw = service.layout.raw / "album" / "side-a.flac"
+    review = next(service.layout.review_dir("album").glob("*.flac"))
+    os.utime(raw, (review.stat().st_mtime + 60, review.stat().st_mtime + 60))
+    r = post(build(service), "/api/import/album", service, {})
+    archive = r.json()["result"]["archive"]
+    assert not archive["archived"] and "captured again" in archive["why"]
+    assert archived.read_bytes() == b"the earlier capture"
+    assert raw.is_file()
+
+
+def test_a_re_ripped_side_cut_and_imported_moves_the_earlier_capture_aside(
+    tmp_path: Path,
+) -> None:
+    service, _library = cut_and_captured(tmp_path)
+    archived = service.layout.archive / "album" / "side-a.flac"
+    archived.parent.mkdir(parents=True)
+    archived.write_bytes(b"the earlier capture")
+    r = post(build(service), "/api/import/album", service, {})
+    assert r.json()["result"]["archive"]["archived"], r.json()
+    aside = list((archived.parent / "_superseded").iterdir())
+    assert [p.read_bytes() for p in aside] == [b"the earlier capture"]
+    assert archived.read_bytes() == b"fLaC"
+
+
+def test_a_merge_holding_more_rows_than_its_plan_opens_the_gate(tmp_path: Path) -> None:
+    """It said an earlier copy had not been replaced, which told a person to remove a
+    correct file, and it could never pass."""
+    service, library = arrived(tmp_path)
+    (library / "A Band" / "A Record" / "02 Two.flac").write_bytes(b"fLaC")
+    doubled = get(build(service), "/api/archive/album", service).json()
+    assert not doubled["ready"] and "not replaced" in doubled["why"]
+    AR.note_filed(service.layout, "album", {}, merged=True)
+    assert get(build(service), "/api/archive/album", service).json()["ready"]
+    AR.note_filed(service.layout, "album", {})
+    assert not get(build(service), "/api/archive/album", service).json()["ready"]

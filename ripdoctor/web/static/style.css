@@ -540,7 +540,6 @@ dialog .err:empty{display:none}
 #imp-out{max-height:22rem;font-size:11px}
 #impdlg{--dlg:40rem}
 
-#arc-plan{max-height:220px}
 .ok{color:var(--start)}
 
 #imp-pick{display:flex;flex-direction:column;gap:14px}

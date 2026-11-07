@@ -31,6 +31,16 @@ from tests.test_web_tape_cut import TWO, Cutting, cut, job_of, placed, settle_al
 from tests.test_web_tape_file import Beet, cut_tape, file_it, holds, pinned
 from tests.test_web_tapes import a_service, a_tape_runner, save_list
 
+
+@pytest.fixture(autouse=True)
+def tape_stays_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These are about a tape before it archives, so its last step is left out here.
+    `tests/test_web_tape_archive.py` is about that step."""
+    monkeypatch.setattr(
+        TX, "archive_if_resolved", lambda *_a, **_k: {"archived": False, "why": ""}
+    )
+
+
 KEYS = (
     "title",
     "artist",

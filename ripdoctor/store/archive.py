@@ -88,9 +88,26 @@ def cut_captures(layout: Layout, slug: str, plan: Plan) -> dict[str, str]:
     }
 
 
-def note_filed(layout: Layout, slug: str, captures: dict[str, str]) -> None:
-    """Which capture the library's tracks came from, for the gate. ADR-055."""
-    write_json(layout.filed_file(slug), {**_filed_captures(layout, slug), **captures})
+# Beside the side names in the proof, and no side is named with a leading underscore.
+MERGED = "_merged"
+FAILED = "_archive_failed"
+
+
+def note_filed(
+    layout: Layout, slug: str, captures: dict[str, str], *, merged: bool = False
+) -> None:
+    """Which capture the library's tracks came from, for the gate. ADR-055. A merge is
+    said too: the rows of a record merged into another are more than its plan holds."""
+    doc = {**_filed_captures(layout, slug), **captures}
+    doc.pop(FAILED, None)
+    doc.pop(MERGED, None)
+    write_json(layout.filed_file(slug), {**doc, **({MERGED: "yes"} if merged else {})})
+
+
+def note_failed(layout: Layout, slug: str, why: str) -> None:
+    """Why archiving failed after a good import, for whoever opens the record next."""
+    doc = {**_filed_captures(layout, slug), FAILED: why}
+    write_json(layout.filed_file(slug), doc)
 
 
 def _filed_captures(layout: Layout, slug: str) -> dict[str, str]:
@@ -168,8 +185,11 @@ def survey(
             sides.append(
                 Side(p.name, p.stat().st_size, verify(runner, str(p)) if read else None)
             )
-    doubt = _capture_doubt(layout, slug) if where and count == expected else ""
-    ready = where is not None and count == expected and bool(sides) and not doubt
+    filed = _filed_captures(layout, slug)
+    merged = MERGED in filed and count > expected
+    held_all = count == expected or merged
+    doubt = _capture_doubt(layout, slug) if where and held_all else ""
+    ready = where is not None and held_all and bool(sides) and not doubt
     why = doubt
     if not sides:
         why = f"no sides in raw for {slug}"
@@ -182,7 +202,7 @@ def survey(
         why = "the record is not in the library yet"
     elif count < expected:
         why = f"only {count} of {expected} tracks are in the library"
-    elif count > expected:
+    elif count > expected and not merged:
         # Clearing raw/ on the strength of this archives over a record the
         # library holds twice. ADR-057.
         why = (
@@ -193,6 +213,7 @@ def survey(
         "ready": ready,
         "why": why,
         "captured_again": bool(doubt),
+        "archive_failed": filed.get(FAILED, ""),
         "library_path": None if where is None else str(where),
         "library_tracks": count,
         "expected": expected,
@@ -334,6 +355,10 @@ def put_away(
     with suppress(OSError):
         (dest / SUPERSEDED).rmdir()
 
+    filed = _filed_captures(layout, slug)
+    if FAILED in filed:
+        del filed[FAILED]
+        write_json(layout.filed_file(slug), filed)
     removed = []
     for directory in (source, *removable(layout, slug)):
         if directory.is_dir():
