@@ -971,7 +971,7 @@ def test_a_nudge_that_ends_align_says_so_as_it_happens() -> None:
     said = re.search(r"async function saidSaved\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert 'alignWas && $("#realign").hidden' in said
     assert "Align from archive is no longer offered" in said
-    assert "Any edit saved here puts the side on this capture and ends that offer" in js
+    assert "Moving or checking a boundary puts the side on this capture" in js
 
 
 def test_saves_are_in_order_and_the_last_state_lands() -> None:

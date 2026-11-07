@@ -1389,14 +1389,15 @@ def test_saving_over_a_re_rip_does_not_launder_an_old_mark_into_a_new_one(
     service, _plain = a_fit_with_a_mark(tmp_path)
     captured_again(service)
 
-    reply = page_saves(service)
-    assert reply["released"] == [1]
+    untouched = page_saves(service)
+    assert untouched["released"] == []
+    saved = F.read_plan(service.layout.plan_file("album"))
+    assert saved.sides[0].tracks[0].settled == "hand", "a save moved no boundary"
+
+    page_saves(service, {1: track_in(service, 1).end - 0.5})
     saved = F.read_plan(service.layout.plan_file("album"))
     assert saved.sides[0].audio == C.stamps_of(service.layout, "album")["side-a.flac"]
-    assert saved.sides[0].tracks[0].settled == ""
-    assert saved.sides[0].tracks[0].placed == "earlier"
-
-    assert not a_second_pass(service)["result"]["released"], "already let go, and said"
+    assert saved.sides[0].tracks[0].settled == "hand"
 
 
 def test_a_boundary_moved_after_a_re_rip_is_a_judgement_about_the_new_capture(
@@ -1441,8 +1442,8 @@ def test_a_cut_of_a_replaced_side_is_refused_by_name_before_anything_is_saved(
 def test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain(
     tmp_path: Path,
 ) -> None:
-    """Before a save, Align is a way out and is named. A save moves the stamp, and from
-    then on naming it would send a person to a refusal."""
+    """Align is a way out and is named until a boundary is moved or checked. That moves
+    the stamp, and from then on naming it would send a person to a refusal."""
     service, _plain = a_fit_with_a_mark(tmp_path)
     archived = service.layout.archive / "album"
     archived.mkdir(parents=True, exist_ok=True)
@@ -1453,9 +1454,12 @@ def test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain
     assert "Align from archive" in cut(service).json()["error"]
 
     page_saves(service)
+    assert get(app, "/api/align/album", service).json()["sides"] == ["a"]
+    assert "Align from archive" in cut(service).json()["error"]
+
+    page_saves(service, {1: track_in(service, 1).end - 0.5})
     assert get(app, "/api/align/album", service).json()["sides"] == []
-    said = cut(service).json()["error"]
-    assert "Align" not in said and "First pass" in said and "Checked" in said
+    assert "Align" not in cut(service).json()["error"]
 
 
 def test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written(

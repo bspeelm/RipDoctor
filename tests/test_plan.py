@@ -323,15 +323,15 @@ def test_a_check_made_on_a_row_shown_as_earlier_survives_the_save_as_heard_here(
     assert not released
 
 
-def test_a_check_from_a_tab_older_than_the_re_rip_is_still_let_go() -> None:
+def test_a_save_from_a_tab_older_than_the_re_rip_is_not_taken_for_a_check() -> None:
     plan, released = P.saved_over(
         stamped("", settled=P.EAR),
         stamped("old", settled=P.EAR),
         {"side-a.flac": "new"},
     )
-    track = plan.sides[0].tracks[0]
-    assert (track.settled, track.placed) == ("", P.EARLIER)
-    assert released
+    assert plan.sides[0].audio == "old" and not released
+    shown = P.as_it_stands(plan, {"side-a.flac": "new"}).sides[0].tracks[0]
+    assert (shown.settled, shown.placed) == ("", P.EARLIER)
 
 
 def test_a_check_on_a_side_already_saved_over_comes_out_heard_here() -> None:
@@ -347,3 +347,79 @@ def test_a_check_on_a_side_already_saved_over_comes_out_heard_here() -> None:
 def test_a_plan_with_nothing_to_check_has_no_refusal() -> None:
     plan = P.Plan.from_dict(a_plan_doc(a_track_doc(settled=P.EAR), a_track_doc()))
     assert P.cut_refusal(plan) == ""
+
+
+def test_a_title_changed_on_a_re_ripped_side_leaves_it_on_the_earlier_capture() -> None:
+    plan, released = P.saved_over(
+        stamped("", title="New Title", placed=P.EARLIER),
+        stamped("old", settled=P.HAND),
+        {"side-a.flac": "new"},
+    )
+    side = plan.sides[0]
+    assert side.audio == "old" and not released
+    track = side.tracks[0]
+    assert track.title == "New Title" and track.settled == P.HAND and track.placed == ""
+
+
+def test_moving_a_boundary_on_a_re_ripped_side_puts_it_on_this_capture() -> None:
+    plan, _released = P.saved_over(
+        stamped("", end=30.0, settled=P.HAND),
+        stamped("old"),
+        {"side-a.flac": "new"},
+    )
+    assert plan.sides[0].audio == "new" and plan.sides[0].tracks[0].settled == P.HAND
+
+
+def test_a_check_on_a_re_ripped_side_puts_it_on_this_capture() -> None:
+    plan, _released = P.saved_over(
+        stamped("", placed=P.EARLIER, settled=P.EAR),
+        stamped("old"),
+        {"side-a.flac": "new"},
+    )
+    assert plan.sides[0].audio == "new"
+
+
+def test_a_nudge_on_one_side_once_closed_align_on_another_and_cleared_its_marks() -> (
+    None
+):
+    doc = a_plan_doc(a_track_doc())
+    other = dict(doc["sides"][0])
+    other["file"] = "side-b.flac"
+    other["tracks"] = [a_track_doc(number=2, settled=P.HAND)]
+    before = {
+        **doc,
+        "sides": [{**doc["sides"][0], "audio": "old-a"}, {**other, "audio": "old-b"}],
+    }
+    moved = a_track_doc(end=30.0, settled=P.HAND)
+    after = {
+        **doc,
+        "sides": [
+            {**doc["sides"][0], "tracks": [moved]},
+            {**other, "tracks": [a_track_doc(number=2, placed=P.EARLIER)]},
+        ],
+    }
+    plan, released = P.saved_over(
+        P.Plan.from_dict(after),
+        P.Plan.from_dict(before),
+        {"side-a.flac": "new-a", "side-b.flac": "new-b"},
+    )
+    a, b = plan.sides
+    assert a.audio == "new-a"
+    assert b.audio == "old-b" and b.tracks[0].settled == P.HAND and not released
+
+
+def test_moving_one_boundary_lets_go_of_an_old_mark_beside_it_by_name() -> None:
+    before = a_plan_doc(
+        a_track_doc(settled=P.HAND), a_track_doc(number=2, start=20.0, end=30.0)
+    )
+    before["sides"][0]["audio"] = "old"
+    after = a_plan_doc(
+        a_track_doc(placed=P.EARLIER),
+        a_track_doc(number=2, start=20.0, end=29.0, settled=P.HAND),
+    )
+    plan, released = P.saved_over(
+        P.Plan.from_dict(after), P.Plan.from_dict(before), {"side-a.flac": "new"}
+    )
+    one, two = plan.sides[0].tracks
+    assert plan.sides[0].audio == "new" and [r.track.number for r in released] == [1]
+    assert (one.settled, one.placed) == ("", P.EARLIER) and two.settled == P.HAND

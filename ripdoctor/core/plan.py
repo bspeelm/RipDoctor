@@ -309,10 +309,12 @@ def saved_over(
 ) -> tuple[Plan, tuple[Released, ...]]:
     """A plan being saved, on the capture that is there now.
 
-    A time unchanged from the plan it replaces, on a side captured again since,
-    was placed on the earlier audio: saving it again must not launder it into a
-    judgement about this one. A time that differs was set here, on what is
-    there now, and is whatever the page says it is. ADR-064.
+    A side nobody moved or checked a boundary on is left where it was, on the earlier
+    capture with its marks, whatever else changed: a title is no judgement about audio,
+    and Align still has that capture's times to carry. Once one is moved or checked, a
+    time unchanged from the plan it replaces was placed on the earlier audio, and saving
+    it again must not launder it into a judgement about this one. A time that differs
+    was set here, on what is there now, and is whatever the page says it is. ADR-064.
     """
     old = {s.file: s for s in before.sides} if before else {}
     released: list[Released] = []
@@ -328,6 +330,10 @@ def saved_over(
             sides.append(replace(side, tracks=tracks, audio=now))
             continue
         placed = {t.number: t for t in was.tracks}
+        if not _boundary_touched(side.tracks, placed):
+            tracks = tuple(_as_was(t, placed[t.number]) for t in side.tracks)
+            sides.append(replace(side, tracks=tracks, audio=was.audio))
+            continue
         kept = []
         for t in side.tracks:
             if t.placed == EARLIER and t.settled == EAR:
@@ -342,6 +348,27 @@ def saved_over(
             kept.append(_from_earlier(t) if same else t)
         sides.append(replace(side, tracks=tuple(kept), audio=now))
     return replace(plan, sides=tuple(sides)), tuple(released)
+
+
+def _boundary_touched(
+    tracks: tuple[PlanTrack, ...], placed: dict[int, PlanTrack]
+) -> bool:
+    """Whether a person moved, added, removed or checked one on this side. The page
+    shows an earlier capture's row with no mark, so a mark gone from it says nothing."""
+    if {t.number for t in tracks} != set(placed):
+        return True
+    return any(
+        (t.start, t.end) != (placed[t.number].start, placed[t.number].end)
+        or (
+            t.settled and (t.placed == EARLIER or t.settled != placed[t.number].settled)
+        )
+        for t in tracks
+    )
+
+
+def _as_was(t: PlanTrack, prior: PlanTrack) -> PlanTrack:
+    """Its words as saved now, and what it knows about its place as saved then."""
+    return replace(t, settled=prior.settled, placed=prior.placed, forced=prior.forced)
 
 
 def _heard_here(t: PlanTrack) -> PlanTrack:

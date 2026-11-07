@@ -121,7 +121,7 @@ async function saidSaved(released, alignWas) {
   const said = [];
   if (released?.length) said.push(`${counted(released.length, "track", "tracks")} (${released.join(", ")}) kept ${released.length === 1 ? "its time" : "their times"} from the earlier capture, and ${released.length === 1 ? "is" : "are"} marked for that.`);
   // Said once, as it happens. From here the rail names only what still works.
-  if (alignWas && $("#realign").hidden) said.push("Saved on this capture, so Align from archive is no longer offered. First pass, Checked after listening, and moving a boundary remain.");
+  if (alignWas && $("#realign").hidden) said.push("A boundary moved or checked puts the side on this capture, so Align from archive is no longer offered. First pass, Checked after listening, and moving a boundary remain.");
   if (said.length) status(said.join(" "), true);
 }
 
@@ -342,7 +342,7 @@ function railFirstPass(f) {
   const earlier = sidesFromEarlier();
   if (earlier.length) {
     blue("#firstpass", true);
-    return cutStep("firstpass", "todo", "Captured again", `Side ${namedList(earlier)} was captured again after its boundaries were placed. Run this again${$("#realign").hidden ? "" : ", or align from the archive. Any edit saved here puts the side on this capture and ends that offer"}.`);
+    return cutStep("firstpass", "todo", "Captured again", `Side ${namedList(earlier)} was captured again after its boundaries were placed. Run this again${$("#realign").hidden ? "" : ", or align from the archive. Moving or checking a boundary puts the side on this capture and ends that offer"}.`);
   }
   return cutStep("firstpass", "done", S.meta.mbid ? "Matched" : "By hand",
                  `${counted(n, "track", "tracks")} across ${counted(f.sides.length, "side", "sides")}.`);

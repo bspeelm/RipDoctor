@@ -2802,13 +2802,16 @@ on such a row is a claim about what is there now, and the server can tell it fro
 tab's old mark: the page only says `earlier` after the re-rip, so `earlier` and `ear`
 together cannot be left over from before it.
 
-**Saving cannot launder an old mark.** A save moves the side's stamp to the capture on
-disk, so a time unchanged from the plan it replaces is marked `placed: earlier`, loses its
-`settled`, and is named in the reply. A time that differs was set on what is there now,
-and is the person's. The page never says which capture a plan is on; the server does.
+**Saving cannot launder an old mark.** A save that moves or checks no boundary on a side leaves
+that side alone: its stamp, its times and its marks stay as they were, and only the words change.
+One that does moves the side's stamp to the capture on disk, so a time unchanged from the plan it
+replaces is marked `placed: earlier`, loses its `settled`, and is named in the reply. A time that
+differs was set on what is there now, and is the person's. The page never says which capture a plan
+is on; the server does. This goes side by side: a nudge on one side says nothing about another.
 
 **Aligning** carries times from the archived capture onto the new one, so it is offered and
-named only for a side still stamped with the old one, and refuses one saved over. Such times
+named only for a side still stamped with the old one, and refuses one a boundary was moved or
+checked on. Such times
 would be moved by a transform that was never about them, a person's included, and running it
 twice used to do exactly that. A side saved over is not a dead end: a first pass, `Checked`
 after listening, and moving the boundary all remain, and the refusals and the rail name those
@@ -2901,10 +2904,10 @@ tab with an edit in hand is told and offered what is saved, and neither overwrit
 every few seconds what is on disk, and a new capture or a changed plan reaches a page with nothing
 in hand, with nothing pressed.
 
-**Align.** Any saved edit puts a re-ripped side on the new capture, which ends Align by the rule
-above, so one nudge would close it. The rail says so while it is offered, and the moment it closes
-the status line says so once; the row moved reads `Set by you` and the others stay `From an earlier
-capture`.
+**Align.** Moving or checking a boundary puts a re-ripped side on the new capture, which ends Align
+by the rule above, so one nudge closes it, and a title or a year does not. The rail says so while it
+is offered, and the moment it closes the status line says so once; the row moved reads `Set by you`
+and the others stay `From an earlier capture`.
 
 ### The keys
 
