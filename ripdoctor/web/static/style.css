@@ -228,6 +228,8 @@ body[data-mode=tapes] #record-pick{display:none}
   border:1px solid var(--c);color:var(--c);border-radius:999px;font-size:13px;white-space:nowrap}
 #tp-left[data-kind=done],#cut-saved[data-kind=done]{--c:var(--start)}
 #tp-left[data-kind=todo],#cut-saved[data-kind=todo]{--c:var(--warn)}
+#cut-saved[data-kind=bad]{--c:var(--end)}
+#cut-save-why{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin:.25rem 0 .5rem}
 #tp-left[data-kind=fail]{--c:var(--end)}
 #tp-left i,#cut-saved i{width:7px;height:7px;border-radius:50%;background:var(--c)}
 button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font-size:12px;

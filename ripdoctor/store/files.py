@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from contextlib import suppress
@@ -156,6 +157,15 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=1) + "\n")
     os.replace(tmp, path)
+
+
+def plan_seen(layout: Layout, slug: str) -> str:
+    """The saved plan as it stands, which a save names as what it was made from: a page
+    left open would otherwise put back whatever has changed since."""
+    where = layout.plan_file(slug)
+    return (
+        hashlib.sha256(where.read_bytes()).hexdigest()[:16] if where.is_file() else ""
+    )
 
 
 def read_spec(path: Path) -> Spec:

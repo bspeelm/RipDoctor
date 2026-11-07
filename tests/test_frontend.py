@@ -943,6 +943,69 @@ def test_next_doubt_on_a_record_goes_over_all_the_check_step_counts() -> None:
     assert "on a tape, the same as" not in help_dialog
 
 
+def test_there_is_no_save_to_press_and_nothing_to_be_prompted_about() -> None:
+    page, js = markup(), (STATIC / "app.js").read_text()
+    for gone in ('id="save"', 'id="revert"', 'id="cut-st-save"'):
+        assert gone not in page
+    assert "beforeunload" not in js
+    assert "railSave" not in js and "Unsaved changes" not in js
+
+
+def test_every_edit_saves_once_and_a_failure_stays_said() -> None:
+    js = (STATIC / "app.js").read_text()
+    head = re.search(r"function showCutHead\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    for said in ('"Not saved"', '"Saving"', '"Saved"', '"Waiting to save"'):
+        assert said in head
+    assert 'failed ? "bad"' in head, "a failed save does not look saved"
+    assert "saveFail.why" in head and "#cut-save-retry" in head
+    nudge = re.search(r"function nudgeSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "markDirty(true, NUDGE_SETTLE)" in nudge, "a held key is not a save a press"
+    assert "markDirty(true, null)" in js, "a drag saves on release"
+    assert "{ doubt: canCheck," in js and "onDrop: cutEdgeDropped" in js
+    assert "$(id).onchange = () => markDirty();" in js, "a field saves on leaving it"
+    assert 'addEventListener("pagehide", saveOnLeaving)' in js
+
+
+def test_a_nudge_that_ends_align_says_so_as_it_happens() -> None:
+    js = (STATIC / "app.js").read_text()
+    said = re.search(r"async function saidSaved\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'alignWas && $("#realign").hidden' in said
+    assert "Align from archive is no longer offered" in said
+    assert "Any edit saved here puts the side on this capture and ends that offer" in js
+
+
+def test_saves_are_in_order_and_the_last_state_lands() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "saveRun ??= saveLoop()" in js
+    run = re.search(r"async function saveLoop\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "if (edits === saveEdits) S.dirty = false;" in run
+    assert "seen: S.meta.seen" in run
+    assert "saveFail = {" in run
+
+
+def test_a_record_changed_on_disk_reaches_the_page_with_nothing_pressed() -> None:
+    """Revert was how a side finished by a rip showed up."""
+    js = (STATIC / "app.js").read_text()
+    noticed = re.search(r"async function noticeDisk\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "now.seen === S.meta.seen && now.captures === S.meta.captures" in noticed
+    assert "S.dirty" in noticed and "saveRun" in noticed and "typing" in noticed
+    assert "setInterval(noticeDisk, 4000)" in js
+
+
+def test_a_job_refuses_what_it_is_reading_and_says_so() -> None:
+    js = (STATIC / "app.js").read_text()
+    assert "Not changed: ${S.job} is running" in js
+    for body in (
+        r"function nudgeSelected\(",
+        r"function typedEdge\(",
+        r"function removeTrack\(",
+        r"function checkSelected\(",
+        r"function splitAtPlayhead\(",
+    ):
+        fn = re.search(body + r".*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+        assert "refusedByJob()" in fn, body
+
+
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
@@ -1259,7 +1322,7 @@ def cut_markup() -> str:
 
 def test_the_record_s_rail_runs_in_the_order_the_work_does() -> None:
     steps = re.findall(r'id="cut-st-(\w+)"', cut_markup())
-    assert steps == ["rip", "firstpass", "check", "save", "cut", "import", "archive"]
+    assert steps == ["rip", "firstpass", "check", "cut", "import", "archive"]
     js = (STATIC / "app.js").read_text()
     assert f"const CUT_STEPS = {json.dumps(steps)};" in js
 
@@ -1269,7 +1332,6 @@ def test_the_record_s_rail_runs_in_the_order_the_work_does() -> None:
     [
         ("firstpass", ["firstpass", "realign"]),
         ("check", ["cut-review"]),
-        ("save", ["save", "revert"]),
         ("cut", ["split"]),
         ("import", ["import"]),
         ("archive", ["archive"]),
@@ -1289,8 +1351,6 @@ def test_the_header_is_the_tabs_and_the_record_picker() -> None:
     for moved in (
         "firstpass",
         "realign",
-        "revert",
-        "save",
         "split",
         "import",
         "archive",

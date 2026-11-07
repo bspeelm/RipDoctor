@@ -1018,7 +1018,9 @@ def test_an_import_under_a_pasted_release_makes_it_the_one_the_plan_names() -> N
     assert (
         "if (mbid && mbid !== S.meta.mbid) { S.meta.mbid = mbid; markDirty(); }" in run
     )
-    assert run.index("S.meta.mbid = mbid") < run.index("if (S.dirty) await save()")
+    assert run.index("S.meta.mbid = mbid") < run.index(
+        "if (S.dirty && !(await save()))"
+    )
 
 
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
@@ -1403,6 +1405,52 @@ def test_a_side_saved_over_is_not_offered_align_and_is_told_the_ways_that_remain
     assert get(app, "/api/align/album", service).json()["sides"] == []
     said = cut(service).json()["error"]
     assert "Align" not in said and "First pass" in said and "Checked" in said
+
+
+def test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written(
+    tmp_path: Path,
+) -> None:
+    """Two tabs: the second's whole document would put back what the first saved."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    app = build(service)
+    seen = get(app, "/api/album/album", service).json()["seen"]
+    doc = {"album": "A Record", "artist": "A Band", "date": "2022", "sides": []}
+    first = post(app, "/api/plan/album", service, {**doc, "seen": seen})
+    assert first.status == 200 and first.json()["seen"]
+    on_disk = service.layout.plan_file("album").read_bytes()
+    stale = post(app, "/api/plan/album", service, {**doc, "seen": seen, "date": "1999"})
+    assert stale.status == 409 and stale.json()["stale"]
+    assert "nothing was saved" in stale.json()["error"]
+    assert service.layout.plan_file("album").read_bytes() == on_disk
+    assert get(app, "/api/seen/album", service).json()["seen"] == first.json()["seen"]
+
+
+def test_a_save_during_a_job_waits_and_one_during_a_prepare_does_not(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    app = build(service)
+    doc = {"album": "A Record", "artist": "A Band", "date": "2022", "sides": []}
+    with service.jobs.claim("album", "first pass"):
+        held = post(app, "/api/plan/album", service, doc)
+    assert held.status == 409 and held.json()["busy"]
+    assert "saves when it ends" in held.json()["error"]
+    assert post(app, "/api/plan/album", service, doc).status == 200
+
+
+def test_a_cut_older_than_the_plan_is_said_to_be(tmp_path: Path) -> None:
+    """With no unsaved state left, this is what says the page has moved on from it."""
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    cut_file = review / "01 One.flac"
+    cut_file.write_bytes(b"fLaC")
+    plan = service.layout.plan_file("album")
+    app = build(service)
+    os.utime(plan, (1000, 1000))
+    assert not get(app, "/api/review/album", service).json()["older_than_plan"]
+    os.utime(cut_file, (500, 500))
+    assert get(app, "/api/review/album", service).json()["older_than_plan"]
 
 
 def test_a_save_does_not_turn_a_replaced_sides_times_into_something_to_cut(

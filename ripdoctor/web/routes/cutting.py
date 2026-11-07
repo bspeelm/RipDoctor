@@ -122,8 +122,20 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/review/([^/]+)")
     def review(r: H.Request) -> H.Response:
-        names = _listing(layout.review_dir(slug_of(r)))
-        return H.ok({"tracks": [{"index": i, "name": n} for i, n in enumerate(names)]})
+        slug = slug_of(r)
+        names = _listing(layout.review_dir(slug))
+        cuts = list(layout.review_dir(slug).glob("*.flac"))
+        plan = layout.plan_file(slug)
+        return H.ok(
+            {
+                "tracks": [{"index": i, "name": n} for i, n in enumerate(names)],
+                # Edits save themselves, so a plan newer than a cut is what says the
+                # page has moved on from what is waiting here.
+                "older_than_plan": bool(cuts)
+                and plan.is_file()
+                and plan.stat().st_mtime > min(p.stat().st_mtime for p in cuts),
+            }
+        )
 
     @app.route("GET", "/api/review/([^/]+)/(\\d+)")
     def review_audio(r: H.Request) -> H.Response:

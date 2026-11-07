@@ -124,6 +124,8 @@ def add(app: App, service: Service) -> None:
             "sides": sides,
             "ready": ready,
             "recording": recording,
+            "seen": F.plan_seen(layout, slug),
+            "captures": _captures(layout, slug),
             "mbid": spec.mbid if spec else "",
             "album": album,
             "artist": artist,
@@ -202,6 +204,15 @@ def add(app: App, service: Service) -> None:
         if job is None:
             raise H.HttpError(404, "no job")
         return H.ok(job.as_dict())
+
+    @app.route("GET", "/api/seen/([^/]+)")
+    def seen(r: H.Request) -> H.Response:
+        """What a page compares with what it loaded, to find a side or a plan that
+        changed without it. Cheap enough to ask every few seconds."""
+        slug = slug_of(r)
+        return H.ok(
+            {"seen": F.plan_seen(layout, slug), "captures": _captures(layout, slug)}
+        )
 
     @app.route("GET", "/api/align/([^/]+)")
     def can_align(r: H.Request) -> H.Response:
@@ -291,6 +302,22 @@ def add(app: App, service: Service) -> None:
         """
         slug = slug_of(r)
         body = r.json()
+        try:
+            with service.jobs.claim(slug, "a save", ("prepare",)):
+                return _saved(slug, body)
+        except Busy:
+            job = service.jobs.status(slug)
+            doing = job.op if job and not job.done else "a change"
+            said = f"{doing} is running on this record, and this saves when it ends"
+            return H.ok({"error": said, "busy": True}, 409)
+
+    def _saved(slug: str, body: dict[str, Any]) -> H.Response:
+        if "seen" in body and body["seen"] != F.plan_seen(layout, slug):
+            said = (
+                "the plan has changed since this page loaded it, in another tab or by "
+                "a job, and nothing was saved"
+            )
+            return H.ok({"error": said, "stale": True}, 409)
         # A name already on disk is never replaced by an empty one. The page
         # falls back to what it last loaded, so a record that opened badly
         # sends two empty strings - and saving then wiped what the record was
@@ -319,6 +346,7 @@ def add(app: App, service: Service) -> None:
                 "ok": True,
                 "spec": spec_path.name,
                 "plan": plan_path.name,
+                "seen": F.plan_seen(layout, slug),
                 "released": [t.track.number for t in released],
             }
         )
@@ -382,6 +410,10 @@ def _plan_from(slug: str, doc: dict[str, Any]) -> Plan:
             ],
         }
     )
+
+
+def _captures(layout: F.Layout, slug: str) -> str:
+    return "|".join(f"{k}={v}" for k, v in sorted(C.stamps_of(layout, slug).items()))
 
 
 def _align_side(service: Service, slug: str, side: Any) -> dict[str, Any]:

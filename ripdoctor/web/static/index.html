@@ -468,18 +468,6 @@
           </div>
         </div>
       </section>
-      <section class="step" id="cut-st-save" title="Cut tracks saves for itself, so nothing here has to be pressed first.">
-        <i class="step-mark"></i>
-        <div class="step-body">
-          <div class="step-head"><b>Save</b><span class="step-state"></span></div>
-          <p class="step-detail"></p>
-          <details class="step-why" hidden><summary>Why</summary><p></p></details>
-          <div class="step-acts">
-            <button type="button" id="save">Save</button>
-            <button type="button" id="revert" class="ghost" title="discard unsaved changes and reload the saved plan from disk">Revert</button>
-          </div>
-        </div>
-      </section>
       <section class="step" id="cut-st-cut" title="Writes each track into review/, saving any changes first.">
         <i class="step-mark"></i>
         <div class="step-body">
@@ -524,6 +512,7 @@
         <span id="sides" class="tabs"></span>
         <div id="cut-saved" hidden><i></i><span></span></div>
       </div>
+      <p class="err" id="cut-save-why" hidden><span></span><button type="button" id="cut-save-retry" class="ghost"></button></p>
       <div id="cut-wave"><canvas id="cv"></canvas></div>
       <div id="readout">
         <span id="ro-time">&mdash;</span>

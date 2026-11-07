@@ -2870,6 +2870,42 @@ loses nothing.
 the plan it would gate on (`test_the_archive_gates_409_is_the_overlap_saying_so`). The
 rail says what it is waiting on instead of its usual line.
 
+### Edits save by themselves
+
+As on Tapes, and for the same reason: a page that holds edits a person has to remember to keep
+is a page that can lose them. Every edit saves once as it lands: a field on leaving it, a drag on
+release, a nudge after half a second so a held key is not a save a press, and Add, Split, Remove,
+Checked and the album fields at once. So there is no Save, no Revert, and no prompt on leaving; a
+page left straight after an edit sends it as it goes.
+
+The argument against is the one this section answers: a mistaken edit is now on disk at once, with
+no Revert to take it back. What survives it is that an edit is one boundary or one word, the row
+says what it is, and moving it back is the undo. A cut, an import and an archive are still pressed.
+
+**A save cannot look like it landed.** The pill reads `Saving`, `Saved` or `Not saved`, and a failed
+one stays on screen with its reason and a retry, what was typed stays where it is, and Cut, First
+pass and Import stop rather than read a plan behind the page. Saves go one at a time, and whatever
+changed during one goes next, so the last state lands.
+
+**A job in progress.** Whatever it is reading must not move under it, so a boundary, a track added
+or removed and a check are refused while it runs, and say so. Text waits: the server answers a save
+during a job with `busy`, the pill says `Waiting to save`, and it goes when the job ends. A prepare
+reads only audio, so a save goes beside one.
+
+**Two tabs.** A save names the digest of the plan it was made from, as a tape's list does, and a
+different one is refused with nothing written. A tab with nothing in hand reloads what changed, a
+tab with an edit in hand is told and offered what is saved, and neither overwrites the other
+(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`).
+
+**What Revert was also for.** A side finished by a rip showed up by pressing it. The page now asks
+every few seconds what is on disk, and a new capture or a changed plan reaches a page with nothing
+in hand, with nothing pressed.
+
+**Align.** Any saved edit puts a re-ripped side on the new capture, which ends Align by the rule
+above, so one nudge would close it. The rail says so while it is offered, and the moment it closes
+the status line says so once; the row moved reads `Set by you` and the others stay `From an earlier
+capture`.
+
 ### The keys
 
 `A` hears a boundary and `↵` accepts on both Cut and Tapes. `S` splits on Cut and does
