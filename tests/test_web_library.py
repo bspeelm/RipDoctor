@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ripdoctor.audio import session as S
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.core.plan import Plan
 from ripdoctor.integrations import musicbrainz as MB
@@ -25,6 +26,7 @@ from ripdoctor.web import http as H
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.library import spec_from
 from ripdoctor.web.service import Service
+from ripdoctor.work import capture as W
 from tests.pool import a_layout, a_runner, quiet_then_loud
 from tests.test_web_routes import a_service, get, post
 
@@ -1731,3 +1733,43 @@ def test_the_archive_gates_409_is_the_overlap_saying_so(tmp_path: Path) -> None:
     r = get(build(service), "/api/archive/album", service)
     assert r.status == 409
     assert "before track 1 ends" in r.json()["error"]
+
+
+def test_a_partial_cut_may_not_replace_the_record_through_the_route(
+    tmp_path: Path,
+) -> None:
+    service, _plain = a_fit_with_a_mark(tmp_path)
+    service.settings = replace(service.settings, library=str(tmp_path / "lib"))
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert sum(len(s.tracks) for s in plan.sides) != 1
+    r = post(build(service), "/api/import/album", service, {"replace": True})
+    assert r.status == 409 and "would lose the rest" in r.json()["error"]
+
+
+def capture_of(slug: str) -> W.Live:
+    return W.Live(slug, "b", "hw:9", started=100.0, control=S.Control())
+
+
+def test_archiving_during_a_capture_of_the_record_once_deleted_the_capture(
+    tmp_path: Path,
+) -> None:
+    service, _library = arrived(tmp_path)
+    partial = service.layout.raw / "album" / ".side-b.flac.partial"
+    partial.write_bytes(b"being written")
+    service.recorder.live = capture_of("album")
+    gate = get(build(service), "/api/archive/album", service).json()
+    assert not gate["ready"] and gate["capturing"] and "still being" in gate["why"]
+    r = post(build(service), "/api/archive/album", service)
+    assert r.status == 409 and "still being" in r.json()["error"]
+    assert partial.is_file()
+    r = post(build(service), "/api/import/album", service, {})
+    assert r.status == 409 and "still being" in r.json()["error"]
+
+
+def test_a_capture_of_another_record_stops_nothing_here(tmp_path: Path) -> None:
+    service, _library = arrived(tmp_path)
+    service.recorder.live = capture_of("another")
+    assert get(build(service), "/api/archive/album", service).json()["ready"]

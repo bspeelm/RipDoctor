@@ -187,7 +187,7 @@ def test_applying_answers_the_matcher(tmp_path: Path) -> None:
     review = tmp_path / "review"
     review.mkdir()
     fake = beets_runner()
-    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="aaa")
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
     assert "import" in fake.argv_for("import")
 
 
@@ -391,7 +391,7 @@ def test_a_record_with_a_release_is_left_to_the_catalogue(tmp_path: Path) -> Non
     replaced by the ones it fetches."""
     review = Path(a_review(tmp_path))
     fake = moving_beets(review)
-    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="aaa")
+    I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
     assert not [c for c in fake.calls if c[0] == "metaflac"]
 
 
@@ -768,10 +768,17 @@ def test_taking_it_pins_the_release_that_was_shown(tmp_path: Path) -> None:
     fake = (
         FakeRunner(installed={"beet"})
         .expect(lambda argv: argv[0] == "beet" and "import" in argv, stdout=b"added")
-        .expect("ls", stdout=b"")
+        .expect("ls", stdout=copy_row(tmp_path / "01.flac", "abc").encode())
     )
     (tmp_path / "A Band").mkdir()
-    I.Beets().take(fake, str(tmp_path), str(tmp_path), mbid="abc", tracks=("01.flac",))
+    I.Beets().take(
+        fake,
+        str(tmp_path),
+        str(tmp_path),
+        mbid="abc",
+        tracks=("01.flac",),
+        duplicates="keep",
+    )
 
     argv = fake.argv_for("import")
     assert "--search-id" in argv and argv[argv.index("--search-id") + 1] == "abc"
@@ -870,7 +877,8 @@ def test_the_album_flow_s_answers_and_argv_are_not_the_tape_s(tmp_path: Path) ->
     assert I.answers("replace", matching=False) == b"K\n"
     runner = FakeRunner()
     (tmp_path / "A Band").mkdir()
-    _beets().apply(runner, a_plan(), str(tmp_path), str(tmp_path), mbid="rel-1")
+    with pytest.raises(I.ImportFailed, match="holds 0 of 2"):
+        _beets().apply(runner, a_plan(), str(tmp_path), str(tmp_path), mbid="rel-1")
     assert runner.calls[0] == (
         "beet",
         "--config",
@@ -1207,7 +1215,7 @@ def test_merge_once_stopped_at_the_second_apply_and_now_answers_it(
     """Merging matches afresh, so `A`, `M` ran out of input and nothing was filed."""
     (tmp_path / "A Band").mkdir()
     review = Path(a_review(tmp_path))
-    held = [merge_row("rel")]
+    held = [merge_row("rel"), merge_row("rel", title="Two")]
     fake = merging(review, held, held)
     done = I.Beets().apply(
         fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
@@ -1238,9 +1246,10 @@ def test_merge_with_nothing_held_declines_an_edition_only_beets_can_see(
     (tmp_path / "A Band").mkdir()
     review = Path(a_review(tmp_path))
     fake = merging(review, [], [])
-    I.Beets().apply(
-        fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
-    )
+    with pytest.raises(I.ImportFailed, match="holds 0 of 2"):
+        I.Beets().apply(
+            fake, a_plan(), str(review), str(tmp_path), mbid="rel", duplicates="merge"
+        )
     assert fed_to_the_import(fake) == b"A\nS\n"
 
 
@@ -1249,8 +1258,8 @@ def test_merge_beside_another_edition_joins_its_row_and_names_no_other(
 ) -> None:
     (tmp_path / "A Band").mkdir()
     review = Path(a_review(tmp_path))
-    held = [merge_row("rel")]
-    fake = merging(review, held, [*held, merge_row("rel-other", title="Two")])
+    held = [merge_row("rel"), merge_row("rel", title="Two")]
+    fake = merging(review, held, [*held, merge_row("rel-other", title="Three")])
     fake.replies[:0] = (
         FakeRunner()
         .expect(lambda a: "-a" in a and "ls" in a, stdout=b"2\n3\n")
@@ -1801,3 +1810,24 @@ def test_a_held_copy_with_something_at_its_paths_stops_the_next_import(
         I.Beets().apply(fake, a_plan(), str(review), library, mbid="x")
     assert path.read_bytes() == b"something else"
     assert list((Path(library) / A.WHERE).rglob("0")), "the held file was lost"
+
+
+def test_a_partial_cut_once_replaced_a_whole_record_and_reported_success(
+    tmp_path: Path,
+) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    next(review.glob("*.flac")).unlink()
+    fake = replacing(library, said, review)
+    with pytest.raises(I.ImportFailed, match="1 cut tracks"):
+        I.Beets().apply(fake, a_plan(), str(review), library, mbid="x", replacing=True)
+    as_filed(Path(library))
+    assert not [c for c in fake.calls if "import" in c]
+
+
+def test_fewer_in_the_library_than_were_cut_is_a_failure_and_not_a_success(
+    tmp_path: Path,
+) -> None:
+    review = Path(a_review(tmp_path))
+    with pytest.raises(I.ImportFailed, match="holds 1 of 2"):
+        I.Beets().apply(moving_beets(review, listed=1), a_plan(), str(review), "/music")

@@ -814,7 +814,12 @@ def test_a_precut_album_still_succeeds_when_the_rebuild_raises(
     service.runner = (
         Moving(staged, installed={"beet"})
         .expect(lambda a: "import" in a, stdout=MATCH)
-        .expect("ls", stdout=every_row(f"{lib}/01 One.flac", MBID).encode())
+        .expect(
+            "ls",
+            stdout="\n".join(
+                every_row(f"{lib}/{n}.flac", MBID) for n in ("01 One", "02 Two")
+            ).encode(),
+        )
     )
     upload_album(service, an_album())
     lib.mkdir(parents=True)

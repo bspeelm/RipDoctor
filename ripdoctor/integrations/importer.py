@@ -520,11 +520,15 @@ class Beets:
             raise ImportFailed(NO_RELEASE_TO_MERGE)
         how = self._merging(runner, library, mbid, plan.album, duplicates)
         expected = sum(len(s.tracks) for s in plan.sides)
+        replacing = replacing and duplicates == "replace"
+        cut = len(list(Path(review).glob(f"*{FLAC}")))
+        if replacing and (short := partial_cut(cut, expected)):
+            raise ImportFailed(short)
         # Only with the acknowledgement: "replace" alone is a default, not a
         # licence to delete. ADR-060.
         held = (
             self._hold_filed(runner, library, plan.artist, plan.album, mbid, review)
-            if replacing and duplicates == "replace"
+            if replacing
             else None
         )
         try:
@@ -573,6 +577,8 @@ class Beets:
         )
 
         where, count = self.locate(runner, library, plan.artist, plan.album, mbid=mbid)
+        if count < expected:
+            raise ImportFailed(fewer_than_cut(count, expected))
         notes = []
         # beets rewrites every file as it writes tags, and the rewrite lands at
         # 0600 rather than inheriting the directory. Invisible while the player
@@ -712,6 +718,8 @@ class Beets:
         )
 
         where, count = self.locate(runner, library, "", "", mbid=mbid)
+        if count < len(tracks):
+            raise ImportFailed(fewer_than_cut(count, len(tracks)))
         notes = []
         fixed = T.set_modes(where, file_mode, dir_mode) if where else 0
         if fixed:
@@ -1402,6 +1410,23 @@ def proposed(output: str) -> str:
     """The one release beets settled on, or nothing if it did not settle."""
     found = list(dict.fromkeys(_RELEASE.findall(output)))
     return found[0] if len(found) == 1 else ""
+
+
+def partial_cut(cut: int, expected: int) -> str:
+    """Why these cuts may not replace a whole record, or nothing."""
+    if cut == expected:
+        return ""
+    return (
+        f"{cut} cut tracks are waiting and this record has {expected}, so replacing "
+        "would lose the rest. Nothing was changed. Cut it again, then replace"
+    )
+
+
+def fewer_than_cut(count: int, expected: int) -> str:
+    return (
+        f"the import ran, and the library holds {count} of {expected} tracks of this "
+        "record. Look in the library before filing it again"
+    )
 
 
 def too_many(count: int, expected: int) -> list[str]:

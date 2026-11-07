@@ -309,6 +309,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/import/([^/]+)")
     def import_record(r: H.Request) -> H.Response:
         slug = slug_of(r)
+        _refuse_while_capturing(service, slug)
         plan = _plan_of(service, slug)
         root = service.settings.library
         if not root:
@@ -335,6 +336,13 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(
                 409, f"nothing to import for {slug} - cut the tracks first"
             )
+        if replacing and duplicates == "replace":
+            short = IMP.partial_cut(
+                len(list(review_dir.glob("*.flac"))),
+                sum(len(s.tracks) for s in plan.sides),
+            )
+            if short:
+                raise H.HttpError(409, short)
 
         def work(job: Job) -> dict[str, Any]:
             review = str(review_dir)
@@ -383,6 +391,19 @@ def add(app: App, service: Service) -> None:
                 "sides": [],
                 "will_remove": [],
             }
+        capturing = _capturing(service, slug)
+        if capturing:
+            return {
+                "ready": False,
+                "why": capturing,
+                "capturing": True,
+                "library_path": None,
+                "library_tracks": 0,
+                "expected": sum(len(s.tracks) for s in plan.sides),
+                "will_archive_to": str(layout.archive / slug),
+                "sides": [],
+                "will_remove": [],
+            }
         return AR.survey(
             service.runner,
             layout,
@@ -410,6 +431,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/archive/([^/]+)")
     def archive(r: H.Request) -> H.Response:
         slug = slug_of(r)
+        _refuse_while_capturing(service, slug)
         state = _survey(r, read=False)
         if not state["ready"]:
             raise H.HttpError(409, state["why"])
@@ -433,6 +455,24 @@ def add(app: App, service: Service) -> None:
             return H.ok(service.jobs.start(slug, "archive", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
+
+
+def _capturing(service: Service, slug: str) -> str:
+    """Why this record's raw folder may not be read as finished, or nothing. A capture
+    that is still being written or encoded lives in there, and archiving clears it."""
+    live = service.recorder.live
+    if not live or live.slug != slug or live.stage not in ("recording", "encoding"):
+        return ""
+    return (
+        f"side {live.side} of this record is still being captured. Wait for it to "
+        "finish, then import"
+    )
+
+
+def _refuse_while_capturing(service: Service, slug: str) -> None:
+    why = _capturing(service, slug)
+    if why:
+        raise H.HttpError(409, why)
 
 
 def _file(where: Path, slug: str) -> Path:

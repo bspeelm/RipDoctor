@@ -142,20 +142,23 @@ def test_the_upload_is_cleared_only_once_the_library_holds_it(
     tmp_path: Path,
 ) -> None:
     lib = tmp_path / "lib" / "A Band" / "A Record"
-    rows = "\x1f".join(
-        (
-            "T",
-            "A Band",
-            "A Record",
-            "3:00",
-            f"{lib}/01 One.flac",
-            "",
-            "1",
-            MBID,
-            "A Band",
-            "",
-            "",
+    rows = "\n".join(
+        "\x1f".join(
+            (
+                "T",
+                "A Band",
+                "A Record",
+                "3:00",
+                f"{lib}/{name}.flac",
+                "",
+                "1",
+                MBID,
+                "A Band",
+                "",
+                "",
+            )
         )
+        for name in ("01 One", "02 Two")
     )
     service = a_precut_service(tmp_path)
     staged = service.layout.work / "precut"

@@ -391,7 +391,8 @@ function railCut(f) {
 
 function railImport(f) {
   // Unknown is not nothing: if the server could not say, the button stays pressable.
-  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported);
+  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported) || !!f.arc?.capturing;
+  if (f.arc?.capturing) return cutStep("import", "wait", "Waiting", f.arc.why);
   blue("#import", !!f.review);
   if (f.imported && f.review) return cutStep("import", "ready", "Not filed", `${counted(f.review, "cut track", "cut tracks")} in review/ and not in the library yet. What the library holds came from an earlier import.`);
   if (f.imported) return cutStep("import", "done", "In library", `${counted(f.arc.library_tracks, "track", "tracks")} in the library.`);
