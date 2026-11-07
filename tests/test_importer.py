@@ -1908,3 +1908,109 @@ def test_clearing_stale_rows_is_refused_with_the_library_off_its_mount(
 
 def test_the_stale_note_allows_for_a_library_off_its_mount() -> None:
     assert "off its mount" in I.Stale(1, Path("/x")).note()
+
+
+# -------------------------------------------------------- the covers a replace leaves
+
+
+def a_cover_family(tmp_path: Path, *names: str) -> tuple[Path, Path, Library]:
+    """A filed album whose row names the last of these covers."""
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review, who="Another Name")
+    folder = Path(library) / "A Band" / "A Record"
+    for name in names:
+        (folder / name).write_bytes(b"art")
+    for rec in fake.recs:
+        rec.artpath = str(folder / names[-1])
+    return Path(library), review, fake
+
+
+def replaces(fake: Library, review: Path, library: Path) -> I.Outcome:
+    return I.Beets().apply(
+        fake, a_plan(), str(review), str(library), mbid="x", replacing=True
+    )
+
+
+def test_replace_once_left_a_folder_of_covers_behind(tmp_path: Path) -> None:
+    library, review, fake = a_cover_family(
+        tmp_path, "cover.jpg", "cover.1.jpg", "cover.2.jpg"
+    )
+    done = replaces(fake, review, library)
+    assert not (library / "A Band").exists()
+    assert any("removed 3 covers" in n for n in done.notes)
+
+
+def test_a_cover_another_album_row_names_is_never_taken(tmp_path: Path) -> None:
+    library, review, fake = a_cover_family(tmp_path, "cover.jpg", "cover.1.jpg")
+    folder = library / "A Band" / "A Record"
+    other = fake.add(
+        library / "Elsewhere" / "01.flac",
+        album_id="9",
+        album="Other",
+        albumartist="Elsewhere",
+        mb_albumid="other",
+    )
+    other.artpath = str(folder / "cover.jpg")
+    replaces(fake, review, library)
+    assert (folder / "cover.jpg").is_file()
+    assert not (folder / "cover.1.jpg").exists()
+
+
+def test_in_a_folder_with_another_album_s_audio_only_the_row_s_own_cover_goes(
+    tmp_path: Path,
+) -> None:
+    library, review, fake = a_cover_family(tmp_path, "cover.jpg", "cover.1.jpg")
+    folder = library / "A Band" / "A Record"
+    fake.add(
+        folder / "01 Other.flac",
+        album_id="9",
+        album="A Record",
+        mb_albumid="another",
+    )
+    replaces(fake, review, library)
+    assert (folder / "cover.jpg").is_file() and (folder / "01 Other.flac").is_file()
+    assert not (folder / "cover.1.jpg").exists()
+
+
+def test_a_file_that_is_no_cover_keeps_its_folder(tmp_path: Path) -> None:
+    library, review, fake = a_cover_family(tmp_path, "cover.jpg")
+    folder = library / "A Band" / "A Record"
+    (folder / "notes.txt").write_bytes(b"mine")
+    (folder / "back.jpg").write_bytes(b"mine")
+    replaces(fake, review, library)
+    assert sorted(p.name for p in folder.iterdir()) == ["back.jpg", "notes.txt"]
+
+
+def test_a_replace_that_fails_puts_the_covers_back(tmp_path: Path) -> None:
+    library, review, fake = a_cover_family(tmp_path, "cover.jpg", "cover.1.jpg")
+    fake.takes = 0
+    with pytest.raises(I.ImportFailed):
+        replaces(fake, review, library)
+    folder = library / "A Band" / "A Record"
+    assert (folder / "cover.jpg").is_file() and (folder / "cover.1.jpg").is_file()
+
+
+def test_a_new_copy_in_the_same_folder_takes_the_plain_cover_name(
+    tmp_path: Path,
+) -> None:
+    library, said = a_library(tmp_path / "lib", "01 Old.flac", "02 Old.flac")
+    review = Path(a_review(tmp_path))
+    fake = replacing(library, said, review, lands="{what}", art=b"new art")
+    folder = Path(library) / "A Band" / "A Record"
+    (folder / "cover.jpg").write_bytes(b"old art")
+    for rec in fake.recs:
+        rec.artpath = str(folder / "cover.jpg")
+    replaces(fake, review, Path(library))
+    assert (folder / "cover.jpg").read_bytes() == b"new art"
+    assert not (folder / "cover.1.jpg").exists()
+
+
+def test_nothing_above_the_library_root_is_a_cover_of_this_row(tmp_path: Path) -> None:
+    library, review, fake = a_cover_family(tmp_path, "cover.jpg")
+    outside = tmp_path / "cover.jpg"
+    outside.write_bytes(b"art")
+    for rec in fake.recs:
+        rec.artpath = str(outside)
+    replaces(fake, review, library)
+    assert outside.is_file()

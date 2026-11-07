@@ -41,6 +41,7 @@ from ripdoctor.integrations import tagger as T
 from ripdoctor.store.safety import contains
 
 FLAC = ".flac"
+AUDIO = {".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aiff", ".ape", ".wv"}
 
 
 class ImportFailed(Exception):
@@ -1068,6 +1069,7 @@ class Beets:
         for r in rows:
             if not contains(root, r.path):
                 raise ImportFailed(f"refusing to delete {r.path}: outside {root}")
+        covers = self._covers_of(runner, library, rows)
         try:
             return A.hold(
                 library,
@@ -1075,7 +1077,7 @@ class Beets:
                     Path(),
                     tuple(r.row for r in rows),
                     tuple(r.path for r in rows),
-                    (),
+                    tuple(covers),
                     directory,
                     artist,
                     album,
@@ -1084,6 +1086,43 @@ class Beets:
             )
         except OSError as e:
             raise ImportFailed(f"nothing was replaced: {e}") from e
+
+    def _album_art(self, runner: Runner, library: str) -> dict[str, str]:
+        """Every album row's cover, by its id."""
+        said = runner.run(
+            self._argv(["ls", "-a", "-f", _SEP.join(("$id", "$artpath"))]), timeout=300
+        )
+        if not said.ok:
+            raise ImportFailed(TapeRun(said.returncode, said.err).why())
+        found = {}
+        for fields in _fields(said.text):
+            if len(fields) == 2 and fields[1] not in ("", "None"):
+                found[fields[0]] = str(_rooted(library, fields[1]))
+        return found
+
+    def _covers_of(
+        self, runner: Runner, library: str, rows: Sequence[Row]
+    ) -> list[str]:
+        """The covers proved to be these rows': each one's own, and the numbered
+        siblings beets made beside it each time a cover found its name taken. Never one
+        another album row names, and no sibling where another album's audio shares the
+        folder, since nothing says whose it is."""
+        mine = {r.album_row for r in rows if r.album_row}
+        if not mine:
+            return []
+        art = self._album_art(runner, library)
+        others = {path for row, path in art.items() if row not in mine}
+        ours = {r.path for r in rows}
+        found: set[str] = set()
+        for row in mine:
+            cover = art.get(row, "")
+            if not cover or cover in others or not contains(library, cover):
+                continue
+            found.add(cover)
+            where = Path(cover)
+            if where.parent.is_dir() and not _other_audio(where.parent, ours):
+                found |= _numbered_beside(where) - others
+        return sorted(found)
 
     def _new_copy(
         self, runner: Runner, library: str, held: A.Held, expected: int
@@ -1128,7 +1167,11 @@ class Beets:
             rows = self._filed_rows(runner, library, held.artist, held.album, held.mbid)
             added = [r for r in rows if r.row not in held.rows]
             if added:
+                art = self._album_art(runner, library)
                 self._forget_ids(runner, tuple(r.row for r in added))
+                for album in {r.album_row for r in added}:
+                    if album in art and contains(library, art[album]):
+                        Path(art[album]).unlink(missing_ok=True)
                 for r in added:
                     _return_file(Path(r.path), Path(held.directory))
         except (ImportFailed, ToolMissing, OSError) as e:
@@ -1294,6 +1337,27 @@ def _merge_answers(how: str) -> bytes:
     if not how:
         return b""
     return SKIP_ANY_OTHER if how == NEW_ALBUM else PINNED_ANSWERS[how]
+
+
+_NUMBERED = re.compile(r"\.\d+$")
+
+
+def _numbered_beside(cover: Path) -> set[str]:
+    """cover.jpg, cover.1.jpg and cover.2.jpg, whichever of them this one is."""
+    base = _NUMBERED.sub("", cover.stem)
+    return {
+        str(p)
+        for p in cover.parent.iterdir()
+        if p.is_file()
+        and p.suffix == cover.suffix
+        and _NUMBERED.sub("", p.stem) == base
+    }
+
+
+def _other_audio(folder: Path, ours: set[str]) -> bool:
+    return any(
+        p.suffix.lower() in AUDIO and str(p) not in ours for p in folder.iterdir()
+    )
 
 
 def _return_file(path: Path, directory: Path) -> None:
