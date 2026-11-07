@@ -19,6 +19,7 @@ from ripdoctor.web import routes as R
 from ripdoctor.web.routes import build
 from ripdoctor.web.routes.precut import CHUNK, HELD
 from ripdoctor.web.service import Service
+from tests.beets_double import Library
 from tests.pool import a_layout
 from tests.test_web_routes import a_service, get, post, signed_in
 
@@ -252,3 +253,43 @@ def test_keep_both_is_what_an_album_that_arrived_cut_starts_on() -> None:
     choices = page[page.index('id="pc-dup"') :]
     assert choices.index('value="keep"') < choices.index('value="replace"')
     assert 'id="pc-replace"' in page
+
+
+def test_a_ticked_replace_through_the_route_leaves_bystanders_and_the_other_edition(
+    tmp_path: Path,
+) -> None:
+    service = a_precut_service(tmp_path)
+    root = Path(service.settings.library)
+    staged = service.layout.work / "precut"
+    fake = Library(root, staged, installed={"beet"}, who="A Band", what="A Record")
+    mine = root / "A Band" / "A Record"
+    fake.add(mine / "01 Old.flac", mb_albumid=MBID)
+    fake.add(mine / "02 Old.flac", mb_albumid=MBID)
+    edition = fake.add(root / "A Band" / "A Record [2]" / "01.flac", album_id="2")
+    edition.mb_albumid = "another-edition"
+    bystander = fake.add(
+        root / "Someone" / "A Record" / "01.flac",
+        album_id="3",
+        albumartist="Someone",
+        mb_albumid="bystander",
+    )
+    before = {r.path: r.path.read_bytes() for r in (edition, bystander)}
+    fake.expect(lambda a: any("preview" in x for x in a), stdout=MATCH)
+    service.runner = fake
+    upload(service, an_album())
+    assert len(list(staged.glob("*.flac"))) == 2
+
+    shown = get(build(service), f"/api/precut/filed?mbid={MBID}", service).json()
+    assert shown["tracks"] == 2 and not shown["refused"]
+    r = post(
+        build(service),
+        "/api/precut/take",
+        service,
+        {"mbid": MBID, "duplicates": "replace", "replace": True},
+    ).json()
+    assert not r["error"], r["error"]
+    assert not (mine / "01 Old.flac").exists() and not (mine / "02 Old.flac").exists()
+    assert {p: p.read_bytes() for p in before} == before
+    held = [x for x in fake.recs if x.mb_albumid == MBID]
+    assert len(held) == 2 and all(x.path.is_file() for x in held)
+    assert not staged.exists()

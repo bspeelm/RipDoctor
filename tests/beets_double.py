@@ -82,7 +82,8 @@ class Library(FakeRunner):
             self.recs = [
                 r for r in self.recs if r.id not in ids and str(r.path) not in paths
             ]
-        if verb == "import" and reply.returncode == 0:
+        looking = any("preview" in a for a in argv)
+        if verb == "import" and reply.returncode == 0 and not looking:
             self._import(args)
         if verb == "move":
             self._move(args)
