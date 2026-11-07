@@ -328,3 +328,84 @@ export function crossed(track, edge, at, list) {
 export function overlapping(track, list) {
   return list.filter((x) => x !== track && track.start < x.end && x.start < track.end);
 }
+
+// Every edit saves itself. `settle` is how long to wait for the next one, so a held key is
+// not a save a press; null leaves the save to whoever finishes the edit, as a drag does.
+export function autosaver({ state, doc, post, changed, saving, saved, refused }) {
+  let timer = null;
+  let run = null;                     // the one save in flight, so they stay in order
+  let edits = 0;
+  let fail = null;                    // {why, stale, busy}, on screen until a save lands
+
+  function markDirty(d = true, settle = 0) {
+    state.dirty = d;
+    clearTimeout(timer);
+    timer = null;
+    if (d) {
+      edits += 1;
+      if (settle != null) timer = setTimeout(flushSave, settle);
+    } else fail = null;
+    changed();
+  }
+
+  function flushSave() {
+    clearTimeout(timer);
+    timer = null;
+    run ??= saveLoop().finally(() => { run = null; changed(); });
+    return run;
+  }
+
+  // One at a time, from what is on screen when it goes, and again if anything changed while
+  // it went: the last state always lands. What was typed is not touched by a failure.
+  async function saveLoop() {
+    while (state.dirty && state.slug && !timer) {
+      const sent = edits, before = saving();
+      try {
+        const { released, seen } = await post(state.slug, { ...doc(), seen: state.meta.seen });
+        state.meta.seen = seen;
+        fail = null;
+        if (sent === edits) state.dirty = false;
+        saved(released, before);
+      } catch (e) {
+        fail = { why: e.status ? e.message : "The server could not be reached. This tries again by itself.", stale: e.stale, busy: e.busy };
+        // A job ending and a connection coming back are not things a person should have to watch for.
+        if (e.busy || !e.status) timer = setTimeout(flushSave, e.busy ? 2000 : 5000);
+        return false;
+      }
+    }
+    return !fail;
+  }
+
+  // Waits for what is on screen to be on disk, and reports whether it got there, so a caller
+  // that must not proceed on a stale plan can stop.
+  async function save() {
+    let landed = await flushSave();
+    while (landed && state.dirty) landed = await flushSave();
+    if (!landed) refused(fail?.why);
+    return landed;
+  }
+
+  // Reading a record afresh does not cost what the page has not saved. That goes first, and
+  // refused, the page stays as it is. An edit during the read sends it round again, since what
+  // came back is from before it. One made while the rest opens is on the fresh tracks, so it
+  // is left dirty with its save still coming.
+  async function reload(read, show) {
+    let seenEdits, got;
+    do {
+      if (state.dirty && !(await save())) return false;
+      seenEdits = edits;
+      got = await read();
+    } while (seenEdits !== edits);
+    await show(got);
+    if (seenEdits === edits) markDirty(false);
+    return true;
+  }
+
+  // What is saved moved on without the page, found out by something other than a save.
+  function behind(why) {
+    fail = { why, stale: true };
+    changed();
+  }
+
+  return { markDirty, flushSave, save, reload, behind, failure: () => fail, running: () => !!run };
+}

@@ -2893,7 +2893,13 @@ says what it is, and moving it back is the undo. A cut, an import and an archive
 **A save cannot look like it landed.** The pill reads `Saving`, `Saved` or `Not saved`, and a failed
 one stays on screen with its reason and a retry, what was typed stays where it is, and Cut, First
 pass and Import stop rather than read a plan behind the page. Saves go one at a time, and whatever
-changed during one goes next, so the last state lands.
+changed during one goes next, so the last state lands
+(`test_a_failed_save_keeps_the_edit_says_why_and_stops_a_caller`,
+`test_saves_go_one_at_a_time_and_the_last_state_lands`). Reopening the record does not cost an
+edit: what is unsaved goes first, a refusal leaves the page as it is, and an edit made during the
+reload keeps its save (`test_an_edit_landing_as_a_reload_finishes_is_saved_and_not_dropped`,
+`test_an_edit_during_the_read_goes_first_and_the_record_is_read_again`,
+`test_a_reload_during_a_busy_save_keeps_the_edit_and_shows_nothing`).
 
 **A job in progress.** Whatever it is reading must not move under it, so a boundary, a track added
 or removed and a check are refused while it runs, and say so. Text waits: the server answers a save
@@ -2903,7 +2909,11 @@ reads only audio, so a save goes beside one.
 **Two tabs.** A save names the digest of the plan it was made from, as a tape's list does, and a
 different one is refused with nothing written. A tab with nothing in hand reloads what changed, a
 tab with an edit in hand is told and offered what is saved, and neither overwrites the other
-(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`).
+(`test_a_save_from_a_page_left_open_is_refused_and_nothing_is_written`). A page stops looking while
+it is hidden, playing or showing a dialog, so Cut names the digest too and is refused the same way,
+with `Load what is saved` on the rail
+(`test_a_cut_from_a_page_behind_the_plan_is_refused_and_nothing_is_cut`). Import asks first, from the
+page (`test_an_import_from_a_page_behind_the_plan_stops_and_says_so`).
 
 **What Revert was also for.** A side finished by a rip showed up by pressing it. The page now asks
 every few seconds what is on disk, and a new capture or a changed plan reaches a page with nothing

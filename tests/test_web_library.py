@@ -1075,6 +1075,31 @@ def test_an_import_under_a_pasted_release_makes_it_the_one_the_plan_names() -> N
     )
 
 
+def test_browsing_a_release_in_the_import_dialog_changes_nothing_saved() -> None:
+    """A pick saved itself, so looking at a result and closing changed the spec's
+    release and closed the Archive gate on a record already filed."""
+    js = (STATIC_JS).read_text()
+    wired = js[js.index('$("#imp-search").onclick') :]
+    wired = wired[: wired.index('$("#imp-relabel").onclick')]
+    assert "offerRelabel(r)" in wired
+    assert "markDirty" not in wired, "a pick is not an edit"
+    assert "S.meta.mbid" not in wired, "the next edit would save it"
+
+
+def test_an_import_from_a_page_behind_the_plan_stops_and_says_so() -> None:
+    """The dialog stops the page noticing, and the importer tags from the disk."""
+    js = (STATIC_JS).read_text()
+    run = js[js.index("async function runImport()") :]
+    run = run[: run.index("\n}\n")]
+    assert run.index("changedOnDisk()") < run.index("/api/import/")
+    assert "saver.behind(why)" in run
+
+
+def test_a_cut_names_the_plan_this_page_loaded() -> None:
+    js = (STATIC_JS).read_text()
+    assert "/api/split/${S.slug}`, { seen: S.meta.seen }" in js
+
+
 def test_archiving_over_a_doubled_library_is_refused(tmp_path: Path) -> None:
     """More than was cut is not a safer kind of enough: it is what an earlier
     copy that was not replaced looks like, and clearing raw/ on the strength of

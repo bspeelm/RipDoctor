@@ -957,7 +957,7 @@ def test_every_edit_saves_once_and_a_failure_stays_said() -> None:
     for said in ('"Not saved"', '"Saving"', '"Saved"', '"Waiting to save"'):
         assert said in head
     assert 'failed ? "bad"' in head, "a failed save does not look saved"
-    assert "saveFail.why" in head and "#cut-save-retry" in head
+    assert "fail.why" in head and "#cut-save-retry" in head
     nudge = re.search(r"function nudgeSelected\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "markDirty(true, NUDGE_SETTLE)" in nudge, "a held key is not a save a press"
     assert "markDirty(true, null)" in js, "a drag saves on release"
@@ -974,21 +974,12 @@ def test_a_nudge_that_ends_align_says_so_as_it_happens() -> None:
     assert "Moving or checking a boundary puts the side on this capture" in js
 
 
-def test_saves_are_in_order_and_the_last_state_lands() -> None:
-    js = (STATIC / "app.js").read_text()
-    assert "saveRun ??= saveLoop()" in js
-    run = re.search(r"async function saveLoop\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert "if (edits === saveEdits) S.dirty = false;" in run
-    assert "seen: S.meta.seen" in run
-    assert "saveFail = {" in run
-
-
 def test_a_record_changed_on_disk_reaches_the_page_with_nothing_pressed() -> None:
     """Revert was how a side finished by a rip showed up."""
     js = (STATIC / "app.js").read_text()
     noticed = re.search(r"async function noticeDisk\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "now.seen === S.meta.seen && now.captures === S.meta.captures" in noticed
-    assert "S.dirty" in noticed and "saveRun" in noticed and "typing" in noticed
+    assert "S.dirty" in noticed and "saver.running()" in noticed and "typing" in noticed
     assert "setInterval(noticeDisk, 4000)" in js
 
 
