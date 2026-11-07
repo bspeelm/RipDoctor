@@ -539,12 +539,13 @@
         <div class="tool-group">
           <button type="button" id="cut-prev" title="the track before"><span>Prev</span><kbd>K</kbd></button>
           <button type="button" id="cut-next" title="the next track"><span>Next</span><kbd>J</kbd></button>
+          <button type="button" id="cut-doubt" title="the next track to check, on either side (shift-N for the one before)"><span>Next doubt</span><kbd>N</kbd></button>
         </div>
         <div class="tool-group">
           <button type="button" id="cut-edge-start" title="choose this track's start to move"><span>Start</span><kbd>E</kbd></button>
           <button type="button" id="cut-edge-end" title="choose this track's end to move"><span>End</span><kbd>E</kbd></button>
-          <button type="button" id="cut-minus" title="move the chosen marker back 0.05 s (shift for 0.5 s)"><span>&minus;</span><kbd>&larr;</kbd></button>
-          <button type="button" id="cut-plus" title="move the chosen marker on 0.05 s (shift for 0.5 s)"><span>+</span><kbd>&rarr;</kbd></button>
+          <button type="button" id="cut-minus" title="move the chosen marker back 0.05 s (shift for 0.5 s)"><span>&minus;</span><kbd>,</kbd></button>
+          <button type="button" id="cut-plus" title="move the chosen marker on 0.05 s (shift for 0.5 s)"><span>+</span><kbd>.</kbd></button>
         </div>
         <div class="tool-group">
           <button type="button" id="cut-play" title="play or pause, from 3 s before the selected marker or else from the playhead"><span>Play</span><kbd>Space</kbd></button>
@@ -557,6 +558,8 @@
         <div class="tool-group">
           <button type="button" id="cut-zoom-track" title="zoom to the selected track"><span>Track</span><kbd>Z</kbd></button>
           <button type="button" id="cut-zoom-side" title="zoom to the whole side"><span>Side</span><kbd>F</kbd></button>
+          <button type="button" id="cut-out" title="zoom the view out (wheel)"><span>&minus;</span></button>
+          <button type="button" id="cut-in" title="zoom the view in (wheel)"><span>+</span></button>
         </div>
       </div>
 
@@ -622,9 +625,9 @@
         <tr><td><kbd>&crarr;</kbd></td><td>on a record, a catalogue-placed track is right as it is: keeps its boundaries and records it as checked by ear. On a tape, accept the song</td></tr>
         <tr><td><kbd>E</kbd></td><td>choose the start or end marker to move, and swap it</td></tr>
         <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>move the chosen marker 0.05&nbsp;s (<kbd>shift</kbd> for 0.5&nbsp;s). Selecting a track chooses nothing: press <kbd>E</kbd>, the marker, or Start or End first</td></tr>
-        <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>on a tape, the same as <kbd>&larr;</kbd> and <kbd>&rarr;</kbd></td></tr>
+        <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>the same as <kbd>&larr;</kbd> and <kbd>&rarr;</kbd></td></tr>
         <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td>the next track or song, and the one before</td></tr>
-        <tr><td><kbd>N</kbd></td><td>on a tape, the next doubt (<kbd>shift</kbd> for the one before)</td></tr>
+        <tr><td><kbd>N</kbd></td><td>the next doubt, on either side of a record (<kbd>shift</kbd> for the one before)</td></tr>
         <tr><td><kbd>S</kbd></td><td>on a record, split the track under the playhead &mdash; snaps to the gap edges if the playhead is inside a detected silence</td></tr>
         <tr><td><kbd>X</kbd></td><td>on a tape, skip the song</td></tr>
         <tr><td><kbd>F</kbd> / <kbd>0</kbd></td><td>zoom to the whole side or tape</td></tr>

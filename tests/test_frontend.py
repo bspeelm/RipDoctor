@@ -477,7 +477,7 @@ def test_what_needs_a_waveform_waits_for_one_rather_than_throwing() -> None:
     """With none loaded, these reached into a side that was not there."""
     js = (STATIC / "app.js").read_text()
     for function, guard in (
-        ("tapeZoom", "if (!tpEd.side) return;"),
+        ("zoomBy", "if (!editor.side) return;"),
         ("stepDoubt", "if (!tape || !tpEd.side) return;"),
         ("tapeHearSilence", "if (tpEd.side) tpEd.fitRange("),
     ):
@@ -924,6 +924,25 @@ def test_small_leftovers_after_a_library_returns_say_things_once() -> None:
     assert "words !== t.filing.find((f) => f.number === song.number)?.note" in block
 
 
+def test_next_doubt_on_a_record_goes_over_all_the_check_step_counts() -> None:
+    js = (STATIC / "app.js").read_text()
+    doubts = re.search(r"function cutDoubts\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert ".filter(canCheck)" in doubts, "forced, earlier and by length, unsettled"
+    keys = key_listener()
+    assert "reviewNext(e.shiftKey ? -1 : 1)" in keys
+    assert (
+        "if (NUDGE_KEYS[e.key]) {" in js and "} else if (NUDGE_KEYS[e.key]) {" in keys
+    )
+    assert '$("#cut-in").onclick = () => zoomBy(ed, 0.5)' in js
+    assert '$("#tp-in").onclick = () => zoomBy(tpEd, 0.5)' in js, "one zoom, not two"
+    page = markup()
+    for key in ("cut-doubt", "cut-in", "cut-out"):
+        assert f'id="{key}"' in page
+    help_dialog = page[page.index('id="helpdlg"') :]
+    assert "the next doubt, on either side of a record" in help_dialog
+    assert "on a tape, the same as" not in help_dialog
+
+
 def test_a_move_says_nothing_of_another_song_because_none_moved() -> None:
     js = (STATIC / "app.js").read_text()
     said = re.search(r"function moveSaid\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
@@ -1340,8 +1359,9 @@ def test_the_record_s_toolbar_names_the_key_each_button_answers_to() -> None:
         ("cut-next", "J"),
         ("cut-edge-start", "E"),
         ("cut-edge-end", "E"),
-        ("cut-minus", "&larr;"),
-        ("cut-plus", "&rarr;"),
+        ("cut-doubt", "N"),
+        ("cut-minus", ","),
+        ("cut-plus", "."),
         ("cut-play", "Space"),
         ("cut-audition", "A"),
         ("cut-checked", "&crarr;"),

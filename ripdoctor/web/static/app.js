@@ -253,7 +253,7 @@ function railFirstPass(f) {
 }
 
 function railCheck(f) {
-  $("#cut-review").hidden = !f.forced.length;
+  $("#cut-review").hidden = !cutDoubts().length;
   if (!f.tracks.length) return cutStep("check", "wait", "Waiting", "Waiting on the first pass.");
   if (f.forced.length) {
     const titles = namedList(f.forced.map((t) => t.title));
@@ -364,14 +364,21 @@ function showCutRail() {
   railBarSays($("#cut-rail-bar"), now ? cutBox(now) : null);
 }
 
-// The doubtful tracks come round in side order, from whichever is selected.
-async function reviewNext() {
-  const doubts = (S.meta?.sides ?? [])
+// What the Check step counts, all of it, in side order. A settled track has been heard.
+function cutDoubts() {
+  return (S.meta?.sides ?? [])
     .filter((letter) => !(S.meta.recording || []).includes(letter))
-    .flatMap((letter) => (S.bySide[letter] || []).filter((t) => t.forced).map((t) => ({ letter, t })));
+    .flatMap((letter) => (S.bySide[letter] || []).filter(canCheck).map((t) => ({ letter, t })));
+}
+
+// They come round from whichever is selected, as Tapes' do, forwards or back.
+async function reviewNext(way) {
+  const by = way === -1 ? -1 : 1;
+  const doubts = cutDoubts();
   if (!doubts.length) return;
   const at = doubts.findIndex((d) => d.letter === S.side && d.t.number === ed.sel?.track);
-  const { letter, t } = doubts[(at + 1) % doubts.length];
+  const from = at < 0 && by < 0 ? 0 : at;
+  const { letter, t } = doubts[(from + by + doubts.length) % doubts.length];
   try {
     if (letter !== S.side) await openSide(letter);
     select(t.number, "start");
@@ -851,7 +858,10 @@ function showCutTools() {
     b.classList.toggle("on", armed && ed.sel.edge === edge);
   }
   for (const id of ["#cut-minus", "#cut-plus"]) $(id).disabled = !armed;
-  for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side"]) $(id).disabled = !ed.side;
+  for (const id of ["#cut-play", "#cut-split", "#cut-zoom-side", "#cut-in", "#cut-out"]) $(id).disabled = !ed.side;
+  const doubts = cutDoubts().length;
+  $("#cut-doubt").disabled = !doubts || !ed.side;
+  toolLabel("#cut-doubt", doubts ? `Next doubt (${doubts})` : "No doubts");
   $("#cut-checked").disabled = !canCheck(selectedTrack());
   $("#cut-checked").classList.toggle("primary", !!selectedTrack()?.forced);
   $("#cut-play").querySelector("span").textContent = player.playing ? "Pause" : "Play";
@@ -3239,11 +3249,11 @@ function tapeSkip(song) {
   return tapeJudge(() => postJSON(`/api/tapes/${tape.id}/songs/${numberOf(key)}/skip`, { skip: !song.skip, ...seenOf(key) }));
 }
 
-function tapeZoom(by) {
-  if (!tpEd.side) return;
-  const span = (tpEd.t1 - tpEd.t0) * by;
-  const sel = tpEd.sel && tpEd.tracks.find((x) => x.number === tpEd.sel.track);
-  tpEd.centerOn(sel ? sel[tpEd.sel.edge] : (tpEd.t0 + tpEd.t1) / 2, span);
+function zoomBy(editor, by) {
+  if (!editor.side) return;
+  const span = (editor.t1 - editor.t0) * by;
+  const sel = editor.sel && editor.tracks.find((x) => x.number === editor.sel.track);
+  editor.centerOn(sel ? sel[editor.sel.edge] : (editor.t0 + editor.t1) / 2, span);
 }
 
 function tapeShowSong() {
@@ -3310,8 +3320,8 @@ function wireTapeWave() {
   $("#tp-plus").onclick = () => nudgeChosen(0.05);
   $("#tp-play").onclick = tapePlay;
   $("#tp-hear").onclick = tapeHearSelected;
-  $("#tp-in").onclick = () => tapeZoom(0.5);
-  $("#tp-out").onclick = () => tapeZoom(2);
+  $("#tp-in").onclick = () => zoomBy(tpEd, 0.5);
+  $("#tp-out").onclick = () => zoomBy(tpEd, 2);
   $("#tp-whole").onclick = () => tpEd.fit();
   $("#tp-song").onclick = tapeShowSong;
   $("#tp-accept").onclick = () => tapeAccept(songOf(tpEd.sel?.track));
@@ -4648,6 +4658,9 @@ function wire() {
   $("#album-q").oninput = () => renderAlbums(S.slug);
   $("#firstpass").onclick = openFirstPass;
   $("#cut-review").onclick = reviewNext;
+  $("#cut-doubt").onclick = reviewNext;
+  $("#cut-in").onclick = () => zoomBy(ed, 0.5);
+  $("#cut-out").onclick = () => zoomBy(ed, 2);
   $("#cut-rip").onclick = () => setMode("rip");
   railOpens($("#cut-rail"), $("#cut-rail-bar"));
   $("#import").onclick = openImport;
@@ -4921,8 +4934,10 @@ function wire() {
       if (t) { e.preventDefault(); auditionSelected(); }
     } else if (e.key === "Enter") {
       e.preventDefault(); $("#cut-checked").click();
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      if (nudgeSelected((e.shiftKey ? 0.5 : 0.05) * (e.key === "ArrowLeft" ? -1 : 1))) e.preventDefault();
+    } else if (NUDGE_KEYS[e.key]) {
+      if (nudgeSelected((e.shiftKey ? 0.5 : 0.05) * NUDGE_KEYS[e.key])) e.preventDefault();
+    } else if (e.key === "n" || e.key === "N") {
+      e.preventDefault(); reviewNext(e.shiftKey ? -1 : 1);
     } else if (e.key === "e" || e.key === "E") {
       e.preventDefault(); swapEdge();
     } else if (e.key === "j" || e.key === "J") {

@@ -165,7 +165,7 @@ def test_a_page_left_open_cannot_judge_a_song_moved_since(
 def test_a_verdict_is_sent_with_what_the_page_was_looking_at() -> None:
     js = (Path(__file__).parent.parent / "ripdoctor/web/static/app.js").read_text()
     judge = js[js.index("function tapeJudge(") :]
-    judge = judge[: judge.index("function tapeZoom(")]
+    judge = judge[: judge.index("function zoomBy(")]
     assert "{ seen_start: start, seen_end: end }" in judge
     assert "if (e.status === 409 && tape) showTape(" in judge
     assert judge.count("...seenOf(key)") == 2
