@@ -2025,8 +2025,13 @@ refusal. The ceiling moves 12,730 → 12,830.
 folders: `Album [2]` under `%aunique`, and the old artist's folder when a record came back under
 another name. So once the import has run, the folders those files were in, and those above them
 up to the root, are removed as far as each is empty. Only `rmdir` does it, so a folder holding
-anything else stays, and so does one this did not empty. beets leaves a replaced album's cover
-behind, so a folder with one stays too. The ceiling moves 12,700 → 12,730.
+anything else stays, and so does one this did not empty. The ceiling moves 12,700 → 12,730.
+
+**Its covers go with it.** beets leaves a replaced album's cover behind, and each Replace that finds
+one numbers the next. So the row's own `artpath` and the numbered siblings of that name beside it
+are held and deleted with the audio, unless another album row names them. A folder that still holds
+another album's audio keeps its siblings, since nothing says whose they are
+(`test_in_a_folder_with_another_album_s_audio_only_the_row_s_own_cover_goes`).
 
 ## ADR-061 — a side can be placed from the catalogue alone, when it is asked for
 
