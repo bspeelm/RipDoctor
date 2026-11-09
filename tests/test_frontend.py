@@ -1911,3 +1911,12 @@ def test_first_pass_does_not_say_nothing_found_before_anything_was_searched() ->
     body = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "renderReleases()" not in body
     assert "Search MusicBrainz to list its releases." in body
+
+
+def test_the_gap_threshold_label_starts_past_the_lane_s_name() -> None:
+    """At -59 dB the two were drawn on top of each other at the left edge."""
+    js = (STATIC / "editor.js").read_text()
+    band = re.search(r"  _band\(c, lane\) \{.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'const after = 6 + c.measureText("1\u20133 kHz").width' in band
+    assert "dB`, after, y - 3)" in band
+    assert 'c.fillText("1\u20133 kHz", 6, lane.top + 12)' in band

@@ -195,8 +195,11 @@ export class Editor {
       c.beginPath();
       const y = this.dbY(th, lane);
       c.moveTo(0, y); c.lineTo(w, y); c.stroke(); c.setLineDash([]);
+      // Beside the lane's name rather than under it: the line can sit at any height.
+      c.font = "10px ui-sans-serif,system-ui";
+      const after = 6 + c.measureText("1–3 kHz").width + 12;
       c.fillStyle = "rgba(230,196,104,0.7)"; c.font = "10px ui-monospace,monospace";
-      c.fillText(`gap threshold ${th.toFixed(1)} dB`, 6, y - 3);
+      c.fillText(`gap threshold ${th.toFixed(1)} dB`, after, y - 3);
     }
     c.strokeStyle = "#e0a24a"; c.lineWidth = 1.2; c.beginPath();
     let first = true;
