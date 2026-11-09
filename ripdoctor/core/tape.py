@@ -385,9 +385,11 @@ def clock(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
-def _judged(start: float, end: float, delta: float, *, grounded: bool = True) -> Placed:
-    if not grounded:
-        reason = "no silence where this boundary belongs - placed from the list length"
+def _judged(start: float, end: float, delta: float, *, unfound: str = "") -> Placed:
+    """`unfound` names the edges no silence was found for, since the other may well
+    sit in one and a person checking it there would take this for a contradiction."""
+    if unfound:
+        reason = f"no silence where this song {unfound} - placed from the list length"
         return Placed(start, end, delta, DOUBT, reason)
     if abs(delta) <= LENGTH_TOLERANCE:
         return Placed(start, end, delta, AGREES)
@@ -485,9 +487,12 @@ def _walk(
         else:
             stop = min(max(wanted, cursor), end)
             after, landed = stop, False
-        spans.append(
-            _judged(cursor, stop, stop - cursor - length, grounded=grounded and landed)
+        unfound = " and ".join(
+            edge
+            for edge, found in (("starts", grounded), ("ends", landed))
+            if not found
         )
+        spans.append(_judged(cursor, stop, stop - cursor - length, unfound=unfound))
         cursor, grounded = after, landed
     return tuple(spans)
 
