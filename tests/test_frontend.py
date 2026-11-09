@@ -1882,3 +1882,15 @@ def test_the_replace_panel_names_what_goes_for_the_release_in_use() -> None:
     check = js[js.index("async function checkExisting()") :]
     assert "encodeURIComponent(importMbid())" in check[: check.index("\n}\n")]
     assert "the files named above" in markup()
+
+
+def test_a_failed_cut_is_said_on_the_rail_and_holds_the_import_back() -> None:
+    """A cut that died after one file showed Cut tracks done and Import ready."""
+    js = (STATIC / "app.js").read_text()
+    assert "asked.failed = cuts.failed;" in js
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'cutStep("cut", "fail", "Failed"' in cut
+    assert cut.index("if (f.failed)") < cut.index("if (f.review)")
+    imp = re.search(r"function railImport\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "|| !!f.failed;" in imp
+    assert imp.index("if (f.failed)") < imp.index("if (f.review)")

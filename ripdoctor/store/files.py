@@ -134,6 +134,10 @@ class Layout:
     def review_dir(self, slug: str) -> Path:
         return under(self.review, slug)
 
+    def cut_failed_file(self, slug: str) -> Path:
+        """Kept out of review, where the importer would meet it."""
+        return under(self.work, f"{slug}.cut-failed.json")
+
     def clips_dir(self, slug: str) -> Path:
         """Clips are a sibling of the album, never inside it.
 
@@ -304,6 +308,21 @@ def remember(
         spec = Spec(slug=slug, album=album, artist=artist, date=date, sides=())
     write_json(where, _spec_to_dict(spec))
     return where
+
+
+def cut_failure(layout: Layout, slug: str) -> str:
+    """Why the files in review are not a whole cut, or nothing when they are.
+
+    A cut writes this before it starts and removes it only once every track has
+    read back, so a server stopped halfway leaves the same answer as an error.
+    """
+    where = layout.cut_failed_file(slug)
+    if not where.is_file():
+        return ""
+    try:
+        return str(json.loads(where.read_text())["why"])
+    except (OSError, ValueError, KeyError):
+        return "it stopped before every track was cut"
 
 
 def forget(layout: Layout, slug: str) -> bool:

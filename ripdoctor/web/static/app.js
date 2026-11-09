@@ -236,7 +236,7 @@ function clearAlbum(message) {
   $("#ripsides").hidden = true;
   for (const id of ["#split", "#import", "#firstpass", "#addtrack", "#splittrack"])
     $(id).disabled = true;
-  cutAsked = { review: null, arc: null };
+  cutAsked = { review: null, arc: null, failed: "" };
   markDirty(false);
 }
 
@@ -249,7 +249,7 @@ const CUT_STEPS = ["rip", "firstpass", "check", "cut", "import", "archive"];
 
 // What only the server knows. It is asked when a record opens and when a job ends; an edit
 // redraws from what the page already holds, so a nudge costs no request.
-let cutAsked = { review: null, arc: null };
+let cutAsked = { review: null, arc: null, failed: "" };
 let cutCutting = false;
 
 const cutBox = (id) => document.getElementById(`cut-st-${id}`);
@@ -264,13 +264,14 @@ const namedList = (names) => {
 
 async function refreshCutRail() {
   const slug = S.slug;
-  const asked = { review: null, arc: null, recut: false };
+  const asked = { review: null, arc: null, recut: false, failed: "" };
   if (slug) {
     // A step that could not be asked says Waiting, and its own button still reports why.
     try {
       const cuts = await api(`/api/review/${slug}`);
       asked.review = cuts.tracks.length;
       asked.recut = cuts.older_than_plan;
+      asked.failed = cuts.failed;
     } catch { asked.review = null; }
     try { asked.arc = await api(`/api/archive/${slug}?album=${encodeURIComponent(S.meta.album || "")}`); } catch { asked.arc = null; }
   }
@@ -331,7 +332,7 @@ function railCut(f) {
   const n = counted(f.tracks.length, "track", "tracks");
   const files = counted(f.review ?? 0, "file", "files");
   $("#split").disabled = !S.slug || !f.tracks.length || cutCutting || !!f.overlaps.length || !!f.forced.length || !!f.earlier.length;
-  blue("#split", !!f.tracks.length && !f.review && (!f.imported || !!f.arc?.captured_again) && !f.forced.length && !f.overlaps.length && !f.earlier.length);
+  blue("#split", !!f.tracks.length && (!f.review || !!f.failed) && (!f.imported || !!f.arc?.captured_again) && !f.forced.length && !f.overlaps.length && !f.earlier.length);
   if (cutCutting) return cutStep("cut", "run", "Cutting", `${n} going into review/.`);
   if (!f.tracks.length) return cutStep("cut", "wait", "Waiting", "Waiting on the first pass.");
   if (f.overlaps.length) return cutStep("cut", "todo", "Overlap", `Tracks ${namedList(f.overlaps.map((t) => t.number))} overlap. Move a boundary so they do not, and this can run.`);
@@ -343,6 +344,7 @@ function railCut(f) {
     return cutStep("cut", "wait", "Waiting", `Side ${namedList(sidesFromEarlier())} was captured again, so ${held} from the earlier capture. Run First pass${align}. Anything you have moved stays where it is; a track you have listened to on this capture can be marked Checked.`);
   }
   if (f.forced.length && !f.imported) return cutStep("cut", "wait", "Waiting", `Waiting on ${f.forced.length} to check.`);
+  if (f.failed) return cutStep("cut", "fail", "Failed", `The last cut failed: ${f.failed.replace(/\.$/, "")}. What it left in review/ will not be imported. Cut again.`);
   if (f.review) return f.recut
     ? cutStep("cut", "ready", "Changed", `${files} in review/, older than what you see.`)
     : cutStep("cut", "done", "Cut", `${files} in review/.`);
@@ -353,9 +355,10 @@ function railCut(f) {
 
 function railImport(f) {
   // Unknown is not nothing: if the server could not say, the button stays pressable.
-  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported) || !!f.arc?.capturing;
+  $("#import").disabled = !S.slug || (f.review === 0 && !f.imported) || !!f.arc?.capturing || !!f.failed;
   if (f.arc?.capturing) return cutStep("import", "wait", "Waiting", f.arc.why);
-  blue("#import", !!f.review);
+  blue("#import", !!f.review && !f.failed);
+  if (f.failed) return cutStep("import", "wait", "Waiting", "Waiting on a cut that finishes.");
   if (f.imported && f.review) return cutStep("import", "ready", "Not filed", `${counted(f.review, "cut track", "cut tracks")} in review/ and not in the library yet. What the library holds came from an earlier import.`);
   if (f.imported) return cutStep("import", "done", "In library", `${counted(f.arc.library_tracks, "track", "tracks")} in the library.`);
   if (f.review) return cutStep("import", "ready", "Ready", "Tag the cut tracks and place them in the library.");
@@ -398,7 +401,7 @@ function showCutHead(f) {
 
 function showCutRail() {
   const tracks = Object.values(S.bySide).flat();
-  const { review, arc, recut } = cutAsked;
+  const { review, arc, recut, failed } = cutAsked;
   const f = {
     sides: S.meta?.sides ?? [],
     recording: S.meta?.recording ?? [],
@@ -408,6 +411,7 @@ function showCutRail() {
     overlaps: tracks.filter((t) => trackOverlaps(t).length),
     review,
     recut,
+    failed,
     arc,
     imported: !!arc?.library_tracks,
     archived: albumsHeld.find((a) => a.slug === S.slug)?.where === "archive",
