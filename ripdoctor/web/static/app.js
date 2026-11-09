@@ -1036,7 +1036,7 @@ async function loadArtState() {
   try {
     const r = await api(`/api/review/${S.slug}`);
     box.textContent = r.tracks.length
-      ? `${r.tracks.length} cut files ready for art`
+      ? `${counted(r.tracks.length, "cut file", "cut files")} ready for art`
       : "nothing cut yet — art attaches to the library copy";
   } catch { box.textContent = "—"; }
 }
@@ -1125,11 +1125,13 @@ async function split() {
     // Named rather than counted: a track that will not decode is one to cut
     // again, and knowing which costs nothing to report.
     if (bad.length) logline(`these did not read back: ${bad.join(", ")}`, true);
-    loadReview();
   } catch (e) {
     if (e.stale) saver.behind(e.message);
     status(`${e.stale ? "not cut" : "cut failed"}: ${e.message}`, true); logline(e.message, true);
   }
+  // A cut that fails partway has still changed what is in review/.
+  loadReview();
+  loadArtState();
   cutCutting = false;
   await refreshCutRail();
 }

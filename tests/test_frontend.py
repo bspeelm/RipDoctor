@@ -1894,3 +1894,13 @@ def test_a_failed_cut_is_said_on_the_rail_and_holds_the_import_back() -> None:
     imp = re.search(r"function railImport\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "|| !!f.failed;" in imp
     assert imp.index("if (f.failed)") < imp.index("if (f.review)")
+
+
+def test_the_cover_art_count_follows_a_cut_and_says_one_file_in_the_singular() -> None:
+    """It kept the count from before a re-cut until a reload, as "1 cut files"."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function split\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    after = body[body.index("} catch (e) {") :]
+    assert "loadReview();" in after and "loadArtState();" in after
+    assert 'counted(r.tracks.length, "cut file", "cut files")' in js
+    assert "cut files ready for art`" not in js
