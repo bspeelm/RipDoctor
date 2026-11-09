@@ -48,6 +48,10 @@ class Live:
     reading: S.Reading | None = None
     outcome: S.Outcome | None = None
     error: str = ""
+    # A reading's `elapsed` is on the capture loop's clock, so its age is measured
+    # there: a step in the wall clock says nothing about how old it is.
+    tick: Callable[[], float] = time.monotonic
+    ticked: float = field(default_factory=time.monotonic)
 
     @property
     def running(self) -> bool:
@@ -89,6 +93,10 @@ class Live:
             out["music"] = self.reading.music
             out["quiet_for"] = self.reading.quiet_for
             out["warning"] = self.reading.warning
+            # The loop keeps the last reading when it cannot measure, so this is what
+            # tells a level from one that was. It includes the recorder's settle.
+            age = self.tick() - self.ticked - self.reading.elapsed
+            out["reading_age"] = round(age, 1)
         if self.outcome:
             out["reason"] = self.outcome.reason
             out["seconds"] = self.outcome.seconds
@@ -141,6 +149,8 @@ class Recorder:
                 device=device,
                 started=self.now(),
                 control=S.Control(autostop=autostop),
+                tick=self.tick,
+                ticked=self.tick(),
             )
             self.live = live
 

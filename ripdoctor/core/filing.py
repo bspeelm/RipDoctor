@@ -58,7 +58,7 @@ from ripdoctor.core.tape import (
 
 FAILED = "failed"
 FILE = "file"
-NEW_ALBUM, JOIN, BESIDE = "new album", "join", "beside"
+NEW_ALBUM, JOIN, BESIDE, ADDING = "new album", "join", "beside", "adding"
 _SHOWN = {FAILED: 0, UNKNOWN: 0, PENDING: 1, FILED: 2, ALREADY: 3, SKIPPED: 4}
 
 
@@ -79,6 +79,8 @@ class Row:
     track: int = 0
     release: str = ""
     album_artist: str = ""
+    row: str = ""
+    album_row: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,11 +619,49 @@ def joining(run: Run, rows: Sequence[Row]) -> str:
     so only the album's name can be compared here. Merging rematches every row of that
     album against the pinned release, so an owned track is renamed, renumbered and
     retagged unless all of them are already that release. Anything else goes beside
-    them, and an empty or foreign album id is not that release."""
+    them, and an empty or foreign album id is not that release. A release held among
+    others cannot be merged for the same reason, and is added to its own row by hand."""
     held = {r.release for r in rows if fold(r.album) == fold(run.album)}
     if not held:
         return NEW_ALBUM
-    return JOIN if held == {run.release} else BESIDE
+    if held == {run.release}:
+        return JOIN
+    return ADDING if run.release in held else BESIDE
+
+
+def filed_copy(
+    rows: Sequence[Row], artist: str, album: str, release: str = ""
+) -> tuple[Row, ...]:
+    """What the library holds of exactly this record: by the whole release id, or with
+    none by the album artist and album, folded. A replace removes what this chooses, so
+    a title inside a longer one, or the same title by someone else, is never it."""
+    if release:
+        return tuple(r for r in rows if r.release == release)
+    if not album.strip():
+        return ()
+    who, what = fold(artist), fold(album)
+    return tuple(
+        r for r in rows if fold(r.album_artist) == who and fold(r.album) == what
+    )
+
+
+def replace_refusal(
+    copy: Sequence[Row], artist: str, album: str, release: str = ""
+) -> str:
+    """Why these rows may not be removed as one record, or nothing. Rows of several
+    releases under one name are editions, and only a release says which is meant."""
+    if not copy:
+        named = f"release {release}" if release else f"{artist} - {album}"
+        return (
+            f"the library holds nothing that is exactly {named}, so nothing is removed"
+        )
+    releases = {r.release for r in copy}
+    if not release and len(releases) > 1:
+        return (
+            f"{artist} - {album} is {len(releases)} different releases in the library, "
+            "so nothing is removed - pin the release to replace, or choose Keep both"
+        )
+    return ""
 
 
 def beside_note(run: Run) -> str:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from contextlib import suppress
@@ -9,7 +10,16 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ripdoctor.core.plan import LEAD, TAIL, Plan, Spec, SpecSide, SpecTrack
+from ripdoctor.core.plan import (
+    LEAD,
+    TAIL,
+    OldFormat,
+    Plan,
+    Spec,
+    SpecSide,
+    SpecTrack,
+    letter_of,
+)
 from ripdoctor.store.safety import under
 
 # Side files are named by letter, and the letter is opaque - a single-track
@@ -118,6 +128,9 @@ class Layout:
     def plan_file(self, slug: str) -> Path:
         return under(self.work, f"{slug}.plan.json")
 
+    def filed_file(self, slug: str) -> Path:
+        return under(self.work, f"{slug}.filed.json")
+
     def review_dir(self, slug: str) -> Path:
         return under(self.review, slug)
 
@@ -145,6 +158,54 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=1) + "\n")
     os.replace(tmp, path)
+
+
+def with_unseen_sides(plan: Plan, before: Plan | None, on_disk: dict[str, str]) -> Plan:
+    """A plan being saved, with the saved sides a page cannot show. It lists what is on
+    disk, so a side away for the moment would lose its times and marks to a save about
+    something else. Taking one out is `forget_side`, and is asked for by name."""
+    named = {s.file for s in plan.sides}
+    kept = [
+        s
+        for s in (before.sides if before else ())
+        if s.file not in named and s.file not in on_disk
+    ]
+    if not kept:
+        return plan
+    return replace(
+        plan, sides=tuple(sorted((*plan.sides, *kept), key=lambda s: s.file))
+    )
+
+
+def forget_side(layout: Layout, slug: str, file: str) -> None:
+    """A side somebody discarded goes from both documents, as its dialog promises. A
+    record with no readable documents has nothing to take it out of, and a re-rip
+    discarded still has its side in the archive."""
+    if letter_of(file) in layout.sides_on_disk(slug):
+        return
+    try:
+        plan = read_plan(layout.plan_file(slug))
+        spec = read_spec(layout.spec_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return
+    if all(s.file != file for s in plan.sides):
+        return
+    letter = letter_of(file)
+    save(
+        layout,
+        slug,
+        replace(spec, sides=tuple(s for s in spec.sides if s.letter != letter)),
+        replace(plan, sides=tuple(s for s in plan.sides if s.file != file)),
+    )
+
+
+def plan_seen(layout: Layout, slug: str) -> str:
+    """The saved plan as it stands, which a save names as what it was made from: a page
+    left open would otherwise put back whatever has changed since."""
+    where = layout.plan_file(slug)
+    return (
+        hashlib.sha256(where.read_bytes()).hexdigest()[:16] if where.is_file() else ""
+    )
 
 
 def read_spec(path: Path) -> Spec:
@@ -212,6 +273,7 @@ def _spec_to_dict(spec: Spec) -> dict[str, Any]:
                         "len": t.cat,
                         **({"start": t.start} if t.start is not None else {}),
                         **({"end": t.end} if t.end is not None else {}),
+                        **({"settled": t.settled} if t.settled else {}),
                     }
                     for t in s.tracks
                 ],
@@ -273,11 +335,6 @@ def forget(layout: Layout, slug: str) -> bool:
     return True
 
 
-def letter_of(filename: str) -> str:
-    stem = filename.rsplit("/", 1)[-1]
-    return stem[len("side-") : -len(".flac")] if stem.startswith("side-") else stem
-
-
 def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     """A spec derived from a plan, with every edge ear-set.
 
@@ -293,7 +350,12 @@ def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
     for side in plan.sides:
         tracks = tuple(
             SpecTrack(
-                number=t.number, title=t.title, cat=t.cat, start=t.start, end=t.end
+                number=t.number,
+                title=t.title,
+                cat=t.cat,
+                start=t.start,
+                end=t.end,
+                settled=t.settled,
             )
             for t in side.tracks
         )
@@ -316,6 +378,43 @@ def spec_of(plan: Plan, keep: Spec | None = None) -> Spec:
         lead=keep.lead if keep else LEAD,
         tail=keep.tail if keep else TAIL,
     )
+
+
+def keeping_settled(spec: Spec, plan: Plan) -> Spec:
+    """A new fit's spec, holding every boundary a person settled in the plan.
+
+    Tracks are matched by side and number, the only identity the two share. One
+    with no place in the new spec is refused: dropping it would discard the
+    judgement without anyone having asked for that.
+    """
+    held = {
+        (side.file, t.number): t
+        for side in plan.sides
+        for t in side.tracks
+        if t.settled
+    }
+    sides = []
+    for s in spec.sides:
+        tracks = []
+        for t in s.tracks:
+            kept = held.pop((SIDE.format(letter=s.letter), t.number), None)
+            tracks.append(
+                replace(t, start=kept.start, end=kept.end, settled=kept.settled)
+                if kept
+                else t
+            )
+        sides.append(replace(s, tracks=tuple(tracks)))
+    if held:
+        names = ", ".join(
+            f'{number} "{t.title}" on side {letter_of(file)}'
+            for (file, number), t in held.items()
+        )
+        raise ValueError(
+            f"this release has no place for what you settled: track {names}. "
+            "Choose another release, remove that track and save first, or start "
+            "over with the box that replaces the boundaries you set."
+        )
+    return replace(spec, sides=tuple(sides))
 
 
 def spec_from_plan(spec: Spec, plan: Plan) -> Spec:

@@ -26,6 +26,7 @@ from ripdoctor.core.fit import OutOfSide, fit_plan, report
 from ripdoctor.core.meter import Levels, Verdict
 from ripdoctor.core.plan import BadPlan, OldFormat, Plan, Spec, validate
 from ripdoctor.doctor import checks as D
+from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as T
 from ripdoctor.store import files as F
@@ -317,6 +318,20 @@ def cmd_name(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def _recover_replacing(ctx: Context, service: SERVICE) -> None:
+    """A replace a kill interrupted is settled before anything else can file. What it
+    cannot settle stops the next import there, so a failure here is only said."""
+    importer = IMP.choose(ctx.runner, ctx.settings.importer, ctx.machine.state_dir)
+    root = ctx.settings.library
+    if not root or not isinstance(importer, IMP.Beets):
+        return
+    try:
+        for line in importer.recover(service.runner, root):
+            print(f"  library: {line}")
+    except (IMP.ImportFailed, ToolMissing, OSError) as e:
+        print(f"  library: a replace left files held and they were not settled: {e}")
+
+
 def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
     """Run the web interface."""
     if not ctx.settings.vinyl:
@@ -355,6 +370,7 @@ def cmd_serve(ctx: Context, args: argparse.Namespace) -> int:
         # Worth saying out loud: on any other address the login is the only
         # thing between the network and a program that writes to the pool.
         print(f"  reachable from the network on {bind} - the login is the only control")
+    _recover_replacing(ctx, service)
     app = ROUTES.build(service, static=STATIC.handler(STATIC_DIR))
     HTTPD.serve(app, bind, port)
     return 0

@@ -146,6 +146,24 @@ def add(app: App, service: Service) -> None:
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
+    @app.route("GET", "/api/precut/filed")
+    def filed(r: H.Request) -> H.Response:
+        """What Replace would remove, shown before it can be ticked."""
+        got = _beets(service).filed(
+            service.runner,
+            service.settings.library,
+            "",
+            "",
+            mbid=r.query.get("mbid", ""),
+        )
+        return H.ok(
+            {
+                "tracks": got.tracks,
+                "where": "" if got.where is None else str(got.where),
+                "refused": got.refused,
+            }
+        )
+
     @app.route("POST", "/api/precut/take")
     def take(r: H.Request) -> H.Response:
         """Commit the release that was shown, and nothing else."""
@@ -153,6 +171,12 @@ def add(app: App, service: Service) -> None:
         mbid = str(body.get("mbid", ""))
         if not mbid:
             raise H.HttpError(400, "the release that was shown is needed")
+        duplicates = str(body.get("duplicates", "keep"))
+        replacing = bool(body.get("replace"))
+        if duplicates == "replace" and not replacing:
+            raise H.HttpError(
+                409, "replacing removes what is filed, so it has to be ticked"
+            )
         root = service.settings.library
         if not root:
             raise H.HttpError(409, "no library directory is configured")
@@ -176,7 +200,8 @@ def add(app: App, service: Service) -> None:
                     root,
                     mbid=mbid,
                     tracks=audio,
-                    duplicates=str(body.get("duplicates", "replace")),
+                    duplicates=duplicates,
+                    replacing=replacing,
                     file_mode=service.settings.file_mode,
                     dir_mode=service.settings.dir_mode,
                 )

@@ -8,13 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.audio.runner import FakeRunner, Result, ToolFailed
 from ripdoctor.core.naming import Unsafe
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack, Spec, SpecSide, SpecTrack
 from ripdoctor.store import archive as AR
 from ripdoctor.store import files as F
 from ripdoctor.store.files import Layout
 from ripdoctor.store.safety import contains, under
+from tests.pool import a_layout as a_pool
 from tests.pool import a_runner
 
 # ------------------------------------------------------------ containment
@@ -515,3 +516,112 @@ def test_a_side_that_will_not_read_back_puts_the_earlier_take_back(
     with pytest.raises(AR.NotReady):
         AR.put_away(runner, layout, "album")
     assert (layout.archive / "album" / "side-a.flac").read_bytes() == b"the older take"
+
+
+# ------------------------------------------------ what a new fit has to keep
+
+
+def a_settled_plan(*tracks: PlanTrack, file: str = "side-a.flac") -> Plan:
+    return Plan(
+        slug="album", album="A", artist="B", sides=(PlanSide(file=file, tracks=tracks),)
+    )
+
+
+def a_fresh_spec(*numbers: int) -> Spec:
+    tracks = tuple(SpecTrack(number=n, title=f"New {n}", cat=60.0) for n in numbers)
+    return Spec(
+        slug="album",
+        album="A",
+        artist="B",
+        sides=(SpecSide(letter="a", start=1.0, end=200.0, tracks=tracks),),
+    )
+
+
+def test_both_documents_say_who_settled_a_track(tmp_path: Path) -> None:
+    layout = a_layout(tmp_path)
+    plan = a_settled_plan(
+        PlanTrack(number=1, title="One", start=1.0, end=9.0, cat=8.0, settled="hand")
+    )
+    F.save(layout, "album", F.spec_of(plan), plan)
+    assert F.read_plan(layout.plan_file("album")).sides[0].tracks[0].settled == "hand"
+    assert F.read_spec(layout.spec_file("album")).sides[0].tracks[0].settled == "hand"
+
+
+def test_a_new_fit_holds_what_a_person_settled_and_only_that() -> None:
+    plan = a_settled_plan(
+        PlanTrack(number=1, title="One", start=1.0, end=9.0, cat=8.0),
+        PlanTrack(number=2, title="Two", start=11.0, end=19.0, cat=8.0, settled="hand"),
+        PlanTrack(
+            number=3, title="Three", start=21.0, end=29.0, cat=8.0, settled="ear"
+        ),
+    )
+    first, second, third = (
+        F.keeping_settled(a_fresh_spec(1, 2, 3), plan).sides[0].tracks
+    )
+    assert not first.has_ear_edges and not first.settled
+    assert (second.start, second.end, second.settled) == (11.0, 19.0, "hand")
+    assert (third.start, third.end, third.settled) == (21.0, 29.0, "ear")
+    assert second.title == "New 2", "the release names it; the person placed it"
+
+
+def test_a_settled_track_the_new_release_has_no_place_for_is_refused() -> None:
+    plan = a_settled_plan(
+        PlanTrack(number=7, title="Seven", start=1.0, end=9.0, cat=8.0, settled="hand")
+    )
+    with pytest.raises(ValueError, match=r'7 "Seven" on side a'):
+        F.keeping_settled(a_fresh_spec(1, 2), plan)
+
+
+def test_a_track_on_another_side_is_not_taken_for_the_one_settled() -> None:
+    plan = a_settled_plan(
+        PlanTrack(number=1, title="One", start=1.0, end=9.0, cat=8.0, settled="ear"),
+        file="side-b.flac",
+    )
+    with pytest.raises(ValueError, match="on side b"):
+        F.keeping_settled(a_fresh_spec(1), plan)
+
+
+def test_a_later_side_failing_once_left_an_earlier_side_replaced_and_its_take_aside(
+    tmp_path: Path,
+) -> None:
+    layout = a_pool(tmp_path, sides=("a", "b"))
+    kept = layout.archive / "album"
+    kept.mkdir(parents=True)
+    (kept / "side-a.flac").write_bytes(b"earlier a")
+    (kept / "side-b.flac").write_bytes(b"earlier b")
+
+    class FailsB(FakeRunner):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "flac" and "side-b" in args[-1] and "archive" in args[-1]:
+                return Result(tuple(args), 1, b"", b"bad")
+            if args[0] == "ffprobe":
+                return Result(tuple(args), 0, b"1.0\n", b"")
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    with pytest.raises(AR.NotReady):
+        AR.put_away(FailsB(), layout, "album")
+    assert (kept / "side-a.flac").read_bytes() == b"earlier a"
+    assert (kept / "side-b.flac").read_bytes() == b"earlier b"
+    assert not (kept / AR.SUPERSEDED).exists()
+
+
+def test_a_repair_that_dies_leaves_no_part_written_file_at_the_target(
+    tmp_path: Path,
+) -> None:
+    layout = a_pool(tmp_path, sides=("a",))
+
+    class DiesPartWay(FakeRunner):
+        def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+            args = [str(a) for a in argv]
+            if args[0] == "flac":
+                return Result(tuple(args), 1, b"", b"truncated")
+            if args[0] == "ffmpeg":
+                Path(args[-1]).write_bytes(b"part of it")
+                return Result(tuple(args), 1, b"", b"died")
+            return super().run(argv, stdin=stdin, timeout=timeout)
+
+    with pytest.raises(ToolFailed):
+        AR.put_away(DiesPartWay(), layout, "album")
+    assert not (layout.archive / "album" / "side-a.flac").exists()
+    assert (layout.raw / "album" / "side-a.flac").is_file()

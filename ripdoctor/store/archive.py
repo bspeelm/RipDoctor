@@ -12,21 +12,23 @@ sense in five years.
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
 from ripdoctor.audio.split import verify
+from ripdoctor.core.plan import OldFormat, Plan, letter_of
 from ripdoctor.integrations.importer import Importer
 from ripdoctor.store import cache as C
 from ripdoctor.store import tapes as T
-from ripdoctor.store.files import Layout
+from ripdoctor.store.files import Layout, read_plan, read_spec, save, write_json
 from ripdoctor.store.safety import under
 
 # What is cleared once the record is safe: the cut tracks, the tick clips and
@@ -56,6 +58,96 @@ def removable(layout: Layout, slug: str) -> list[Path]:
     ]
 
 
+def alignable(layout: Layout, slug: str, plan: Plan) -> list[str]:
+    """The sides whose saved times are still on the archived capture, which is all a
+    transform between the two captures is about. A save moves a side's stamp to the
+    capture on disk, and after that its times are not on the old one. ADR-064."""
+    found = []
+    for side in plan.sides:
+        old, new = layout.archive / slug / side.file, layout.raw / slug / side.file
+        if old.is_file() and new.is_file() and side.audio != C.stamp_of(new):
+            found.append(letter_of(side.file))
+    return found
+
+
+def cut_captures(layout: Layout, slug: str, plan: Plan) -> dict[str, str]:
+    """Which capture the tracks waiting in review came from, by side. A cut saves first,
+    so the plan's stamp is the audio it cut, unless the side was captured since."""
+    cuts = [p.stat().st_mtime for p in layout.review_dir(slug).glob("*.flac")]
+    if not cuts:
+        return {}
+    source = layout.raw / slug
+    return {
+        s.file: s.audio
+        for s in plan.sides
+        if s.audio
+        and (
+            not (source / s.file).is_file()
+            or (source / s.file).stat().st_mtime <= min(cuts)
+        )
+    }
+
+
+# Beside the side names in the proof, and no side is named with a leading underscore.
+MERGED = "_merged"
+FAILED = "_archive_failed"
+
+
+def note_filed(
+    layout: Layout, slug: str, captures: dict[str, str], *, merged: bool = False
+) -> None:
+    """Which capture the library's tracks came from, for the gate. ADR-055. A merge is
+    said too: the rows of a record merged into another are more than its plan holds."""
+    doc = {**_filed_captures(layout, slug), **captures}
+    doc.pop(FAILED, None)
+    doc.pop(MERGED, None)
+    write_json(layout.filed_file(slug), {**doc, **({MERGED: "yes"} if merged else {})})
+
+
+def note_failed(layout: Layout, slug: str, why: str) -> None:
+    """Why archiving failed after a good import, for whoever opens the record next."""
+    doc = {**_filed_captures(layout, slug), FAILED: why}
+    write_json(layout.filed_file(slug), doc)
+
+
+def _filed_captures(layout: Layout, slug: str) -> dict[str, str]:
+    where = layout.filed_file(slug)
+    # No proof reads as no proof, and the gate asks for one.
+    with suppress(OSError, ValueError):
+        return dict(json.loads(where.read_text()))
+    return {}
+
+
+def _capture_doubt(layout: Layout, slug: str) -> str:
+    """Why the tracks in the library may not be from what is in raw, or nothing.
+
+    Counting rows cannot tell: a side captured again leaves the earlier import counted
+    in full, and archiving then replaces the capture those tracks were cut from.
+    """
+    try:
+        plan = read_plan(layout.plan_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return ""
+    placed = {s.file: s.audio for s in plan.sides}
+    filed = _filed_captures(layout, slug)
+    for side in sorted((layout.raw / slug).glob("side-*.flac")):
+        now = C.stamp_of(side)
+        kept = layout.archive / slug / side.name
+        proof = filed.get(side.name)
+        if (
+            placed.get(side.name, now) not in ("", now)
+            or (proof and proof != now)
+            or (not proof and kept.is_file() and C.stamp_of(kept) != now)
+        ):
+            letter = side.stem.removeprefix("side-")
+            return (
+                f"side {letter} was captured again, and the tracks in the library were "
+                "not cut from this capture. Archiving now would replace the earlier "
+                "capture they came from. Cut this one and import it over them first"
+            )
+    return ""
+
+
 def survey(
     runner: Runner,
     layout: Layout,
@@ -67,6 +159,7 @@ def survey(
     expected: int,
     *,
     read: bool = False,
+    mbid: str = "",
 ) -> dict[str, Any]:
     """What archiving would do, and whether it is allowed to.
 
@@ -76,7 +169,21 @@ def survey(
     # Asked of the importer rather than derived: beets owns its own naming, and
     # a gate that checked the path this project would have chosen would be
     # checking the wrong directory on every install that configured it.
-    where, count = importer.locate(runner, library, artist, album)
+    # By its release first: beets may keep the artist under another name than the
+    # plan's. A record filed with no release has only its names to be found by, and a
+    # row that does name a release is another edition, which proves nothing about this.
+    # With no release, a row that names one is another edition just the same. Only rows
+    # whose files are there count: a row outliving its file proves nothing is anywhere.
+    where, count = importer.locate(
+        runner, library, artist, album, mbid=mbid, unreleased=not mbid, present=True
+    )
+    editions = 0
+    if where is None and mbid:
+        where, count = importer.locate(
+            runner, library, artist, album, unreleased=True, present=True
+        )
+    if where is None:
+        editions = importer.locate(runner, library, artist, album, present=True)[1]
     source = layout.raw / slug
     sides = []
     if source.is_dir():
@@ -84,15 +191,24 @@ def survey(
             sides.append(
                 Side(p.name, p.stat().st_size, verify(runner, str(p)) if read else None)
             )
-    ready = where is not None and count == expected and bool(sides)
-    why = ""
+    filed = _filed_captures(layout, slug)
+    merged = MERGED in filed and count > expected
+    held_all = count == expected or merged
+    doubt = _capture_doubt(layout, slug) if where and held_all else ""
+    ready = where is not None and held_all and bool(sides) and not doubt
+    why = doubt
     if not sides:
         why = f"no sides in raw for {slug}"
+    elif editions:
+        why = (
+            f"the library has {editions} tracks called {artist} - {album}, but of "
+            "another release than this record names. Import this one, or pin that one."
+        )
     elif where is None:
         why = "the record is not in the library yet"
     elif count < expected:
         why = f"only {count} of {expected} tracks are in the library"
-    elif count > expected:
+    elif count > expected and not merged:
         # Clearing raw/ on the strength of this archives over a record the
         # library holds twice. ADR-057.
         why = (
@@ -102,6 +218,8 @@ def survey(
     return {
         "ready": ready,
         "why": why,
+        "captured_again": bool(doubt),
+        "archive_failed": filed.get(FAILED, ""),
         "library_path": None if where is None else str(where),
         "library_tracks": count,
         "expected": expected,
@@ -192,43 +310,51 @@ def put_away(
             progress(what, detail)
 
     archived, notes = [], []
-    # Held until every side has read back, not just this one: a later side
-    # failing must still be able to put the earlier ones back.
-    stepped: list[Path] = []
-    for side in sorted(source.glob("side-*.flac")):
-        target = dest / side.name
-        superseded = step_aside(target)
-        if superseded:
-            stepped.append(superseded)
-        if verify(runner, str(side)):
-            say(side.name, "copying")
-            shutil.copy2(side, target)
-        else:
-            # Not a failure: it is what a capture ended with a signal looks
-            # like, and re-encoding is how it stops being that.
-            say(side.name, "re-encoding")
-            runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
-            notes.append(f"{side.name} was truncated and has been re-encoded")
-
-        seconds = read_back(runner, target)
-        if not seconds:
-            target.unlink(missing_ok=True)
+    # What copied so far and what it stepped aside, so that a side failing anywhere puts
+    # every earlier one back: the archive ends as it began, and raw is still whole.
+    copied: dict[str, tuple[str, str]] = {}
+    written: list[Path] = []
+    stepped: list[tuple[Path, Path]] = []
+    try:
+        for side in sorted(source.glob("side-*.flac")):
+            target = dest / side.name
+            superseded = step_aside(target)
             if superseded:
-                superseded.replace(target)
-            raise NotReady(f"{side.name} did not read back from the archive")
-        archived.append(
-            {
-                "side": side.name,
-                "bytes": target.stat().st_size,
-                "seconds": round(seconds, 2),
-            }
-        )
+                stepped.append((superseded, target))
+            written.append(target)
+            copied[side.name] = (C.stamp_of(side), "")
+            if verify(runner, str(side)):
+                say(side.name, "copying")
+                shutil.copy2(side, target)
+            else:
+                # Not a failure: it is what a capture ended with a signal looks
+                # like, and re-encoding is how it stops being that.
+                say(side.name, "re-encoding")
+                runner.run(repair_argv(str(side), str(target)), timeout=3600).require()
+                notes.append(f"{side.name} was truncated and has been re-encoded")
+
+            seconds = read_back(runner, target)
+            if not seconds:
+                raise NotReady(f"{side.name} did not read back from the archive")
+            copied[side.name] = (copied[side.name][0], C.stamp_of(target))
+            archived.append(
+                {
+                    "side": side.name,
+                    "bytes": target.stat().st_size,
+                    "seconds": round(seconds, 2),
+                }
+            )
+    except Exception:
+        _undo_copies(written, stepped, dest)
+        raise
 
     if not archived:
         raise NotReady(f"no sides in raw for {slug}")
 
+    _same_audio(layout, slug, copied)
+
     # Only now, with every side read back from where it will live.
-    for old_take in stepped:
+    for old_take, _target in stepped:
         if keep_superseded:
             notes.append(f"the previous {old_take.name} is in {SUPERSEDED}/")
             continue
@@ -237,6 +363,10 @@ def put_away(
     with suppress(OSError):
         (dest / SUPERSEDED).rmdir()
 
+    filed = _filed_captures(layout, slug)
+    if FAILED in filed:
+        del filed[FAILED]
+        write_json(layout.filed_file(slug), filed)
     removed = []
     for directory in (source, *removable(layout, slug)):
         if directory.is_dir():
@@ -248,6 +378,43 @@ def put_away(
         "notes": notes,
         "removed": removed,
     }
+
+
+def _undo_copies(
+    written: list[Path], stepped: list[tuple[Path, Path]], dest: Path
+) -> None:
+    for target in written:
+        target.unlink(missing_ok=True)
+    for moved, target in stepped:
+        moved.replace(target)
+    with suppress(OSError):  # it holds the rest of the record, if it was there before
+        (dest / SUPERSEDED).rmdir()
+    with suppress(OSError):
+        dest.rmdir()
+
+
+def _same_audio(layout: Layout, slug: str, copied: dict[str, tuple[str, str]]) -> None:
+    """A copy changes the file and not the music, so the plan follows it.
+
+    Times placed on a truncated capture are still right on its repaired copy, and any
+    copy may land with coarser times. A plan that does not read is left for whoever
+    opens it to be told about.
+    """
+    where = layout.plan_file(slug)
+    if all(old == new for old, new in copied.values()) or not where.is_file():
+        return
+    try:
+        plan = read_plan(where)
+        spec = read_spec(layout.spec_file(slug))
+    except (OSError, ValueError, KeyError, OldFormat):
+        return
+    sides = tuple(
+        replace(s, audio=copied[s.file][1])
+        if s.file in copied and s.audio == copied[s.file][0]
+        else s
+        for s in plan.sides
+    )
+    save(layout, slug, spec, replace(plan, sides=sides))
 
 
 def keep_tape(runner: Runner, layout: Layout, tape: str) -> dict[str, Any]:

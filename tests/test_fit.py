@@ -9,6 +9,7 @@ actually fitted from it, so the guarantee is shown to hold end to end.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -469,3 +470,171 @@ def test_a_boundary_that_was_found_is_not_marked() -> None:
 
     assert not any(t.forced for t in plan.sides[0].tracks)
     assert "forced" not in json.dumps(plan.to_dict())
+
+
+# --------------------------------------------------- what a person settled
+
+
+def test_who_settled_a_track_carries_from_the_spec_to_the_plan() -> None:
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    side = spec_side()
+    held = P.SpecTrack(
+        number=2, title="Two", cat=60.0, start=70.0, end=125.0, settled=P.HAND
+    )
+    side = P.SpecSide(
+        letter="a",
+        start=side.start,
+        end=side.end,
+        tracks=(side.tracks[0], held, *side.tracks[2:]),
+    )
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    plan, _ = FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    second = plan.sides[0].tracks[1]
+    assert (second.start, second.end, second.settled) == (70.0, 125.0, P.HAND)
+    assert not plan.sides[0].tracks[0].settled
+
+
+def test_a_found_end_stops_at_a_start_a_person_set() -> None:
+    """The gap's own end would run past it, and the plan would be refused as
+    overlapping, with no way to fit the record again but to give the boundary up."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    plain, _ = FIT.fit_plan(
+        P.Spec(slug="album", album="A", artist="B", sides=(spec_side(),)),
+        {"a": env},
+        below=G.BELOW,
+    )
+    found = plain.sides[0].tracks[0].end
+    side = spec_side()
+    held = P.SpecTrack(
+        number=2, title="Two", cat=60.0, start=found - 1.0, settled=P.HAND
+    )
+    side = P.SpecSide(
+        letter="a",
+        start=side.start,
+        end=side.end,
+        tracks=(side.tracks[0], held, *side.tracks[2:]),
+    )
+    plan, _ = FIT.fit_plan(
+        P.Spec(slug="album", album="A", artist="B", sides=(side,)),
+        {"a": env},
+        below=G.BELOW,
+    )
+    P.validate(plan)
+    first, second = plan.sides[0].tracks[:2]
+    assert second.start == found - 1.0
+    assert first.end == second.start
+
+
+def test_a_settled_track_on_a_forced_side_is_not_marked_as_placed_blind() -> None:
+    def placed(**kw: object) -> FIT.Fitted:
+        track = P.PlanTrack(number=1, title="t", start=0.0, end=10.0, cat=10.0, **kw)  # type: ignore[arg-type]
+        return FIT.Fitted(track=track, reason=FIT.FORCED + "ear")
+
+    held, blind = placed(settled=P.EAR), placed()
+    side = FIT.to_side("a", (held, blind))
+    assert [t.forced for t in side.tracks] == [False, True]
+    assert side.tracks[0].settled == P.EAR
+    assert not FIT.was_forced((held,))
+    assert FIT.was_forced((held, blind))
+
+
+def test_a_track_with_no_gap_says_it_was_placed_by_length() -> None:
+    """It read "Fitted to gap" with a delta of zero and nothing said otherwise."""
+    env = build([(10, -80), (300, -25)])
+    fitted = fit_side(
+        spec_side(cat=60.0), env, G.find(env, below=G.BELOW), duration=310
+    )
+    assert [f.reason for f in fitted[:2]] == ["no gap", "no gap"]
+    assert fitted[0].track.placed == P.LENGTH
+    assert not fitted[0].track.forced
+
+
+def test_the_track_after_a_no_gap_boundary_inherits_its_start_from_arithmetic() -> None:
+    """Last on the side, its own end is the side's, and its start is still a sum."""
+    env = build([(10, -80), (300, -25)])
+    fitted = fit_side(
+        spec_side(cat=60.0), env, G.find(env, below=G.BELOW), duration=310
+    )
+    assert fitted[-1].reason == "side end"
+    assert fitted[-1].track.placed == P.LENGTH
+
+
+def test_tracks_found_on_gaps_say_so() -> None:
+    env, gapset = side_with_gaps()
+    fitted = fit_side(spec_side(), env, gapset, duration=208.0)
+    assert [f.track.placed for f in fitted] == [P.GAP, P.GAP, P.GAP]
+
+
+def test_a_settled_track_claims_nothing_about_a_gap() -> None:
+    env, gapset = side_with_gaps()
+    side = spec_side()
+    pinned = replace(side.tracks[0], start=10.0, end=70.0, settled=P.HAND)
+    held = replace(side, tracks=(pinned, *side.tracks[1:]))
+    assert fit_side(held, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_edges_handed_to_a_fit_with_nobody_named_claim_nothing() -> None:
+    """A saved spec has every edge ear-set, and those did not come from this fit."""
+    env, gapset = side_with_gaps()
+    side = spec_side()
+    pinned = replace(side.tracks[0], start=10.0, end=70.0)
+    held = replace(side, tracks=(pinned, *side.tracks[1:]))
+    assert fit_side(held, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_the_only_track_on_a_side_has_no_gap_to_claim() -> None:
+    env, gapset = side_with_gaps()
+    only = P.SpecSide("a", 10.0, 208.0, (P.SpecTrack(1, "One", 198.0),))
+    assert fit_side(only, env, gapset, duration=208.0)[0].track.placed == ""
+
+
+def test_what_a_fit_rests_on_is_kept_in_the_plan_and_absent_from_an_old_one() -> None:
+    track = {"number": 1, "title": "T", "start": 0.0, "end": 9.0, "cat": 9.0}
+    doc = {"slug": "s", "sides": [{"file": "side-a.flac", "tracks": [track]}]}
+    assert P.Plan.from_dict(doc).sides[0].tracks[0].placed == ""
+    assert "placed" not in P.Plan.from_dict(doc).to_dict()["sides"][0]["tracks"][0]
+
+    doc["sides"][0]["tracks"] = [{**track, "placed": "length"}]  # type: ignore[index]
+    plan = P.Plan.from_dict(doc)
+    assert plan.to_dict()["sides"][0]["tracks"][0]["placed"] == "length"
+
+
+def test_a_placed_value_nobody_knows_reads_as_absent() -> None:
+    track = {"number": 1, "start": 0.0, "end": 9.0, "placed": "gut feeling"}
+    doc = {"slug": "s", "sides": [{"file": "side-a.flac", "tracks": [track]}]}
+    assert P.Plan.from_dict(doc).sides[0].tracks[0].placed == ""
+
+
+def test_a_side_held_by_set_boundaries_blames_them_and_not_the_last_track() -> None:
+    """It said the last one would start at 96 s with the side ending at 450 s, on a
+    side the catalogue fitted with room to spare. Issue #54."""
+    env = build([(10, -80), (440, -25)])
+    side = P.SpecSide(
+        "a",
+        10.0,
+        450.0,
+        (
+            P.SpecTrack(1, "One", 90.0, start=10.0, end=96.0, settled=P.HAND),
+            P.SpecTrack(2, "Two", 90.0),
+            P.SpecTrack(3, "Three", 90.0, start=50.0, end=300.0, settled=P.HAND),
+            P.SpecTrack(4, "Four", 90.0),
+        ),
+    )
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert "last one" not in said
+    assert 'track 2 "Two"' in said
+    assert "boundaries set on track 1 and track 3" in said
+
+
+def test_a_side_the_gaps_misled_does_not_blame_the_catalogues_total() -> None:
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert "last one" not in said
+    assert "another release" in said and "by ear" in said
+    assert "gaps it found" in said

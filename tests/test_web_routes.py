@@ -10,6 +10,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from ripdoctor.audio.runner import FakeRunner
 from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
@@ -495,6 +497,21 @@ def test_splitting_cuts_every_track_and_verifies_it(tmp_path: Path) -> None:
     assert len(list(service.layout.review_dir("album").glob("*.flac"))) == 2
 
 
+def test_a_cut_from_a_page_behind_the_plan_is_refused_and_nothing_is_cut(
+    tmp_path: Path,
+) -> None:
+    """A tab that had not noticed a change cut what was on disk, not what it showed."""
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting()
+    app = build(service)
+    r = post(app, "/api/split/album", service, {"seen": "what-it-loaded"})
+    assert r.status == 409 and r.json()["stale"]
+    assert "nothing was cut" in r.json()["error"]
+    assert not list(service.layout.review_dir("album").glob("*.flac"))
+    seen = F.plan_seen(service.layout, "album")
+    assert post(app, "/api/split/album", service, {"seen": seen}).status == 202
+
+
 def test_a_cut_clears_what_a_previous_cut_left(tmp_path: Path) -> None:
     """Cuts are named from the track number and title, so re-cutting after a
     retitle left the old files beside the new. The importer reads whatever is
@@ -520,6 +537,155 @@ def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
     )
     body = post(build(service), "/api/split/album", service).json()
     assert body["result"]["unreadable"], "an unreadable track was reported as fine"
+
+
+def with_a_forced_track(service: Service) -> Service:
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["forced"] = True
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    return service
+
+
+def test_a_track_placed_from_the_catalogue_blocks_the_cut_and_is_named(
+    tmp_path: Path,
+) -> None:
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    r = post(build(service), "/api/split/album", service)
+    assert r.status == 409
+    assert '1 "One"' in r.json()["error"] and "Checked" in r.json()["error"]
+    assert not service.runner.calls, "a refused cut must not reach ffmpeg"
+    assert not list(service.layout.review_dir("album").glob("*.flac"))
+
+
+def test_a_refused_cut_leaves_the_last_cut_where_it_is(tmp_path: Path) -> None:
+    """The stale files are cleared inside the job. Clearing them first would cost
+    somebody their cut for pressing a button that said no."""
+    service = with_a_forced_track(a_service(tmp_path))
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    assert post(build(service), "/api/split/album", service).status == 409
+    assert (review / "01 One.flac").is_file()
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_the_refusal_is_judged_on_the_plan_the_page_just_saved(
+    tmp_path: Path, who: str
+) -> None:
+    """Cut saves for itself first, so a check not yet saved when it was pressed
+    has to count by the time the server looks."""
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0].update(forced=False, settled=who)
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    assert post(build(service), "/api/split/album", service).status == 202
+
+
+def test_a_track_placed_by_length_can_be_marked_heard_without_moving_it(
+    tmp_path: Path,
+) -> None:
+    """The amber cleared only by moving the boundary, the complaint ADR-064 is about."""
+    service = a_service(tmp_path)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["placed"] = "length"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    service.runner = Cutting()
+    assert post(build(service), "/api/split/album", service).status == 202, (
+        "placed by length does not block a cut"
+    )
+
+    body["sides"][0]["tracks"][0]["settled"] = "ear"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    back = get(build(service), "/api/album/album", service).json()
+    track = back["tracks_by_side"]["a"][0]
+    assert (track["settled"], track["start"]) == ("ear", 1.0)
+
+
+def test_tick_clips_are_how_a_doubt_is_heard_so_they_are_not_refused(
+    tmp_path: Path,
+) -> None:
+    service = with_a_forced_track(a_service(tmp_path))
+    service.runner = Cutting()
+    assert post(build(service), "/api/clips/album", service).status == 202
+
+
+def test_who_settled_a_track_reaches_the_page_and_comes_back(tmp_path: Path) -> None:
+    service = a_service(tmp_path)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["settled"] = "hand"
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["settled"] == "hand"
+    assert '"settled": "hand"' in service.layout.spec_file("album").read_text()
+
+
+def test_a_plan_with_no_mark_reaches_the_page_as_nobody_having_settled_it(
+    tmp_path: Path,
+) -> None:
+    service = a_service(tmp_path)
+    assert post(build(service), "/api/plan/album", service, a_plan_body()).status == 200
+    assert "settled" not in service.layout.plan_file("album").read_text()
+    back = get(build(service), "/api/album/album", service).json()
+    assert back["tracks_by_side"]["a"][0]["settled"] == ""
+
+
+def with_two_sides_in_two_places(service: Service) -> Service:
+    """A re-rip of one side of a filed record: raw holds it, archive holds the rest."""
+    raw, archived = service.layout.raw / "album", service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-b.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    assert not (raw / "side-b.flac").exists()
+    body = a_plan_body()
+    body["sides"].append(
+        {
+            "letter": "b",
+            "tracks": [{"number": 2, "title": "Two", "start": 1.0, "end": 9.0}],
+        }
+    )
+    assert post(build(service), "/api/plan/album", service, body).status == 200
+    service.runner = Cutting()
+    return service
+
+
+def inputs_of(service: Service) -> set[str]:
+    """Each side ffmpeg was pointed at, as its directory's kind and its name."""
+    calls = service.runner.calls  # type: ignore[attr-defined]
+    named = [Path(c[c.index("-i") + 1]) for c in calls if "-i" in c]
+    return {
+        f"{p.parent.parent.name}/{p.name}" for p in named if p.name.startswith("side-")
+    }
+
+
+def test_a_cut_finds_each_side_where_it_is(tmp_path: Path) -> None:
+    """It looked in raw for all of them, so a record with one side re-ripped failed
+    halfway, having already written the first side's tracks."""
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    body = post(build(service), "/api/split/album", service).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["tracks"] == 2
+    assert inputs_of(service) == {"raw/side-a.flac", "archive/side-b.flac"}
+
+
+def test_tick_clips_find_each_side_where_it_is(tmp_path: Path) -> None:
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    body = post(build(service), "/api/clips/album", service).json()
+    assert not body["error"], body["error"]
+    assert inputs_of(service) == {"raw/side-a.flac", "archive/side-b.flac"}
+
+
+def test_a_cut_of_a_side_nowhere_on_disk_says_so_and_keeps_the_last_cut(
+    tmp_path: Path,
+) -> None:
+    service = with_two_sides_in_two_places(a_service(tmp_path))
+    (service.layout.archive / "album" / "side-b.flac").unlink()
+    review = service.layout.review_dir("album")
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "01 One.flac").write_bytes(b"fLaC")
+    r = post(build(service), "/api/split/album", service)
+    assert r.status == 409 and "no side 'b'" in r.json()["error"]
+    assert (review / "01 One.flac").is_file()
 
 
 def test_splitting_without_a_plan_is_a_404(tmp_path: Path) -> None:
@@ -637,6 +803,74 @@ def test_an_archived_cut_is_carried_onto_a_re_rip(tmp_path: Path, monkeypatch) -
     assert not body["error"], body["error"]
     moved = body["result"]["aligned"][0]["tracks"][0]
     assert moved["start"] == 3.0 and moved["end"] == 11.0
+    assert "settled" not in moved
+
+
+@pytest.mark.parametrize("who", ["hand", "ear"])
+def test_aligning_keeps_a_boundary_as_a_persons_but_not_as_heard(
+    tmp_path: Path, monkeypatch, who: str
+) -> None:
+    """A first pass after this has to leave it alone, and nobody has listened to
+    this capture yet, so a check by ear does not come across as one."""
+    from ripdoctor.core.xcorr import Transform
+
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0]["settled"] = who
+    plan = R._plan_from("album", body)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    monkeypatch.setattr(
+        R, "fit_side", lambda *a, **k: (Transform(offset=2.0, scale=1.0), (), 0.01)
+    )
+    monkeypatch.setattr(R, "true_duration", lambda *a, **k: 60.0)
+    got = post(build(service), "/api/align/album", service).json()
+    assert got["result"]["aligned"][0]["tracks"][0]["settled"] == "hand"
+
+
+def an_aligned_track(tmp_path: Path, monkeypatch, **marks) -> dict:  # type: ignore[no-untyped-def,type-arg]
+    from ripdoctor.core.xcorr import Transform
+
+    service = a_service(tmp_path)
+    archived = service.layout.archive / "album"
+    archived.mkdir(parents=True)
+    (archived / "side-a.flac").write_bytes(b"fLaC" + b"\x00" * 4000)
+    body = a_plan_body()
+    body["sides"][0]["tracks"][0].update(marks)
+    plan = R._plan_from("album", body)
+    F.save(service.layout, "album", F.spec_of(plan), plan)
+    monkeypatch.setattr(
+        R, "fit_side", lambda *a, **k: (Transform(offset=2.0, scale=1.0), (), 0.01)
+    )
+    monkeypatch.setattr(R, "true_duration", lambda *a, **k: 60.0)
+    got = post(build(service), "/api/align/album", service).json()
+    return got["result"]["aligned"][0]["tracks"][0]  # type: ignore[no-any-return]
+
+
+def test_a_forced_track_is_still_in_doubt_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Align read the spec, which has no word for it, so the row said Fitted."""
+    moved = an_aligned_track(tmp_path, monkeypatch, forced=True)
+    assert moved["forced"] is True
+    assert moved["start"] == 3.0
+
+
+def test_a_track_placed_by_length_still_says_so_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    moved = an_aligned_track(tmp_path, monkeypatch, placed="length")
+    assert moved["placed"] == "length"
+
+
+def test_a_settled_track_is_not_called_forced_after_aligning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    moved = an_aligned_track(tmp_path, monkeypatch, forced=True, settled="ear")
+    assert "forced" not in moved
+    assert moved["settled"] == "hand"
 
 
 def test_a_side_that_will_not_align_is_named_not_fatal(tmp_path: Path) -> None:

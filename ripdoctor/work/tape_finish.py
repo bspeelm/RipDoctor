@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -179,6 +180,26 @@ def refusal(place: Place, tape: TP.Tape, state: P.State) -> str:
     return P.archive_refusal(tape, state, audio=audio, playlist_there=there)
 
 
+def archive_if_resolved(
+    place: Place, beets: Beets, tape_id: str, job: Job, now: float
+) -> dict[str, Any]:
+    """The last step of the job that resolved a tape's last song. Filing and the
+    playlist stand whatever happens here, so a failure is said and kept, never raised
+    over the job reporting them. Not resolved yet is the ordinary answer."""
+    try:
+        tape = T.read(place.layout, tape_id)
+        refused = refusal(place, tape, S.read(place.layout, tape_id))
+        if refused:
+            return {"archived": False, "why": refused}
+        return {"archived": True, **archive(place, beets, tape_id, job, now)}
+    except Exception as e:
+        why = f"the songs stand, and archiving failed: {e}"
+        with suppress(Exception):  # the reason still reaches the page in this reply
+            state = S.read(place.layout, tape_id)
+            S.save(place.layout, tape_id, replace(state, archive_failed=why))
+        return {"archived": False, "why": why, "failed": True}
+
+
 def archive(
     place: Place, beets: Beets, tape_id: str, job: Job, now: float
 ) -> dict[str, Any]:
@@ -196,7 +217,11 @@ def archive(
     job.finished = 1
     job.step(tape.name, "copying to the archive and reading it back")
     kept = AR.keep_tape(place.runner, place.layout, tape_id)
-    S.save(place.layout, tape_id, replace(state, archived={**kept, "at": now}))
+    S.save(
+        place.layout,
+        tape_id,
+        replace(state, archived={**kept, "at": now}, archive_failed=""),
+    )
     job.finished = 2
     job.step(tape.name, "clearing what is proved to be elsewhere")
     count = len(tape.songs)

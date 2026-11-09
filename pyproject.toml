@@ -79,6 +79,7 @@ addopts = "--strict-markers -W error"
 markers = [
   "needs_ffmpeg: requires a real ffmpeg binary on PATH",
   "needs_beets: requires the real beet binary, not the fake runner",
+  "needs_node: requires node, to run the page's own code",
   "needs_hardware: requires a real capture device; never run in CI",
 ]
 

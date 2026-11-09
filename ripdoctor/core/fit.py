@@ -7,10 +7,24 @@ from dataclasses import dataclass, replace
 from ripdoctor.core import gaps
 from ripdoctor.core.envelope import Envelope
 from ripdoctor.core.gaps import Gap, GapSet, refine
-from ripdoctor.core.plan import LEAD, TAIL, Plan, PlanSide, PlanTrack, Spec, SpecSide
+from ripdoctor.core.plan import (
+    GAP,
+    LEAD,
+    LENGTH,
+    TAIL,
+    Plan,
+    PlanSide,
+    PlanTrack,
+    Spec,
+    SpecSide,
+    SpecTrack,
+)
 
 # A cut is never placed within this of its neighbour.
 MIN_SEPARATION = 0.2
+
+# The reason a fit gives for an end it could only work out from the catalogue.
+NO_GAP = "no gap"
 
 # A candidate gap must end this far after the track started, or the gap it just
 # began in is its own best match and every track collapses.
@@ -24,15 +38,30 @@ REACH = 0.5
 class OutOfSide(ValueError):
     """The tracks a side was given need more of it than the side has. ADR-045."""
 
-    def __init__(self, side: SpecSide, reached: float) -> None:
+    def __init__(self, side: SpecSide, bad: PlanTrack) -> None:
         want = sum(t.cat for t in side.tracks)
         span = side.end - side.start
+        held = [f"track {t.number}" for t in side.tracks if t.has_ear_edges]
+        where = (
+            f'track {bad.number} "{bad.title}" would start at {bad.start:.0f}s and '
+            f"end at {bad.end:.0f}s"
+        )
+        total = (
+            f"the {len(side.tracks)} tracks the catalogue puts here run {want:.0f}s "
+            f"against {span:.0f}s of music"
+        )
+        if held:
+            why = (
+                f"with the boundaries set on {' and '.join(held)} held where they "
+                "are. Move those"
+            )
+        elif want > span:
+            why = "so the release's durations do not match this pressing. Use"
+        else:
+            why = "so its durations do not line up with the gaps it found. Use"
         super().__init__(
-            f"side {side.letter}: the {len(side.tracks)} tracks the catalogue "
-            f"puts here run {want:.0f}s against {span:.0f}s of music, and the "
-            f"last one would start at {reached:.0f}s with the side ending at "
-            f"{side.end:.0f}s. The release's durations do not match this "
-            f"pressing - try another release, or place this side by ear."
+            f"side {side.letter}: {total}, and {where}, {why}. Try another "
+            "release, or place this side by ear."
         )
 
 
@@ -105,6 +134,20 @@ def _share_gap(
     return meeting, meeting
 
 
+def _rests_on(track: SpecTrack, reason: str, handed_over: bool, tracks: int) -> str:
+    """What a placed track's boundaries rest on, when the fit can say. ADR-064.
+
+    A boundary with no gap belongs to both tracks that meet on it, so the track
+    after one inherits the doubt through its start. The only track on a side
+    has no boundary with a neighbour, so no gap comes into it.
+    """
+    if track.settled:
+        return ""
+    if reason == NO_GAP or (handed_over and track.start is None):
+        return LENGTH
+    return "" if track.has_ear_edges or tracks == 1 else GAP
+
+
 def fit_side(
     side: SpecSide,
     env: Envelope,
@@ -117,6 +160,7 @@ def fit_side(
     """Place every track on one side. `env` and `gapset` must match."""
     out: list[Fitted] = []
     cur = side.start
+    handed_over = False  # the start this track inherits has no gap behind it
 
     for i, track in enumerate(side.tracks):
         last = i == len(side.tracks) - 1
@@ -145,13 +189,19 @@ def fit_side(
             gap = _pick_gap(gapset, want, cur, reach=track.cat * REACH)
             if gap is None:
                 end = nxt = min(want, duration)
-                reason = "no gap"
+                reason = NO_GAP
             else:
                 music_end, next_start = refine(env, gap.lo, gap.hi)
                 end, nxt = _share_gap(music_end, next_start, lead, tail)
                 reason = f"gap {gap.lo:.2f}-{gap.hi:.2f}"
                 if not gap.lo <= want <= gap.hi:
                     want_outside = want - (gap.lo + gap.hi) / 2.0
+
+        # A found end stops at a start a person set, which the fit may not move.
+        if not last and track.end is None:
+            held = side.tracks[i + 1].start
+            if held is not None:
+                end = min(end, held)
 
         out.append(
             Fitted(
@@ -161,12 +211,15 @@ def fit_side(
                     start=round(cur, 2),
                     end=round(end, 2),
                     cat=track.cat,
+                    settled=track.settled,
+                    placed=_rests_on(track, reason, handed_over, len(side.tracks)),
                 ),
                 reason=reason,
                 want_outside=want_outside,
             )
         )
 
+        handed_over = reason == NO_GAP
         if not last:
             following = side.tracks[i + 1]
             if following.start is not None:
@@ -224,7 +277,7 @@ def fit_plan(
             )
             bad = next((f for f in fitted if f.track.end <= f.track.start), None)
         if bad is not None:
-            raise OutOfSide(side, bad.track.start)
+            raise OutOfSide(side, bad.track)
         working[side.letter] = fitted
         sides.append(to_side(side.letter, fitted))
     plan = Plan(
@@ -239,14 +292,18 @@ def fit_plan(
 
 def was_forced(fitted: tuple[Fitted, ...]) -> bool:
     """Whether this side was placed from the catalogue alone. ADR-061."""
-    return any(f.reason.startswith(FORCED) for f in fitted)
+    return any(_placed_blind(f) for f in fitted)
+
+
+def _placed_blind(f: Fitted) -> bool:
+    return f.reason.startswith(FORCED) and not f.track.settled
 
 
 def to_side(letter: str, fitted: tuple[Fitted, ...]) -> PlanSide:
     return PlanSide(
         file=f"side-{letter}.flac",
         tracks=tuple(
-            replace(f.track, forced=True) if f.reason.startswith(FORCED) else f.track
+            replace(f.track, forced=True) if _placed_blind(f) else f.track
             for f in fitted
         ),
     )

@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from ripdoctor.core.fit import fit_plan, report, was_forced
-from ripdoctor.core.plan import BadPlan, Plan, Spec, SpecSide, SpecTrack, validate
+from ripdoctor.core.plan import (
+    BadPlan,
+    OldFormat,
+    Plan,
+    Released,
+    Spec,
+    SpecSide,
+    SpecTrack,
+    holding_only_current,
+    letter_of,
+    validate,
+)
 from ripdoctor.core.sides import assign_sides, music_span
 from ripdoctor.integrations import importer as IMP
 from ripdoctor.integrations import musicbrainz as MB
@@ -75,6 +87,11 @@ def spec_from(slug: str, release: MB.Release, sides: list[tuple[str, float, floa
     )
 
 
+def _spec_mbid(service: Service, slug: str) -> str:
+    spec_file = service.layout.spec_file(slug)
+    return F.read_spec(spec_file).mbid if spec_file.is_file() else ""
+
+
 def add(app: App, service: Service) -> None:
     layout = service.layout
 
@@ -104,6 +121,7 @@ def add(app: App, service: Service) -> None:
         if not mbid:
             raise H.HttpError(400, "a release is needed; search first")
         force = bool(r.json().get("force", False))
+        start_over = bool(r.json().get("start_over", False))
         letters = layout.sides_on_disk(slug)
         if not letters:
             raise H.HttpError(404, f"no side files for {slug}")
@@ -133,16 +151,40 @@ def add(app: App, service: Service) -> None:
                 job.finished += 1
 
             spec = spec_from(slug, release, spans)
+            stamps = C.stamps_of(layout, slug)
+            saved = _saved_plan(layout, slug)
+            released: tuple[Released, ...] = ()
+            replaced: list[Released] = []
+            if saved is not None:
+                held, released = holding_only_current(saved, stamps)
+                if start_over:
+                    replaced = [
+                        Released(s.file, t, "you asked")
+                        for s in held.sides
+                        for t in s.tracks
+                        if t.settled
+                    ]
+                else:
+                    spec = F.keeping_settled(spec, held)
             plan, working = fit_plan(
                 spec, lanes, above=service.thresholds.gap_above, force=force
             )
             validate(plan)
+            plan = replace(
+                plan,
+                sides=tuple(
+                    replace(s, audio=stamps.get(s.file, "")) for s in plan.sides
+                ),
+            )
             F.save(layout, slug, spec, plan)
             return {
+                "released": [_released(x) for x in released],
+                "replaced": [_released(x) for x in replaced],
                 "album": plan.album,
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
                 "forced": [k for k, f in working.items() if was_forced(f)],
+                "kept": sum(bool(t.settled) for s in plan.sides for t in s.tracks),
                 "report": "\n".join(
                     f"=== side {letter}\n{report(fitted)}"
                     for letter, fitted in working.items()
@@ -214,17 +256,29 @@ def add(app: App, service: Service) -> None:
         importer = IMP.choose(
             service.runner, service.settings.importer, service.state_dir
         )
-        where, count = importer.locate(
-            service.runner, service.settings.library, plan.artist, plan.album
+        # The page says which release it will use, empty included, because this is what
+        # a replace would remove. A caller that says nothing gets the spec's.
+        mbid = r.query.get("mbid", _spec_mbid(service, slug))
+        filed = importer.filed(
+            service.runner,
+            service.settings.library,
+            plan.artist,
+            plan.album,
+            mbid=mbid,
         )
-        stale = importer.stale(
-            service.runner, service.settings.library, plan.artist, plan.album
-        )
+        stale = filed.stale
         return H.ok(
             {
                 "existing": None
-                if where is None
-                else {"where": str(where), "tracks": count},
+                if filed.where is None
+                else {
+                    "where": str(filed.where),
+                    "tracks": filed.tracks,
+                    "artist": plan.artist,
+                    "album": plan.album,
+                    "folders": filed.folders,
+                    "refused": filed.refused,
+                },
                 # Rows without files. They read as a copy already there, and
                 # they stop an import part-way. ADR-050.
                 "stale": None
@@ -236,13 +290,20 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/library/clear-stale/([^/]+)")
     def clear_stale(r: H.Request) -> H.Response:
         """Remove rows whose files are gone. Refuses if any of them is there."""
-        plan = _plan_of(service, slug_of(r))
+        slug = slug_of(r)
+        plan = _plan_of(service, slug)
         importer = IMP.choose(
             service.runner, service.settings.importer, service.state_dir
         )
+        # The release the page asked about, as `existing` does: the rows it showed.
+        mbid = str(r.json().get("mbid", _spec_mbid(service, slug)))
         try:
             cleared = importer.clear_stale(
-                service.runner, service.settings.library, plan.artist, plan.album
+                service.runner,
+                service.settings.library,
+                plan.artist,
+                plan.album,
+                mbid=mbid,
             )
         except IMP.ImportFailed as e:
             raise H.HttpError(409, str(e)) from e
@@ -256,6 +317,7 @@ def add(app: App, service: Service) -> None:
     @app.route("POST", "/api/import/([^/]+)")
     def import_record(r: H.Request) -> H.Response:
         slug = slug_of(r)
+        _refuse_while_capturing(service, slug)
         plan = _plan_of(service, slug)
         root = service.settings.library
         if not root:
@@ -282,34 +344,78 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(
                 409, f"nothing to import for {slug} - cut the tracks first"
             )
+        if replacing and duplicates == "replace":
+            short = IMP.partial_cut(
+                len(list(review_dir.glob("*.flac"))),
+                sum(len(s.tracks) for s in plan.sides),
+            )
+            if short:
+                raise H.HttpError(409, short)
 
         def work(job: Job) -> dict[str, Any]:
             review = str(review_dir)
             job.total = sum(len(s.tracks) for s in plan.sides)
             job.step(plan.album, f"importing with {importer.name}")
+            captures = AR.cut_captures(layout, slug, plan)
             with one_import(job):
-                done = importer.apply(
-                    service.runner,
-                    plan,
-                    review,
-                    root,
-                    mbid=mbid,
-                    duplicates=duplicates,
-                    replacing=replacing,
-                    file_mode=service.settings.file_mode,
-                    dir_mode=service.settings.dir_mode,
-                )
+                try:
+                    done = importer.apply(
+                        service.runner,
+                        plan,
+                        review,
+                        root,
+                        mbid=mbid,
+                        duplicates=duplicates,
+                        replacing=replacing,
+                        file_mode=service.settings.file_mode,
+                        dir_mode=service.settings.dir_mode,
+                    )
+                except IMP.ImportFailed as e:  # written for the person; see `Jobs`
+                    raise ValueError(str(e)) from e
+            AR.note_filed(layout, slug, captures, merged=duplicates == "merge")
             job.finished = done.tracks
             notes = [*done.notes, *after_import(service)]
-            return {**done.as_dict(), "importer": importer.name, "notes": notes}
+            filed = {**done.as_dict(), "importer": importer.name, "notes": notes}
+            return {**filed, "archive": _archive_after(job, slug, mbid)}
 
         try:
             return H.ok(service.jobs.start(slug, "import", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
 
-    def _survey(r: H.Request, read: bool) -> dict[str, Any]:
-        slug = slug_of(r)
+    def _archive_after(job: Job, slug: str, mbid: str) -> dict[str, Any]:
+        """The last step of an import. The import stands whatever happens here, so
+        every failure is said and none is raised over the job reporting it."""
+        try:
+            state = _survey(slug, read=False, mbid=mbid)
+            if not state["ready"]:
+                return {"archived": False, "why": state["why"]}
+            return {"archived": True, **_put_away(job, slug, state)}
+        except Exception as e:
+            why = f"the import stands, and archiving failed: {e}"
+            with suppress(OSError):  # the reason still reaches the page in this reply
+                AR.note_failed(layout, slug, why)
+            return {"archived": False, "why": why, "failed": True}
+
+    def _put_away(job: Job, slug: str, state: dict[str, Any]) -> dict[str, Any]:
+        """An earlier capture is always moved aside and kept here: nobody is asked
+        before this runs, so nothing it does may be final. ADR-065."""
+        job.total = len(state["sides"])
+        job.finished = 0
+
+        def step(name: str, what: str) -> None:
+            job.step(name, what)
+            job.finished += 1
+
+        return AR.put_away(
+            service.runner,
+            layout,
+            slug,
+            keep_superseded=True,
+            progress=step,
+        )
+
+    def _survey(slug: str, *, read: bool, mbid: str | None = None) -> dict[str, Any]:
         plan = _maybe_plan(service, slug)
         if plan is None:
             # A record that has been captured and not yet cut is the ordinary
@@ -325,6 +431,19 @@ def add(app: App, service: Service) -> None:
                 "sides": [],
                 "will_remove": [],
             }
+        capturing = _capturing(service, slug)
+        if capturing:
+            return {
+                "ready": False,
+                "why": capturing,
+                "capturing": True,
+                "library_path": None,
+                "library_tracks": 0,
+                "expected": sum(len(s.tracks) for s in plan.sides),
+                "will_archive_to": str(layout.archive / slug),
+                "sides": [],
+                "will_remove": [],
+            }
         return AR.survey(
             service.runner,
             layout,
@@ -335,45 +454,62 @@ def add(app: App, service: Service) -> None:
             plan.album,
             sum(len(s.tracks) for s in plan.sides),
             read=read,
+            mbid=_spec_mbid(service, slug) if mbid is None else mbid,
         )
 
     @app.route("GET", "/api/archive/([^/]+)")
     def archive_gate(r: H.Request) -> H.Response:
         """Whether the raw sides are safe to clear, and why not if they are not.
 
+        An import asks this itself, as its last step. The page asks to say the outcome.
+
         The gate is the whole point: it is what stops twenty minutes a side
         being cleared before the record is provably somewhere else. `verify=1`
         reads every side back, which takes seconds each - worth it before the
         irreversible step, not worth it for a button's tooltip.
         """
-        return H.ok(_survey(r, read=r.query.get("verify") == "1"))
+        return H.ok(_survey(slug_of(r), read=r.query.get("verify") == "1"))
 
     @app.route("POST", "/api/archive/([^/]+)")
     def archive(r: H.Request) -> H.Response:
+        """Archive again, after an import that could not. Same gate, same refusals."""
         slug = slug_of(r)
-        state = _survey(r, read=False)
+        _refuse_while_capturing(service, slug)
+        state = _survey(slug, read=False)
         if not state["ready"]:
             raise H.HttpError(409, state["why"])
 
         def work(job: Job) -> dict[str, Any]:
-            job.total = len(state["sides"])
-
-            def step(name: str, what: str) -> None:
-                job.step(name, what)
-                job.finished += 1
-
-            return AR.put_away(
-                service.runner,
-                layout,
-                slug,
-                keep_superseded=service.settings.keep_superseded,
-                progress=step,
-            )
+            try:
+                return _put_away(job, slug, state)
+            except Exception as e:
+                # Raised for the job to report, and kept for whoever opens this next.
+                with suppress(OSError):  # that report is the one that matters
+                    AR.note_failed(layout, slug, f"archiving failed: {e}")
+                raise
 
         try:
             return H.ok(service.jobs.start(slug, "archive", work).as_dict(), 202)
         except Busy as e:
             raise H.HttpError(409, str(e)) from e
+
+
+def _capturing(service: Service, slug: str) -> str:
+    """Why this record's raw folder may not be read as finished, or nothing. A capture
+    that is still being written or encoded lives in there, and archiving clears it."""
+    live = service.recorder.live
+    if not live or live.slug != slug or live.stage not in ("recording", "encoding"):
+        return ""
+    return (
+        f"side {live.side} of this record is still being captured. Wait for it to "
+        "finish, then import"
+    )
+
+
+def _refuse_while_capturing(service: Service, slug: str) -> None:
+    why = _capturing(service, slug)
+    if why:
+        raise H.HttpError(409, why)
 
 
 def _file(where: Path, slug: str) -> Path:
@@ -419,6 +555,26 @@ def _retitled_plan(plan: Plan, titles: list[str], release: MB.Release) -> Plan:
         artist=release.artist or plan.artist,
         date=release.date or plan.date,
     )
+
+
+def _released(gone: Released) -> dict[str, Any]:
+    return {
+        "side": letter_of(gone.file),
+        "number": gone.track.number,
+        "title": gone.track.title,
+        "why": gone.why,
+    }
+
+
+def _saved_plan(layout: F.Layout, slug: str) -> Plan | None:
+    """The plan a new fit replaces. A superseded format holds no judgement to keep."""
+    where = layout.plan_file(slug)
+    if not where.is_file():
+        return None
+    try:
+        return F.read_plan(where)
+    except OldFormat:
+        return None
 
 
 def _isdir(path: str) -> bool:

@@ -139,6 +139,38 @@ def test_cut_is_refused_while_a_doubt_is_unheard_and_cuts_nothing(
     assert not job_of(app, tape, service)["error"]
 
 
+@pytest.mark.parametrize(("verb", "body"), [("heard", {}), ("skip", {})])
+def test_a_page_left_open_cannot_judge_a_song_moved_since(
+    service: Service, verb: str, body: dict[str, object]
+) -> None:
+    """#45: a move sent what it had seen and a verdict did not, so a verdict could land
+    on boundaries the person giving it had never looked at."""
+    app = build(service)
+    tape = placed(app, service, TWO)
+    song = T.read(service.layout, tape).songs[1]
+    assert song.start is not None and song.end is not None
+    url = f"/api/tapes/{tape}/songs/2"
+    moved = {"start": song.start, "end": song.end - 0.5}
+    seen = {"seen_start": song.start, "seen_end": song.end}
+    assert post(app, f"{url}/edges", service, {**moved, **seen}).status == 200
+    before = T.read(service.layout, tape)
+    refused = post(app, f"{url}/{verb}", service, {**body, **seen})
+    assert refused.status == 409 and "has changed since" in refused.json()["error"]
+    assert T.read(service.layout, tape) == before
+    fresh = {"seen_start": moved["start"], "seen_end": moved["end"]}
+    if verb == "skip":
+        assert post(app, f"{url}/{verb}", service, {**body, **fresh}).status == 200
+
+
+def test_a_verdict_is_sent_with_what_the_page_was_looking_at() -> None:
+    js = (Path(__file__).parent.parent / "ripdoctor/web/static/app.js").read_text()
+    judge = js[js.index("function tapeJudge(") :]
+    judge = judge[: judge.index("function zoomBy(")]
+    assert "{ seen_start: start, seen_end: end }" in judge
+    assert "if (e.status === 409 && tape) showTape(" in judge
+    assert judge.count("...seenOf(key)") == 2
+
+
 def test_cut_goes_ahead_with_albums_unsettled_while_file_refuses(
     service: Service,
 ) -> None:
@@ -275,6 +307,8 @@ def test_a_cut_seeks_exactly_and_re_encodes_from_the_tape(service: Service) -> N
         "flac",
         "-compression_level",
         "8",
+        "-frame_size",
+        "4096",
         str(root / T.PARTIAL / "01 One.flac"),
     )
 

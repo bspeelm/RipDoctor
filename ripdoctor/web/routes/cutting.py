@@ -12,7 +12,17 @@ from pathlib import Path
 from typing import Any
 
 from ripdoctor.audio.split import cut_one, plan_cuts, tick_one, verify
-from ripdoctor.core.plan import BadPlan, OldFormat, PlanTrack, validate
+from ripdoctor.core.plan import (
+    BadPlan,
+    OldFormat,
+    PlanTrack,
+    as_it_stands,
+    cut_refusal,
+    letter_of,
+    validate,
+)
+from ripdoctor.store import archive as AR
+from ripdoctor.store import cache as C
 from ripdoctor.store import files as F
 from ripdoctor.web import http as H
 from ripdoctor.web.app import App
@@ -53,6 +63,17 @@ def _plan(service: Service, slug: str) -> Any:
     return plan
 
 
+def _sides_of(service: Service, slug: str, plan: Any) -> dict[str, str]:
+    """Where each side is, one by one: a re-rip puts one in raw and leaves the rest."""
+    try:
+        return {
+            side.file: str(service.layout.side_file(slug, letter_of(side.file)))
+            for side in plan.sides
+        }
+    except FileNotFoundError as e:
+        raise H.HttpError(409, str(e)) from e
+
+
 def add(app: App, service: Service) -> None:
     layout = service.layout
 
@@ -61,8 +82,29 @@ def add(app: App, service: Service) -> None:
         """Cut, then verify. A file that will not decode is not a track."""
         slug = slug_of(r)
         plan = _plan(service, slug)
-        source = layout.album_dir(slug)
+        # A page stops looking while it is hidden, playing or showing a dialog, and a
+        # cut is from the plan on disk, so it says which plan it means.
+        body = r.json()
+        if "seen" in body and body["seen"] != F.plan_seen(layout, slug):
+            said = (
+                "the plan has changed since this page loaded it, in another tab or by "
+                "a job, and nothing was cut"
+            )
+            return H.ok({"error": said, "stale": True}, 409)
+        # Judged here, on the saved plan: the page saves for itself before it
+        # asks, so an edit it has just made is already in what this reads. The
+        # stamps are what a save has not yet had the chance to say.
+        refused = cut_refusal(
+            as_it_stands(plan, C.stamps_of(layout, slug)),
+            AR.alignable(layout, slug, plan),
+        )
+        if refused:
+            raise H.HttpError(409, refused)
         dest = layout.review_dir(slug)
+        # Before anything is cleared: a side that cannot be found costs nobody
+        # the cut they already have.
+        where = _sides_of(service, slug, plan)
+        cuts = plan_cuts(plan, where.__getitem__, str(dest))
 
         def work(job: Job) -> dict[str, Any]:
             dest.mkdir(parents=True, exist_ok=True)
@@ -72,7 +114,6 @@ def add(app: App, service: Service) -> None:
             # which turns the next good import into a reported failure.
             for stale in dest.glob("*.flac"):
                 stale.unlink()
-            cuts = plan_cuts(plan, str(source), str(dest))
             job.total = len(cuts)
             bad = []
             for cut in cuts:
@@ -90,8 +131,20 @@ def add(app: App, service: Service) -> None:
 
     @app.route("GET", "/api/review/([^/]+)")
     def review(r: H.Request) -> H.Response:
-        names = _listing(layout.review_dir(slug_of(r)))
-        return H.ok({"tracks": [{"index": i, "name": n} for i, n in enumerate(names)]})
+        slug = slug_of(r)
+        names = _listing(layout.review_dir(slug))
+        cuts = list(layout.review_dir(slug).glob("*.flac"))
+        plan = layout.plan_file(slug)
+        return H.ok(
+            {
+                "tracks": [{"index": i, "name": n} for i, n in enumerate(names)],
+                # Edits save themselves, so a plan newer than a cut is what says the
+                # page has moved on from what is waiting here.
+                "older_than_plan": bool(cuts)
+                and plan.is_file()
+                and plan.stat().st_mtime > min(p.stat().st_mtime for p in cuts),
+            }
+        )
 
     @app.route("GET", "/api/review/([^/]+)/(\\d+)")
     def review_audio(r: H.Request) -> H.Response:
@@ -103,7 +156,7 @@ def add(app: App, service: Service) -> None:
         """One clip per boundary, with a tick at the instant being judged."""
         slug = slug_of(r)
         plan = _plan(service, slug)
-        source = layout.album_dir(slug)
+        sources = _sides_of(service, slug, plan)
         dest = layout.clips_dir(slug)
 
         def work(job: Job) -> dict[str, Any]:
@@ -119,7 +172,7 @@ def add(app: App, service: Service) -> None:
                 job.step(f"track {track.number} {edge}", "building")
                 tick_one(
                     service.runner,
-                    str(source / file),
+                    sources[file],
                     at,
                     str(dest / _clip_name(n, track, edge)),
                 )

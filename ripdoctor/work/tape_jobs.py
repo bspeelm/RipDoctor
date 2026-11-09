@@ -15,7 +15,7 @@ from ripdoctor.core import match as TM
 from ripdoctor.core import tape as TP
 from ripdoctor.integrations import musicbrainz as MB
 from ripdoctor.integrations import tagger as TG
-from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun
+from ripdoctor.integrations.importer import Beets, ImportFailed, TapeRun, holds_nothing
 from ripdoctor.store import incoming as IN
 from ripdoctor.store import tapes as T
 from ripdoctor.store.files import Layout
@@ -361,6 +361,7 @@ class _Filing:
     dir_mode: int
     unanswered: set[int] = field(default_factory=set)
     plugins: tuple[str, ...] | None = None
+    regained: set[str] = field(default_factory=set)
 
     def rows(self, query: list[str]) -> tuple[F.Row, ...]:
         return self.beets.library_rows(self.runner, self.library, query)
@@ -418,7 +419,7 @@ class _Filing:
         rows = self.read_back(run, song)
         paths = F.recovered(song, rows, taken=taken, track=track.number)
         if len(paths) == 1:
-            self.complete(song, F.FILED, paths[0])
+            self.complete(song, F.FILED, paths[0], self.after_a_kill(run, paths[0]))
             return True
         if paths:
             self.tell(song, F.UNKNOWN, note=_which(paths))
@@ -449,7 +450,8 @@ class _Filing:
             elif said.action == F.FILE:
                 waiting.append((track, by_name))
             elif said.action == F.ALREADY and song.import_begun:
-                self.complete(song, F.FILED, said.path, said.note)
+                note = self.after_a_kill(run, said.path)
+                self.complete(song, F.FILED, said.path, said.note, note)
             else:
                 self.tell(
                     song,
@@ -460,10 +462,27 @@ class _Filing:
                 )
         return waiting
 
+    def after_a_kill(self, run: F.Run, path: str) -> str:
+        """A song an interrupted import left in the library has what beets does after
+        moving it still to do: joining its release's row, and the album gain of all that
+        is on that row, once whichever of its songs comes back first. A run with no
+        release writes no album gain, killed or not."""
+        if not run.release:
+            return ""
+        said = self.gathered(run)
+        try:
+            album, _ = self.beets.album_files(self.runner, self.library, path)
+            if album in self.regained:
+                return said
+            gained = self.album_refreshed(album)
+        except (ImportFailed, ToolMissing, ToolFailed, TimedOut) as e:
+            gained = f"its album's gain was not refreshed: {e}"
+        return "; ".join(n for n in (said, gained) if n)
+
     def lost_copy(self, song: TP.Song) -> None:
         """A copy a lookup found and File did not. A library off its mount has lost
         all of them and nothing has really gone, so nobody chooses albums again."""
-        if not _reachable(self.library):
+        if holds_nothing(self.library):
             self.tell(
                 song,
                 F.FAILED,
@@ -523,9 +542,7 @@ class _Filing:
         ReplayGain as much as a refusal, is a note on the song and not its outcome."""
         said = []
         try:
-            if self.plugins is None:
-                self.plugins = self.beets.plugins(self.runner)
-            if "embedart" in self.plugins:
+            if "embedart" in self.loaded():
                 said.append(self.with_art(path))
             said.append(self.with_gain(song, path))
         except Exception as e:  # a retry would file it twice to get this back
@@ -584,6 +601,9 @@ class _Filing:
             how = F.joining(
                 run, self.beets.album_rows(self.runner, self.library, run.album)
             )
+            # Its row is only sure to be in the same folder when no path can part them.
+            if how == F.ADDING and self.beets.folders_apart(self.runner) is not False:
+                how = F.BESIDE
             doubled = F.beside_note(run) if how == F.BESIDE else ""
         else:
             query = [F.term("albumartist", run.artist), F.term("album", run.album)]
@@ -593,7 +613,42 @@ class _Filing:
         took = self.beets.file_tape_run(
             self.runner, str(where), run.release, self.library, how=how
         )
+        if how == F.ADDING:
+            doubled = self.gathered(run)
         return copies, took, doubled
+
+    def gathered(self, run: F.Run) -> str:
+        """This release's rows made one. Not managing it leaves a song that is filed,
+        beside the others of its release, and that is said."""
+        try:
+            album, joined, apart = self.beets.join_release(
+                self.runner, self.library, run.release
+            )
+        except (ImportFailed, ToolMissing, ToolFailed, TimedOut) as e:
+            return f"{F.beside_note(run)} - it could not join its release's row: {e}"
+        said = [F.beside_note(run)] if apart else []
+        if joined:
+            said.append(self.album_refreshed(album))
+        return "; ".join(n for n in said if n)
+
+    def loaded(self) -> tuple[str, ...]:
+        if self.plugins is None:
+            self.plugins = self.beets.plugins(self.runner)
+        return self.plugins
+
+    def album_refreshed(self, album: str) -> str:
+        """A song arriving changes its album's gain. That rewrites the files of this row
+        alone, at the writer's umask, so theirs and only theirs come back. ADR-056."""
+        self.regained.add(album)
+        if "replaygain" not in self.loaded():
+            return ""
+        why = self.beets.album_gain(self.runner, album)
+        try:
+            files = self.beets.files_on(self.runner, self.library, album)
+            TG.set_file_modes([Path(f) for f in files], self.file_mode)
+        except (OSError, ImportFailed, ToolMissing, ToolFailed, TimedOut) as e:
+            return f"its album's modes could not be set: {e}"
+        return f"its album's gain was not refreshed: {why}" if why else ""
 
     def believed(
         self,
@@ -657,6 +712,9 @@ class _Filing:
             # From the pre-check to the import: two jobs filing one recording would
             # otherwise both find nothing, and both import it.
             with one_import(self.job):
+                why = self.beets.off_its_mount(self.runner, self.library)
+                if why:
+                    raise ImportFailed(why)
                 self.clear_leftovers()
                 waiting = self.checked(run)
                 if not waiting:
@@ -671,13 +729,6 @@ class _Filing:
                     self.tell(track.song, F.UNKNOWN, note=_unconfirmed(e))
                 elif number in self.unanswered:
                     self.tell(track.song, F.FAILED, note=str(e))
-
-
-def _reachable(library: str) -> bool:
-    try:
-        return any(Path(library).iterdir())
-    except OSError:  # not there at all, or not to be read: neither holds a song
-        return False
 
 
 def _unconfirmed(why: Exception) -> str:

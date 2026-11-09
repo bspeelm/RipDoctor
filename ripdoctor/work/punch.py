@@ -31,7 +31,7 @@ from typing import Any
 from ripdoctor.audio.align import fit_punch
 from ripdoctor.audio.ffprobe import true_duration
 from ripdoctor.audio.runner import Runner
-from ripdoctor.audio.split import verify
+from ripdoctor.audio.split import CODEC, verify
 from ripdoctor.core.naming import token
 from ripdoctor.core.plan import Plan, SpecTrack
 from ripdoctor.integrations.tagger import carry_tags, placements
@@ -187,10 +187,7 @@ def cut_argv(source: str, start: float, end: float, dest: str) -> list[str]:
         f"{start:.3f}",
         "-to",
         f"{end:.3f}",
-        "-c:a",
-        "flac",
-        "-compression_level",
-        "8",
+        *CODEC,
         dest,
     ]
 

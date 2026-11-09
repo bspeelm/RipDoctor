@@ -46,16 +46,15 @@ header strong{letter-spacing:.02em}
    it rather than a field in its own right. */
 .pick{width:9rem;flex:none}
 
-/* A select sizes itself to its widest option, not its selected one, so one long
-   album title set the whole header's width and pushed the last actions off the
-   right edge. min-width:0 is what lets a flex item shrink below its content at
-   all; the cap stops it eating the row on a wide screen. */
+/* A select sizes itself to its widest option, not its selected one, so one long album title
+   could set the whole header's width. min-width:0 is what lets a flex item shrink below its
+   content at all; the cap stops it eating the row on a wide screen. */
+#record-pick{display:flex;align-items:center;gap:.5rem;flex:0 1 38rem;min-width:0}
 #album{flex:1 1 12rem;min-width:0;max-width:26rem}
 
-/* Everything else in the header keeps its size. A picker that is shorter than
-   it would like costs nothing; an action that is off the edge cannot be
-   reached, and nothing on screen says it is there. */
-header > button,header .tabs,header strong{flex:none}
+/* A picker shorter than it would like costs nothing. A tab off the edge cannot be reached,
+   and nothing on screen says it is there. */
+header .tabs,header strong{flex:none}
 
 /* It is a sentence of varying length in the middle of a fixed row. */
 #status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -65,55 +64,96 @@ header > button,header .tabs,header strong{flex:none}
 .bar{flex:1;height:4px;background:#0f1114;border-radius:2px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
 
-#cv{display:block;width:100%;flex:1;min-height:0;cursor:crosshair;touch-action:none}
+/* Cut: the rail beside one column, in the same proportions as a tape's page. */
+#cutview{flex:1;min-height:0;display:grid;font-size:14px;
+  grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
+/* Everything down to the status line stays in view, so a boundary is judged with the
+   waveform on screen however long the table below it runs. */
+#cut-main{min-width:0;min-height:0;display:flex;flex-direction:column;gap:.5rem;
+  padding:.65rem 1rem .75rem;overflow-y:auto}
+#cut-top{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;flex:none}
+#cut-top > div:first-child{flex:1 1 20rem;display:flex;align-items:baseline;flex-wrap:wrap;
+  gap:.1rem .75rem;min-width:0}
+#cut-what{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em;overflow-wrap:anywhere}
+#sp-meta{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+#sides{padding:2px;gap:2px;border-radius:7px;background:var(--panel);border:1px solid var(--line)}
+#sides:empty{display:none}
+#sides button{border:0;padding:.2rem .8rem;color:var(--fg)}
+#sides button.on{color:#0b0d10}
+#cut-wave{flex:none;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0f1114}
+#cut-scroll{flex:1 1 auto;min-height:11rem;overflow-y:auto;display:flex;flex-direction:column;gap:.75rem}
+#cut-scroll > *{flex:none}
+#cut-scroll #logwrap{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+#cut-msg{flex:none;min-height:1.4em;font-size:13px}
+#cut-msg #status{display:block;white-space:normal;color:#b9bec5;font-size:13px}
+
+#cv{display:block;width:100%;height:clamp(13rem,30vh,26rem);cursor:crosshair;touch-action:none}
 
 #readout,#tp-readout{display:flex;align-items:center;gap:1rem;padding:.35rem .75rem;flex:none;
   border-top:1px solid var(--line);border-bottom:1px solid var(--line);
   font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel)}
 #ro-time,#tp-ro-time{color:var(--accent);font-weight:600;min-width:7rem}
+#ro-armed.start{color:var(--start)}
+#ro-armed.end{color:var(--end)}
 #ro-gap.bad,#tp-ro-gap.bad{color:var(--warn)}
 #ro-gap.good,#tp-ro-gap.good{color:var(--start)}
+#readout{gap:0 1.1rem;padding:0;white-space:nowrap;font-size:12.5px}
+#readout > *{flex:none}
+#readout > #ro-track{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hint{margin:0;color:var(--ghost);font-size:11px;line-height:1.45;max-width:44rem}
 kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 .25rem}
 
-/* tracks | album+art | rip doctor | side.  The track table gives up the width:
-   it was running to ~50% of a wide screen while the album panel was 16rem and
-   scrolling. */
-#lower{display:flex;gap:0;flex:none;height:36vh;min-height:15rem;overflow:hidden;
-  padding:.5rem 0 .5rem .75rem}
-#tracks{flex:1;border-collapse:collapse;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
-  display:block;overflow:auto}
-#tracks th{position:sticky;top:0;background:var(--bg);text-align:left;color:var(--dim);
-  font-weight:500;padding:.25rem .5rem;border-bottom:1px solid var(--line)}
-#tracks td{padding:.15rem .5rem;border-bottom:1px solid #1f232a}
+/* The table takes what the album panel leaves, and scrolls sideways before it crushes a
+   time. A row's own title is what gives way. */
+#lower{display:grid;grid-template-columns:minmax(0,1fr) minmax(16rem,20rem);gap:.75rem;align-items:start}
+#cut-table{min-width:0;overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+#cut-table-head{display:flex;align-items:center;gap:.4rem;min-width:36rem;padding:.4rem .6rem}
+#cut-table-head button{font-size:12.5px;padding:.2rem .6rem}
+#tracks{width:100%;min-width:36rem;table-layout:fixed;border-collapse:collapse}
+#tracks th{text-align:left;color:var(--ghost);font-size:11px;font-weight:500;letter-spacing:.06em;
+  text-transform:uppercase;padding:.3rem .5rem;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#tracks .c-num{width:3rem}
+#tracks .c-time{width:5rem}
+#tracks .c-len{width:4.25rem}
+#tracks .c-bnd{width:10.75rem}
+#tracks td{padding:.3rem .5rem;border-bottom:1px solid #1f232a;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+#tracks tbody tr:last-child td{border-bottom:0}
 #tracks tr.sel td{background:#20262e}
-#tracks input{width:100%;border:0;background:transparent;padding:.1rem .2rem;font:inherit}
-#tracks input:focus{background:#0f1114;outline:1px solid var(--accent)}
-#tracks .num{width:3rem}#tracks .t{width:6rem;text-align:right}
-#tracks .drift{text-align:right}
-#tracks .drift.forced{color:var(--warn);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
-.big{color:var(--warn)}
-/* The table was taking half a wide screen while sitting nearly empty and the
-   album panel scrolled at 21rem. Cap the table, let the panels take real width,
-   and reserve the scrollbar gutter so it never crowds an input. */
-#tracks{flex:1 1 0;min-width:20rem;max-width:44rem}
-#album-panel{flex:1 1 25rem;min-width:20rem;max-width:32rem;overflow-y:auto;
-  scrollbar-gutter:stable;border-left:1px solid var(--line);
-  padding:0 1rem 0 1rem;display:flex;flex-direction:column}
-#album-panel label{flex-direction:row;align-items:center;gap:.6rem;margin-bottom:.4rem}
-#album-panel label input{flex:1;min-width:0}
-#album-panel label{font-size:.75rem}
-#side-panel{flex:0 0 15rem;overflow-y:auto;scrollbar-gutter:stable;
-  border-left:1px solid var(--line);padding:0 .75rem 0 1rem;
-  display:flex;flex-direction:column}
-#album-panel .row,#side-panel .row{display:flex;gap:.4rem;margin-bottom:.5rem}
-#album-panel .row button,#side-panel .row button{flex:1}
-#album-panel h3,#side-panel h3{margin:.15rem 0 .35rem;font-size:.8rem;color:var(--dim);font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em}
-#review{flex:1;min-height:0;overflow-y:auto}
+#tracks tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+#tracks tbody tr:not(.cut-open){cursor:pointer}
+#tracks tbody tr:not(.cut-open):not(.sel):hover td{background:#1a1e24}
+#tracks td.c-num{color:var(--dim)}
+#tracks tr.cut-open td{background:#20262e;white-space:normal;overflow:visible;padding:.15rem .6rem .7rem 3.5rem}
+.cut-fields{display:grid;grid-template-columns:4.5rem minmax(0,2fr) 7rem 7rem auto;gap:.6rem;align-items:end}
+.cut-fields label{font-size:11.5px;min-width:0;color:var(--dim)}
+.cut-fields input{width:100%;min-width:0;font-size:13px}
+.cut-fields input[data-edge]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.cut-moves{display:flex;gap:.25rem;align-items:stretch}
+.cut-moves button{padding:.3rem .55rem;font-weight:500;font-size:12.5px}
+.cut-fields input[type=number]{appearance:textfield}
+#tracks .t{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks .t-start,#tracks .t-end{cursor:pointer}
+#tracks .t-start{color:var(--start)}
+#tracks .t-end{color:var(--end)}
+#tracks .drift{color:var(--dim);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+#tracks .drift.big{color:var(--warn)}
+#album-panel{min-width:0;display:flex;flex-direction:column;gap:.5rem;padding:.65rem .75rem;
+  border:1px solid var(--line);border-radius:9px}
+#album-panel h3,#cut-table-head h3{margin:0;font-size:11px;font-weight:500;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim)}
+#album-panel label{font-size:11.5px}
+#album-panel input:not([type=file]){width:100%;min-width:0;font-size:13px}
+#md-names{display:grid;grid-template-columns:minmax(0,1fr) 5rem;gap:.35rem .5rem}
+#md-who{grid-column:1/-1}
+#album-panel hr{width:100%;margin:.15rem 0;border:0;border-top:1px solid var(--line)}
+#album-panel .row{display:flex;gap:.4rem}
+#album-panel .row button{font-size:12.5px;padding:.2rem .6rem}
+#album-panel .err:empty{display:none}
 #review a{display:block;color:var(--accent);text-decoration:none;padding:.1rem 0;
   font:12px/1.5 ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #review a:hover{text-decoration:underline}
+#review p{margin:0;font-size:12.5px}
 #logwrap{flex:none;background:#0f1114;border-top:1px solid var(--line)}
 #logbar{display:flex;align-items:center;gap:.6rem;padding:.25rem .75rem;
   font-size:11px;color:var(--dim)}
@@ -127,8 +167,7 @@ kbd{background:#0f1114;border:1px solid var(--line);border-radius:3px;padding:0 
 /* ---- tapes ---- */
 .warn{color:var(--warn);margin:0}
 /* A tape is not a record, so what acts on the record picker has no place here. */
-body[data-mode=tapes] header > button,body[data-mode=tapes] #album-q,
-body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
+body[data-mode=tapes] #record-pick{display:none}
 #tp-head{display:flex;align-items:center;gap:.6rem;flex:none}
 #tp-head label{flex-direction:row;align-items:center;gap:.5rem}
 #tp-head select{max-width:18rem}
@@ -138,34 +177,34 @@ body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 #tapeview{flex:1;min-height:0;display:grid;font-size:14px;
   grid-template-columns:minmax(15.5rem,19rem) minmax(0,1fr)}
 #tapeview.no-rail{grid-template-columns:minmax(0,1fr)}
-#tp-rail{border-right:1px solid var(--line);padding:.65rem .75rem;overflow-y:auto;
+.rail{border-right:1px solid var(--line);padding:.65rem .75rem;overflow-y:auto;
   display:flex;flex-direction:column;gap:.1rem}
-#tp-rail h2{margin:0 0 .3rem .25rem;font-size:11px;font-weight:500;letter-spacing:.08em;
+.rail h2{margin:0 0 .3rem .25rem;font-size:11px;font-weight:500;letter-spacing:.08em;
   text-transform:uppercase;color:var(--dim)}
-.tp-step{--c:var(--ghost);display:grid;grid-template-columns:22px minmax(0,1fr);gap:.45rem;
+.step{--c:var(--ghost);display:grid;grid-template-columns:22px minmax(0,1fr);gap:.45rem;
   padding:.4rem .4rem;border-radius:7px;flex:none}
-.tp-step[data-kind=done]{--c:var(--start)}
-.tp-step[data-kind=todo]{--c:var(--warn);background:var(--panel)}
-.tp-step[data-kind=ready],.tp-step[data-kind=run]{--c:var(--accent);background:var(--panel)}
-.tp-step[data-kind=fail]{--c:var(--end);background:var(--panel)}
-.tp-mark{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--c);display:flex;
+.step[data-kind=done]{--c:var(--start)}
+.step[data-kind=todo]{--c:var(--warn);background:var(--panel)}
+.step[data-kind=ready],.step[data-kind=run]{--c:var(--accent);background:var(--panel)}
+.step[data-kind=fail]{--c:var(--end);background:var(--panel)}
+.step-mark{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--c);display:flex;
   align-items:center;justify-content:center;font:600 10px/1 ui-sans-serif,system-ui;
   color:#0b0d10}
-.tp-step[data-kind=done] .tp-mark{background:var(--c)}
-.tp-step[data-kind=done] .tp-mark::after{content:"\2713"}
-.tp-step[data-kind=fail] .tp-mark::after{content:"!";color:var(--c)}
-.tp-step-body{display:flex;flex-direction:column;gap:.25rem;min-width:0}
-.tp-step-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
-.tp-step-head b{font-weight:500}
-.tp-state{font-size:12px;color:var(--c);white-space:nowrap}
-.tp-detail{margin:0;font-size:12.5px;line-height:1.35;color:var(--dim);overflow-wrap:anywhere}
-.tp-why{font-size:12px;color:var(--dim)}
-.tp-why summary{cursor:pointer}
-.tp-why p{margin:.25rem 0 0;white-space:pre-line;overflow-wrap:anywhere}
-.tp-acts{display:flex;flex-wrap:wrap;gap:.4rem}
-.tp-acts:not(:has(button:not([hidden]))){display:none}
-.tp-acts button{font-size:12.5px;padding:.2rem .6rem}
-#tp-rail-bar{display:none}
+.step[data-kind=done] .step-mark{background:var(--c)}
+.step[data-kind=done] .step-mark::after{content:"\2713"}
+.step[data-kind=fail] .step-mark::after{content:"!";color:var(--c)}
+.step-body{display:flex;flex-direction:column;gap:.25rem;min-width:0}
+.step-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.step-head b{font-weight:500}
+.step-state{font-size:12px;color:var(--c);white-space:nowrap}
+.step-detail{margin:0;font-size:12.5px;line-height:1.35;color:var(--dim);overflow-wrap:anywhere}
+.step-why{font-size:12px;color:var(--dim)}
+.step-why summary{cursor:pointer}
+.step-why p{margin:.25rem 0 0;white-space:pre-line;overflow-wrap:anywhere}
+.step-acts{display:flex;flex-wrap:wrap;gap:.4rem}
+.step-acts:not(:has(button:not([hidden]))){display:none}
+.step-acts button{font-size:12.5px;padding:.2rem .6rem}
+.rail-bar{display:none}
 #tp-progress{display:flex;flex-direction:column;gap:.25rem;grid-column:2}
 #tp-progress .bar{flex:none}
 #tp-state{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
@@ -185,12 +224,14 @@ body[data-mode=tapes] #album,body[data-mode=tapes] #sides{display:none}
 #tp-top .spacer{flex:1}
 #tp-meta{margin:0;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
 #tp-next-act{padding:.3rem .75rem;font-size:13px}
-#tp-left{--c:var(--accent);display:flex;align-items:center;gap:.6rem;padding:.3rem .75rem;
+#tp-left,#cut-saved{--c:var(--accent);display:flex;align-items:center;gap:.6rem;padding:.3rem .75rem;
   border:1px solid var(--c);color:var(--c);border-radius:999px;font-size:13px;white-space:nowrap}
-#tp-left[data-kind=done]{--c:var(--start)}
-#tp-left[data-kind=todo]{--c:var(--warn)}
+#tp-left[data-kind=done],#cut-saved[data-kind=done]{--c:var(--start)}
+#tp-left[data-kind=todo],#cut-saved[data-kind=todo]{--c:var(--warn)}
+#cut-saved[data-kind=bad]{--c:var(--end)}
+#cut-save-why{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin:.25rem 0 .5rem}
 #tp-left[data-kind=fail]{--c:var(--end)}
-#tp-left i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+#tp-left i,#cut-saved i{width:7px;height:7px;border-radius:50%;background:var(--c)}
 button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font-size:12px;
   padding:.2rem .4rem}
 #tp-remove:hover{color:var(--end)}
@@ -212,18 +253,18 @@ button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font
 #tp-ro-len{color:var(--dim)}
 #tp-ro-gap.bad{color:var(--warn)}
 #tp-ro-gap.good{color:var(--start)}
-#tp-tools{display:flex;flex-wrap:wrap;gap:.3rem .35rem;align-items:center}
-.tp-group{display:flex;flex-wrap:wrap;gap:2px;padding:2px;border-radius:7px;
+#tp-tools,#cut-tools{display:flex;flex-wrap:wrap;gap:.3rem .35rem;align-items:center;flex:none}
+.tool-group{display:flex;flex-wrap:wrap;gap:2px;padding:2px;border-radius:7px;
   background:var(--panel);border:1px solid var(--line)}
-.tp-group button{display:flex;align-items:center;gap:.25rem;padding:.2rem .35rem;background:none;
+.tool-group button{display:flex;align-items:center;gap:.25rem;padding:.2rem .35rem;background:none;
   color:var(--fg);border:0;border-radius:5px;font-weight:500;font-size:12.5px;white-space:nowrap}
-.tp-group button:not(:disabled):hover{background:#20262e}
-.tp-group button.on,.tp-group button.on:hover{background:var(--accent);color:#0b0d10}
-.tp-group button.primary,.tp-group button.primary:not(:disabled):hover{background:var(--accent);color:#0b0d10}
-.tp-group button.primary kbd{color:#0b0d10;border-color:rgba(11,13,16,.45)}
-.tp-group kbd{font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);
+.tool-group button:not(:disabled):hover{background:#20262e}
+.tool-group button.on,.tool-group button.on:hover{background:var(--accent);color:#0b0d10}
+.tool-group button.primary,.tool-group button.primary:not(:disabled):hover{background:var(--accent);color:#0b0d10}
+.tool-group button.primary kbd{color:#0b0d10;border-color:rgba(11,13,16,.45)}
+.tool-group kbd{font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);
   background:none;border:1px solid var(--line);padding:0 .2rem}
-.tp-group button.on kbd{color:#0b0d10;border-color:rgba(11,13,16,.45)}
+.tool-group button.on kbd{color:#0b0d10;border-color:rgba(11,13,16,.45)}
 #tp-tools .vol{margin-left:auto;flex:1 1 0;min-width:0;max-width:5rem}
 #tp-tools .vol input{width:100%;min-width:0}
 #tp-msg{flex:none;font-size:13px}
@@ -269,6 +310,7 @@ button.tp-quiet{background:none;border:0;color:var(--ghost);font-weight:400;font
 .tp-status span{overflow:hidden;text-overflow:ellipsis}
 .tp-status.is-good{--c:var(--start)}
 .tp-status.is-warn{--c:var(--warn)}
+.tp-status.is-quiet{--c:color-mix(in srgb,var(--warn) 62%,var(--dim))}
 .tp-status.is-bad{--c:var(--end)}
 .tp-status i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c)}
 #tp-rows tr.tp-open td{white-space:normal;padding:.15rem .6rem .7rem 1rem}
@@ -354,166 +396,98 @@ button.tp-danger.tp-quiet:hover{color:var(--end)}
   border:1px dashed var(--line);font-weight:400}
 #tp-add:hover{color:var(--fg)}
 
-/* ---- rip view ---- */
-#captureview{flex:1;display:flex;gap:2rem;padding:1.5rem;overflow:auto;min-height:0}
-.ripform{width:30rem;flex:none;display:flex;flex-direction:column;gap:.55rem;min-width:0}
-.ripform h2{margin:0;font-size:1rem;font-weight:600}
-.ripform .row{display:flex;gap:.5rem;margin-top:.2rem}
-/* five buttons sized to their own labels made a ragged line; a fixed three
-   columns keeps the second row aligned under the first */
-.ripform .row.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;
-  margin-top:0}
-.ripform .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
-  overflow:hidden;text-overflow:ellipsis}
-.ripform .fields .wide input{margin-bottom:.35rem}
-/* two columns: the fields are short, and a single 22rem stack of six of them
-   ran taller than the meter beside it while leaving the right half empty */
-.ripform .fields{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .75rem}
-/* The source column is stacked blocks now, so each one stacks its own
-   contents at the same gap or the form reads as several forms. Named rather
-   than `.ripform > div`, which would also catch the captures list and both of
-   punch's blocks. */
-#recordfields,#ripbits{display:flex;flex-direction:column;gap:.55rem}
-.ripform .fields label{min-width:0}
-.ripform .fields .wide{grid-column:1/-1}
-.ripform .fields input[readonly]{opacity:.7;cursor:not-allowed}
-/* :not(checkbox) matters - this rule outranks label.inline input{width:auto}
-   on specificity, and a stretched checkbox pushes its own caption away */
-.ripform .fields select,
-.ripform .fields input:not([type=checkbox]){min-width:0;width:100%}
-/* the checkbox shares the Side row, aligned to the control not the caption */
-label.autostop{align-self:end;padding-bottom:.5rem;color:var(--fg);font-size:.8rem;
-  gap:.45rem;white-space:nowrap}
-label.autostop input{width:auto;flex:none;margin:0}
+/* ---- capture: what goes on the record on the left, what the record is doing on the right ---- */
+#captureview{flex:1;display:flex;align-items:flex-start;gap:1.5rem;padding:1.5rem;overflow:auto;
+  min-height:0;font-size:14px}
+.ripform{width:26.25rem;flex:0 1 26.25rem;display:flex;flex-direction:column;gap:1rem;min-width:18rem}
+.source-head{display:flex;flex-direction:column;gap:.35rem}
+.kicker{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.source-head h2{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ripform .lead{margin:0;font-size:13px;line-height:1.55;color:#a3a9b0}
+.lead b{color:var(--fg);font-weight:600}
+#captureview .hint b{color:#a3a9b0;font-weight:600}
+.ripform > label,.ripform .fields label,.ripmeter .fields label{min-width:0;font-size:11.5px}
+.ripform select,.ripform input:not([type=checkbox]),.ripmeter .fields select{width:100%;min-width:0;font-size:13px}
+#recordfields,#ripbits,#uploadbits,#punch-found{display:flex;flex-direction:column;gap:.75rem}
+#captureview .fields{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+#captureview .fields.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+#captureview .fields.device{grid-template-columns:2fr 1fr 1fr}
+.ripform input[readonly]{opacity:.7;cursor:not-allowed}
+#captureview .row.btns{display:flex;flex-wrap:wrap;gap:.5rem}
+#captureview .row.btns button{white-space:nowrap;padding:.45rem .75rem;min-width:0}
+#rip-go,#pc-import{width:100%;padding:.6rem .85rem;font-size:14px}
+.autostop{align-self:end;padding-bottom:.5rem;color:var(--fg);font-size:13px !important;gap:.5rem;
+  white-space:nowrap}
+label.autostop input{width:auto;flex:none;margin:0;accent-color:var(--accent)}
+#rip-force-wrap input{accent-color:var(--accent)}
 .mono{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+#captureview .mono{font-size:11.5px;overflow-wrap:anywhere}
+#captureview p.mono{margin:0}
+#captureview p.mono:empty{display:none}
+.ripform .err:empty,.ripmeter .err:empty{display:none}
 
-.ripmeter{flex:1;min-width:0;display:flex;flex-direction:column;gap:.6rem}
-.ripmeter .row{display:flex;align-items:baseline;gap:1rem}
-.ripmeter .row .spacer{flex:1}
-.big-time{font:600 1.6rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
-/* grow into the space instead of leaving a screen of nothing under a 190px box */
-#meter{width:100%;flex:1;min-height:190px;max-height:34rem;display:block;
+/* The record's sides, and what is left of a capture that was cut short. */
+#ripsides{display:flex;flex-direction:column;gap:.45rem;border-top:1px solid var(--line);padding-top:.75rem}
+#ripsides h4,#orphans h4{margin:0;font-size:11px;font-weight:500;text-transform:uppercase;
+  letter-spacing:.08em;color:var(--dim)}
+#ripsides .side{display:grid;grid-template-columns:1.75rem minmax(0,1fr) auto auto;gap:.6rem;align-items:center;font-size:13px}
+#ripsides .side b{font:500 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+#ripsides .side span{color:#c7ccd1}
+#ripsides .side button.ghost{padding:.15rem .5rem;font-size:12.5px}
+#orphans{display:flex;flex-direction:column;gap:.5rem;border:1px solid var(--warn);border-radius:8px;
+  padding:.75rem;font-size:12.5px;line-height:1.5;color:#c7ccd1}
+#orphans h4{letter-spacing:.06em;font-weight:600;color:var(--warn)}
+#orphans p{margin:0}
+#orphans .row{display:flex;flex-wrap:wrap;gap:.4rem}
+#orphans .row button{padding:.3rem .65rem;font-size:12.5px}
+button.linky{padding:0;background:none;border:0;color:var(--accent);font:inherit;font-size:12.5px;white-space:nowrap}
+button.linky:hover{color:#8cc4f0}
+
+/* The panel opposite the form: the capture, or how far an upload has got. */
+.ripmeter{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:1rem;padding:1.15rem;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.ripmeter h2{margin:0;font-size:18px;font-weight:600;overflow-wrap:anywhere}
+.ripmeter > p{margin:0}
+.ripmeter > p.dim:empty{display:none}
+.ripmeter .bar{flex:none;height:6px;border-radius:3px}
+#pc-report{margin:0;max-height:14rem;overflow:auto;padding:.75rem;background:#0f1114;
+  border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;
+  font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c7ccd1}
+.row.now{display:flex;align-items:baseline;flex-wrap:wrap;gap:.35rem .85rem}
+.row.now .spacer{flex:1}
+.big-time{font:600 34px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+#rip-state{display:inline-flex;align-items:center;gap:.45rem;font-size:13px;overflow-wrap:anywhere}
+#rip-state::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--ghost)}
+#rip-state[data-on]{color:var(--end)}
+#rip-state[data-on]::before{background:var(--end)}
+#rip-state.working{color:var(--warn)}
+#rip-state.working::before{background:var(--warn)}
+#rip-auto{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);overflow-wrap:anywhere}
+#rip-auto.dim{color:var(--dim)}
+#rip-auto.err{color:#ff8080}
+.done-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem .75rem;
+  padding:.75rem;border:1px solid var(--start);border-radius:8px;font-size:13px;line-height:1.5}
+.done-box:has(> p:empty){display:none}
+.done-box:has(> p.err){border-color:#ff8080}
+.done-box > p{margin:0;min-width:0;overflow-wrap:anywhere;color:var(--fg)}
+.done-box > p.err{color:#ff8080;font-size:13px}
+.done-line:empty{display:none}
+p.done-line{margin:0;padding:.75rem;border:1px solid var(--start);border-radius:8px;font-size:13px;
+  line-height:1.5;overflow-wrap:anywhere}
+body[data-mode=punch] #rip-open-cut{display:none}
+#meter-box{display:flex;flex-direction:column;gap:.75rem;padding:1rem;
   background:#0f1114;border:1px solid var(--line);border-radius:8px}
-
-/* capture lists belong under the form, not above its heading */
-#orphans,#ripsides{border-top:1px solid var(--line);padding-top:.6rem;margin-top:.2rem}
-#orphans h4,#ripsides h4{margin:0 0 .4rem;font-size:.75rem;font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
-#ripsides .row{display:flex;align-items:center;gap:.6rem;margin-bottom:.35rem}
-#ripsides .row span{flex:1;font-size:12px}
-#ripsides .row button,#orphans .row button{flex:none}
-
-
-dialog{background:var(--panel);color:var(--fg);border:1px solid var(--line);
-  border-radius:10px;padding:1.25rem;min-width:34rem;max-width:44rem}
-dialog::backdrop{background:rgba(0,0,0,.55)}
-dialog h3{margin:0 0 .75rem;font-size:1rem;font-weight:600}
-dialog form{display:flex;flex-direction:column;gap:.6rem}
-dialog .row{display:flex;gap:.5rem}
-#fp-results{max-height:16rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
-#fp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
-  font-weight:500;text-align:left;padding:.4rem .6rem;font:12px/1.4 ui-monospace,monospace}
-#fp-results button:hover{border-color:var(--accent)}
-#fp-results .vinyl{border-left:3px solid var(--start)}
-#fp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
-#fp-report{margin:0;max-height:14rem;overflow:auto;background:#0f1114;padding:.5rem;
-  border-radius:6px;font:11px/1.4 ui-monospace,monospace;color:var(--dim)}
-
-#imp-out{margin:0;max-height:22rem;overflow:auto;background:#0f1114;padding:.5rem;
-  border-radius:6px;font:11px/1.45 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
-#impdlg{min-width:44rem;max-width:60rem}
-#impdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
-
-#arc-plan{margin:0;max-height:20rem;overflow:auto;background:#0f1114;padding:.6rem;
-  border-radius:6px;font:11px/1.5 ui-monospace,monospace;color:var(--fg);white-space:pre-wrap}
-#arcdlg{min-width:40rem}
-#arcdlg code{background:#0f1114;padding:0 .25rem;border-radius:3px}
-.ok{color:var(--start)}
-
-#orphans{border:1px solid var(--warn);border-radius:8px;padding:.6rem;margin-bottom:.6rem;
-  font-size:12px;line-height:1.5}
-#orphans h4{margin:0 0 .3rem;font-size:.8rem;color:var(--warn);text-transform:uppercase;
-  letter-spacing:.04em}
-#orphans .row{margin-top:.4rem}
-
-#imp-done h4{margin:0 0 .3rem;font-size:.8rem;color:var(--start);
-  text-transform:uppercase;letter-spacing:.04em}
-#imp-done{border:1px solid var(--start);border-radius:8px;padding:.7rem}
-#imp-done p{margin:.2rem 0}
-#imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-#imp-outwrap summary{cursor:pointer;color:var(--dim);font-size:.8rem;padding:.2rem 0}
-
+#meter{display:block;width:100%;height:112px}
+#meter-then{padding-top:.75rem;border-top:1px solid var(--line);font-size:11px;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--ghost)}
+#meter-history{display:block;width:100%;height:150px}
+.transport{align-items:center}
+.transport .spacer{flex:1}
+#rip-stop:not(:disabled){background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
+#rip-abandon:not(:disabled){color:var(--end)}
 #rip-listen.on{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-weight:600}
-#rip-auto{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);min-height:1.4em}
-
-.vol{flex-direction:row;align-items:center;margin-left:auto}
-.vol input[type=range]{width:5.5rem;accent-color:var(--accent);padding:0;background:none;border:0}
-button.tiny{padding:.15rem .5rem;font-weight:700}
-table.keys{border-collapse:collapse;font-size:12px}
-table.keys td{padding:.22rem .6rem .22rem 0;vertical-align:top}
-table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
-#helpdlg{min-width:34rem}
-
-#imp-results{max-height:12rem;overflow:auto;display:flex;flex-direction:column;gap:.2rem}
-#imp-results button{background:transparent;border:1px solid var(--line);color:var(--fg);
-  font-weight:500;text-align:left;padding:.35rem .6rem;font:12px/1.4 ui-monospace,monospace}
-#imp-results button:hover{border-color:var(--accent)}
-#imp-results .vinyl{border-left:3px solid var(--start)}
-#imp-results .nodur{opacity:.45;border-left:3px solid var(--end);cursor:not-allowed}
-
-#pipeline{display:flex;align-items:center;gap:.15rem;padding:.3rem .75rem;flex:none;
-  border-bottom:1px solid var(--line);background:#101318;font-size:11px}
-#pipeline .st{display:flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:20px;
-  color:var(--ghost);white-space:nowrap}
-#pipeline .st.done{color:var(--start)}
-#pipeline .st.now{background:var(--accent);color:#0b0d10;font-weight:700}
-#pipeline .sep{color:var(--line)}
-#pipeline .why{color:var(--ghost);margin-left:.5rem;font-style:italic}
-
-
-#md-note{font-size:10.5px;line-height:1.4;margin:0 0 .2rem;color:var(--ghost)}
-#art-state{font:11px/1.4 ui-monospace,monospace;margin-bottom:.3rem}
-#art-err{font-size:11px}
-
-/* auto-stop warning: a 20 s decision, so the countdown is the loudest thing in
-   the box and the safe answer is the default button */
-#autostopdlg{min-width:30rem;max-width:34rem}
-#autostopdlg #as-count{margin:.25rem 0 .75rem;font-size:2.4rem;text-align:center}
-#autostopdlg .row{flex-wrap:wrap}
-
-/* replacing a library album deletes files, so the offer looks like a warning
-   and the paths that would go are shown, not summarised */
-.warn{border:1px solid #6a4a2a;background:#241c14;border-radius:8px;
-  padding:.6rem .75rem;display:flex;flex-direction:column;gap:.35rem}
-.warn b{color:#e0a24a}
-#imp-replace-what{color:var(--fg);word-break:break-all}
-
-/* monitor volume sits in the button grid; the peak-hold line is the number you
-   set gain against, so it gets weight the transient meter does not */
-/* labelled, because a bare slider sitting among the transport buttons reads as
-   a record level - which is the one thing it cannot be */
-.ripform .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0}
-.ripform .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--ghost)}
-.ripform .row.btns label.vol input{width:100%;min-width:0}
-#rip-peak{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-#rip-peak-reset{flex:none}
-
-/* The capture pane is shared by Rip and Punch, so it hosts the same kinds of
-   control a form does - device selects, a button grid, the monitor slider.
-   These mirror the .ripform rules rather than widening them, because the
-   .ripmeter .row rule above styles the meter's own baseline-aligned rows and
-   must keep doing so. */
-.ripmeter .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem .75rem}
-.ripmeter .fields label{min-width:0}
-.ripmeter .fields select{min-width:0;width:100%}
-.ripmeter .row.btns{display:flex;gap:.5rem;margin-top:.2rem;align-items:center}
-.ripmeter .row.btns button{white-space:nowrap;padding:.45rem .5rem;min-width:0;
-  flex:1;overflow:hidden;text-overflow:ellipsis}
-.ripmeter .row.btns label.vol{display:flex;align-items:center;gap:.4rem;margin:0;flex:2}
-.ripmeter .row.btns label.vol span{flex:none;font-size:10px;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--ghost)}
-.ripmeter .row.btns label.vol input{width:100%;min-width:0}
+.transport label.vol{gap:.5rem;margin:0;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ghost)}
+.transport label.vol input{width:7rem;accent-color:var(--accent);padding:0;background:none;border:0}
 
 /* Encoding a side is most of a minute with nothing to report but that it is
    still going. A sweep says that honestly; a percentage would be invented. */
@@ -527,35 +501,168 @@ table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
   #rip-state.working::after{animation:none;background-position:50% 0}
 }
 
+/* A width rather than a floor, so a phone gets the screen less its margins. */
+dialog{--dlg:35rem;width:min(var(--dlg),calc(100vw - 2rem));max-width:none;
+  max-height:calc(100dvh - 2rem);overflow:auto;margin:8vh auto auto;
+  background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:22px}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h3{margin:0;font-size:16px;font-weight:600}
+dialog form,#autostopdlg{gap:14px}
+dialog form,#autostopdlg[open]{display:flex;flex-direction:column}
+dialog p{margin:0;line-height:1.5}
+dialog p.dim{font-size:13px;color:#a3a9b0}
+dialog label{font-size:11.5px}
+dialog input,dialog select{min-width:0}
+dialog code{background:#0f1114;padding:0 .25rem;border-radius:3px}
+dialog label.inline{gap:8px;font-size:12.5px;color:#a3a9b0}
+dialog input[type=checkbox]{accent-color:var(--accent);flex:none}
+dialog .row{display:flex;flex-wrap:wrap;gap:8px}
+.dlg-acts{justify-content:flex-end}
+/* The names and the button that searches them, on one line where there is room. */
+.dlg-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end}
+.dlg-search button{white-space:nowrap;min-height:2.3rem}
+dialog .err:empty{display:none}
+.dlg-pre{margin:0;overflow:auto;background:#0f1114;padding:10px;border-radius:6px;
+  font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.releases{display:flex;flex-direction:column;gap:4px;max-height:16rem;overflow:auto}
+.releases:empty{display:none}
+.releases button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;flex:none;width:100%;
+  padding:8px 10px;background:#14161a;color:var(--fg);border:1px solid var(--line);
+  border-left:3px solid var(--line);border-radius:5px;text-align:left;
+  font:500 12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.releases button:hover{border-color:var(--accent)}
+.releases button > span:last-child{color:var(--dim)}
+.releases .vinyl{border-left-color:var(--start)}
+.releases .nodur{opacity:.45;border-left-color:var(--end);cursor:not-allowed}
+#fp-report{max-height:14rem;font-size:11px;color:var(--dim)}
+
+#imp-out{max-height:22rem;font-size:11px}
+#impdlg{--dlg:40rem}
+
+.ok{color:var(--start)}
+
+#imp-pick{display:flex;flex-direction:column;gap:14px}
+#imp-done{display:flex;flex-direction:column;gap:14px}
+#imp-done-box{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--start);border-radius:8px}
+#imp-done h4{margin:0;font-size:11px;font-weight:600;color:var(--start);
+  text-transform:uppercase;letter-spacing:.06em}
+#imp-summary{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+#imp-outwrap summary{cursor:pointer;color:var(--dim);font-size:.8rem;padding:.2rem 0}
+
+.vol{flex-direction:row;align-items:center;margin-left:auto}
+.vol input[type=range]{width:5.5rem;accent-color:var(--accent);padding:0;background:none;border:0}
+button.tiny{padding:.15rem .5rem;font-weight:700}
+table.keys{border-collapse:collapse;font-size:13px;color:#a3a9b0}
+table.keys td{padding:4.5px 16px 4.5px 0;vertical-align:baseline}
+table.keys td:last-child{padding-right:0}
+table.keys td:first-child{white-space:nowrap;text-align:right;color:var(--dim)}
+table.keys kbd{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);padding:1px 6px}
+#helpdlg{--dlg:40rem}
+
+#md-note{font-size:12px;line-height:1.4;margin:0;color:var(--ghost)}
+#art-state{font-size:12.5px;line-height:1.4}
+#art-err{font-size:11px}
+
+/* auto-stop warning: a 20 s decision, so the countdown is the loudest thing in
+   the box and the safe answer is the default button */
+#autostopdlg{--dlg:32.5rem}
+#autostopdlg #as-count{padding:6px 0;font-size:44px;text-align:center}
+
+/* replacing a library album deletes files, so the offer looks like a warning
+   and the paths that would go are shown, not summarised */
+.warn{border:1px solid #6a4a2a;background:#241c14;border-radius:8px;
+  padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.warn b{color:#e0a24a;font-size:13px}
+.warn .hint{font-size:12px;color:#a3a9b0}
+.warn .mono{white-space:pre-wrap;overflow-wrap:anywhere}
+#imp-replace-what{color:var(--fg)}
+
 /* A phone: the columns stack, and a row of a table becomes a block of its own. */
 @media (max-width:48rem){
-  #captureview{flex-direction:column;padding:1rem;gap:1.25rem}
+  #captureview{flex-direction:column;align-items:stretch;padding:1rem;gap:1.25rem;overflow-x:hidden}
   .ripform{width:100%}
-  .ripmeter{flex:none}
+  #captureview .ripform{flex:none;min-width:0}
+  .ripmeter{flex:none;padding:.85rem}
+  #meter-box{padding:.75rem}
+  #meter{height:138px}
+  #captureview .fields.device{grid-template-columns:1fr 1fr}
+  #captureview .fields.device label:first-child{grid-column:1/-1}
+  .autostop{white-space:normal}
+  .ripform input:not([type=checkbox]),.ripform select,.ripmeter .fields select{min-height:40px;font-size:16px}
+  #captureview .row.btns button,#rip-go,#pc-import,#orphans .row button,#ripsides .side button{min-height:40px}
+  #captureview .row.btns button{flex:1 1 auto}
+  button.linky{min-height:40px}
+  .transport .spacer{display:none}
+  .transport label.vol{flex:1 1 100%;min-height:40px}
+  .transport label.vol input{flex:1;width:auto;min-width:0}
+  #ripsides .side{grid-template-columns:1.5rem minmax(0,1fr) auto auto}
   #tapeview{display:block;overflow-y:auto;overflow-x:hidden}
+  #cutview{display:block;overflow-y:auto;overflow-x:hidden}
+  #cut-main{padding:.75rem 1rem 1rem;overflow:visible}
+  #cut-top > div:first-child{flex-basis:100%}
+  #sides button{min-height:40px}
+  #cut-scroll{overflow:visible;min-height:0}
+  #readout{flex-wrap:wrap;white-space:normal}
+  #readout > *,#readout > #ro-track{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+  #lower{grid-template-columns:minmax(0,1fr)}
+  #cut-table{overflow-x:visible}
+  dialog{margin:1rem auto auto;padding:16px}
+  dialog input,dialog select{min-height:40px;font-size:16px}
+  dialog button,dialog summary{min-height:40px}
+  dialog label.inline{min-height:40px;font-size:13px}
+  .dlg-search{grid-template-columns:minmax(0,1fr)}
+  dialog .row > button{flex:1 1 auto}
+  .releases{max-height:none}
+  .releases button{grid-template-columns:minmax(0,1fr)}
+  .warn button{width:100%}
+  table.keys td{padding-right:10px}
+  table.keys td:first-child{white-space:normal;min-width:4.5rem}
+  #cut-table-head{min-width:0}
+  #cut-table-head button,#album-panel .row button,#logbar button{min-height:40px}
+  #logbar #logwhat{display:none}
+  #tracks{display:block;min-width:0}
+  #tracks thead{display:none}
+  #tracks tbody{display:block}
+  #tracks tbody tr{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:center;
+    gap:.1rem .5rem;padding:.45rem .5rem;border-top:1px solid var(--line)}
+  #tracks tr.sel{background:#20262e}
+  #tracks td{display:block;width:auto;padding:0;border:0;background:none !important;box-shadow:none !important}
+  #tracks td.c-title{grid-column:span 5;min-height:32px;line-height:32px}
+  #tracks tr.cut-open{display:block}
+  #tracks tr.cut-open td{padding:.25rem 0 .5rem}
+  .cut-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .cut-fields label.wide,.cut-moves{grid-column:1/-1}
+  .cut-fields input{min-height:40px;font-size:16px}
+  .cut-moves button{min-height:40px;flex:1 1 0}
+  #tracks td.t{grid-column:span 2;min-height:32px;line-height:32px}
+  #tracks td.drift{grid-column:span 2}
+  #tracks td.c-bnd-cell{grid-column:span 4}
+  #record-pick{flex:1 1 100%}
+  #record-pick .pick{width:6rem}
   #tp-head{flex-wrap:wrap}
   #tp-head select{max-width:60vw}
-  #tp-rail{border-right:0;border-bottom:1px solid var(--line);overflow:visible;padding:.25rem 1rem}
-  #tp-rail-bar{--c:var(--accent);display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;
+  .rail{border-right:0;border-bottom:1px solid var(--line);overflow:visible;padding:.25rem 1rem}
+  .rail-bar{--c:var(--accent);display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;
     padding:0;background:none;border:0;color:var(--fg);font-size:14px;font-weight:500;text-align:left}
-  #tp-rail-bar[data-kind=todo]{--c:var(--warn)}
-  #tp-rail-bar[data-kind=fail]{--c:var(--end)}
-  #tp-rail-bar[data-kind=done]{--c:var(--start)}
-  #tp-rail-bar i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--c)}
-  #tp-rail-bar::after{content:"\25BE";margin-left:auto;color:var(--dim)}
-  #tp-rail.open #tp-rail-bar::after{content:"\25B4"}
-  #tp-rail:not(.open) > :not(#tp-rail-bar){display:none}
-  #tp-rail:not(.open){position:sticky;top:0;z-index:4;background:var(--bg)}
+  .rail-bar[data-kind=todo]{--c:var(--warn)}
+  .rail-bar[data-kind=fail]{--c:var(--end)}
+  .rail-bar[data-kind=done]{--c:var(--start)}
+  .rail-bar i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--c)}
+  .rail-bar::after{content:"\25BE";margin-left:auto;color:var(--dim)}
+  .rail.open .rail-bar::after{content:"\25B4"}
+  .rail:not(.open) > :not(.rail-bar){display:none}
+  .rail:not(.open){position:sticky;top:0;z-index:4;background:var(--bg)}
   #tp-main-body{padding:.75rem 1rem 1rem;overflow:visible}
   #tp-readout{flex-wrap:wrap;white-space:normal}
   #tp-readout > *,#tp-readout > #tp-ro-song{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
   #tp-tools .vol{flex:0 0 5rem}
-  .tp-group button{min-height:40px;min-width:40px;justify-content:center;padding:.2rem .5rem}
-  .tp-group kbd{display:none}
+  .tool-group button{min-height:40px;min-width:40px;justify-content:center;padding:.2rem .5rem}
+  .tool-group kbd{display:none}
   .tp-moves button,.tp-rel-quiet button,.tp-search button,.tp-by-id button,.tp-ask button,
   .tp-opts > button,.tp-hears button,.tp-note button{min-height:40px;min-width:40px}
   .tp-opt-go{min-height:40px}
-  #tp-next-act,.tp-acts button{min-height:40px}
+  #tp-next-act,.step-acts button{min-height:40px}
   #tp-gone:not([hidden]){position:fixed;left:0;right:0;bottom:0;z-index:5;padding:.5rem 1rem;
     background:var(--panel);border-top:1px solid var(--warn)}
   #tapepane{overflow:visible}
