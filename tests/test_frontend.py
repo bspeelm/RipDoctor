@@ -1904,3 +1904,10 @@ def test_the_cover_art_count_follows_a_cut_and_says_one_file_in_the_singular() -
     assert "loadReview();" in after and "loadArtState();" in after
     assert 'counted(r.tracks.length, "cut file", "cut files")' in js
     assert "cut files ready for art`" not in js
+
+
+def test_first_pass_does_not_say_nothing_found_before_anything_was_searched() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "renderReleases()" not in body
+    assert "Search MusicBrainz to list its releases." in body

@@ -1412,7 +1412,7 @@ function openFirstPass() {
   $("#fp-artist").value = S.meta.artist || g.artist;
   $("#fp-album").value = S.meta.album || g.album;
   fpReleases = [];
-  renderReleases();
+  $("#fp-results").innerHTML = '<p class="dim">Search MusicBrainz to list its releases.</p>';
   $("#fp-err").textContent = "";
   $("#fp-report").hidden = true;
   $("#fp-done").hidden = true;
