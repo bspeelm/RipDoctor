@@ -4179,6 +4179,11 @@ async function loadDevices() {
     } else if (!devices.length) {
       $("#rip-err").textContent = "no capture device found — is the interface plugged in?";
     } else {
+      // Said in the box itself, where an error line cleared by the next action is not,
+      // and chosen by nobody: another device is a pick, and the server asks about it.
+      const o = el("option", "", info.configured ? `${info.configured} — configured, not found` : "no device configured — pick one");
+      o.value = ""; o.disabled = true;
+      sel.prepend(o);
       sel.value = "";
       $("#rip-err").textContent = info.configured
         ? `${info.configured} is configured but this machine cannot see it — check the cable`

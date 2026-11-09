@@ -1920,3 +1920,12 @@ def test_the_gap_threshold_label_starts_past_the_lane_s_name() -> None:
     assert 'const after = 6 + c.measureText("1\u20133 kHz").width' in band
     assert "dB`, after, y - 3)" in band
     assert 'c.fillText("1\u20133 kHz", 6, lane.top + 12)' in band
+
+
+def test_a_configured_device_that_is_missing_is_named_above_the_others() -> None:
+    """The box showed blank, with the devices that were there listed under nothing."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function loadDevices\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "configured, not found" in body
+    assert 'o.value = ""; o.disabled = true;' in body and "sel.prepend(o);" in body
+    assert 'sel.value = "";' in body, "a missing device must not be swapped for another"
