@@ -1882,3 +1882,50 @@ def test_the_replace_panel_names_what_goes_for_the_release_in_use() -> None:
     check = js[js.index("async function checkExisting()") :]
     assert "encodeURIComponent(importMbid())" in check[: check.index("\n}\n")]
     assert "the files named above" in markup()
+
+
+def test_a_failed_cut_is_said_on_the_rail_and_holds_the_import_back() -> None:
+    """A cut that died after one file showed Cut tracks done and Import ready."""
+    js = (STATIC / "app.js").read_text()
+    assert "asked.failed = cuts.failed;" in js
+    cut = re.search(r"function railCut\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'cutStep("cut", "fail", "Failed"' in cut
+    assert cut.index("if (f.failed)") < cut.index("if (f.review)")
+    imp = re.search(r"function railImport\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "|| !!f.failed;" in imp
+    assert imp.index("if (f.failed)") < imp.index("if (f.review)")
+
+
+def test_the_cover_art_count_follows_a_cut_and_says_one_file_in_the_singular() -> None:
+    """It kept the count from before a re-cut until a reload, as "1 cut files"."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function split\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    after = body[body.index("} catch (e) {") :]
+    assert "loadReview();" in after and "loadArtState();" in after
+    assert 'counted(r.tracks.length, "cut file", "cut files")' in js
+    assert "cut files ready for art`" not in js
+
+
+def test_first_pass_does_not_say_nothing_found_before_anything_was_searched() -> None:
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"function openFirstPass\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "renderReleases()" not in body
+    assert "Search MusicBrainz to list its releases." in body
+
+
+def test_the_gap_threshold_label_starts_past_the_lane_s_name() -> None:
+    """At -59 dB the two were drawn on top of each other at the left edge."""
+    js = (STATIC / "editor.js").read_text()
+    band = re.search(r"  _band\(c, lane\) \{.*?\n  \}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert 'const after = 6 + c.measureText("1\u20133 kHz").width' in band
+    assert "dB`, after, y - 3)" in band
+    assert 'c.fillText("1\u20133 kHz", 6, lane.top + 12)' in band
+
+
+def test_a_configured_device_that_is_missing_is_named_above_the_others() -> None:
+    """The box showed blank, with the devices that were there listed under nothing."""
+    js = (STATIC / "app.js").read_text()
+    body = re.search(r"async function loadDevices\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "configured, not found" in body
+    assert 'o.value = ""; o.disabled = true;' in body and "sel.prepend(o);" in body
+    assert 'sel.value = "";' in body, "a missing device must not be swapped for another"

@@ -235,6 +235,18 @@ def test_importing_nothing_is_refused_rather_than_reported_as_done(
     assert r.status == 409 and "cut the tracks first" in r.json()["error"]
 
 
+def test_files_a_failed_cut_left_in_review_are_not_imported(tmp_path: Path) -> None:
+    """A cut stopped by a missing flac left one file, and Import took it for a cut."""
+    service, _library = ready_to_import(tmp_path)
+    F.write_json(service.layout.cut_failed_file("album"), {"why": "ToolMissing: flac"})
+    r = post(build(service), "/api/import/album", service)
+    assert r.status == 409
+    assert (
+        "ToolMissing: flac" in r.json()["error"] and "cut it again" in r.json()["error"]
+    )
+    assert not service.runner.calls, "a refused import must not reach the importer"
+
+
 def test_the_release_chosen_in_the_dialog_is_the_one_imported(
     tmp_path: Path,
 ) -> None:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ripdoctor.audio.runner import FakeRunner
+from ripdoctor.audio.runner import FakeRunner, ToolMissing
 from ripdoctor.config.settings import Settings
 from ripdoctor.config.thresholds import Thresholds
 from ripdoctor.core.plan import Plan, PlanSide, PlanTrack
@@ -537,6 +537,58 @@ def test_a_track_that_will_not_decode_is_named(tmp_path: Path) -> None:
     )
     body = post(build(service), "/api/split/album", service).json()
     assert body["result"]["unreadable"], "an unreadable track was reported as fine"
+
+
+class CuttingOnce(Cutting):
+    """Writes the first track, then finds flac gone, as a server without it did."""
+
+    def run(self, argv, *, stdin=None, timeout=None):  # type: ignore[no-untyped-def]
+        if str(argv[0]) == "flac":
+            raise ToolMissing("flac")
+        return super().run(argv, stdin=stdin, timeout=timeout)
+
+
+def test_a_cut_that_failed_halfway_reads_as_failed_and_not_as_one_file_cut(
+    tmp_path: Path,
+) -> None:
+    """A missing flac stopped the cut after its first file, and the rail read that
+    file in review as a cut and offered Import."""
+    service = with_a_plan(tmp_path)
+    service.runner = CuttingOnce()
+    app = build(service)
+    job = post(app, "/api/split/album", service).json()
+    assert job["error"].startswith("ToolMissing")
+    review = get(app, "/api/review/album", service).json()
+    assert len(review["tracks"]) == 1, "the partial file is still there to hear"
+    assert review["failed"].startswith("ToolMissing: ")
+    assert "flac" in review["failed"]
+
+
+def test_a_cut_a_restart_interrupted_is_failed_until_one_finishes(
+    tmp_path: Path,
+) -> None:
+    service = with_a_plan(tmp_path)
+    app = build(service)
+    F.write_json(service.layout.cut_failed_file("album"), {"why": "it stopped"})
+    assert get(app, "/api/review/album", service).json()["failed"] == "it stopped"
+    service.runner = Cutting()
+    post(app, "/api/split/album", service)
+    assert get(app, "/api/review/album", service).json()["failed"] == ""
+    assert not service.layout.cut_failed_file("album").exists()
+
+
+def test_a_cut_with_a_track_that_will_not_decode_is_a_failed_cut(
+    tmp_path: Path,
+) -> None:
+    service = with_a_plan(tmp_path)
+    service.runner = Cutting().expect(
+        lambda a: a[0] == "flac", returncode=1, stderr=b"bad"
+    )
+    app = build(service)
+    post(app, "/api/split/album", service)
+    assert (
+        "did not read back" in get(app, "/api/review/album", service).json()["failed"]
+    )
 
 
 def with_a_forced_track(service: Service) -> Service:

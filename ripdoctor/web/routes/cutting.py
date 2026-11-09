@@ -106,7 +106,10 @@ def add(app: App, service: Service) -> None:
         where = _sides_of(service, slug, plan)
         cuts = plan_cuts(plan, where.__getitem__, str(dest))
 
+        failed = layout.cut_failed_file(slug)
+
         def work(job: Job) -> dict[str, Any]:
+            F.write_json(failed, {"why": "it stopped before every track was cut"})
             dest.mkdir(parents=True, exist_ok=True)
             # Cuts are named from the track number and title, so re-cutting
             # after a retitle leaves the old files beside the new ones. The
@@ -116,12 +119,22 @@ def add(app: App, service: Service) -> None:
                 stale.unlink()
             job.total = len(cuts)
             bad = []
-            for cut in cuts:
-                job.step(Path(cut.dest).name, "cutting")
-                cut_one(service.runner, cut)
-                if not verify(service.runner, cut.dest):
-                    bad.append(Path(cut.dest).name)
-                job.finished += 1
+            try:
+                for cut in cuts:
+                    job.step(Path(cut.dest).name, "cutting")
+                    cut_one(service.runner, cut)
+                    if not verify(service.runner, cut.dest):
+                        bad.append(Path(cut.dest).name)
+                    job.finished += 1
+            except Exception as e:
+                F.write_json(failed, {"why": f"{type(e).__name__}: {e}"})
+                raise
+            if bad:
+                F.write_json(
+                    failed, {"why": f"these did not read back: {', '.join(bad)}"}
+                )
+            else:
+                failed.unlink()
             return {"tracks": len(cuts), "unreadable": bad}
 
         try:
@@ -138,6 +151,8 @@ def add(app: App, service: Service) -> None:
         return H.ok(
             {
                 "tracks": [{"index": i, "name": n} for i, n in enumerate(names)],
+                # Files in review are not a cut unless the cut that wrote them ended.
+                "failed": F.cut_failure(layout, slug),
                 # Edits save themselves, so a plan newer than a cut is what says the
                 # page has moved on from what is waiting here.
                 "older_than_plan": bool(cuts)

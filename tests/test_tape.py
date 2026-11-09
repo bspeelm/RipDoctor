@@ -268,6 +268,18 @@ def test_a_song_that_lands_on_a_gap_past_another_is_doubt_when_walking() -> None
     assert "0:50 to 0:52" in placed.songs[0].reason
 
 
+def test_a_walked_song_says_which_of_its_edges_had_no_silence() -> None:
+    """A row said its boundary had no silence while its start sat at a gap's end:
+    it was the end that had none, and the row did not say which."""
+    found = TP.align([(100.0, 102.0)], 0.0, 400.0, [100.0, 100.0, 100.0, 100.0])
+    first, second, third, fourth = (s.reason for s in found.spans)
+    assert not first
+    assert found.spans[1].start == 102.0
+    assert "no silence where this song ends -" in second
+    assert "no silence where this song starts and ends -" in third
+    assert "no silence where this song starts -" in fourth
+
+
 def test_fewest_doubts_outranks_smallest_error_when_grouping() -> None:
     """99|5|104|100 against 100, 100, 100.
 

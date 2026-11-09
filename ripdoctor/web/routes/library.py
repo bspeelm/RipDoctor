@@ -344,6 +344,11 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(
                 409, f"nothing to import for {slug} - cut the tracks first"
             )
+        failed = F.cut_failure(layout, slug)
+        if failed:
+            raise H.HttpError(
+                409, f"the last cut of {slug} failed ({failed}) - cut it again first"
+            )
         if replacing and duplicates == "replace":
             short = IMP.partial_cut(
                 len(list(review_dir.glob("*.flac"))),
