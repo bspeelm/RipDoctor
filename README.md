@@ -3,6 +3,12 @@
 Record a vinyl side, split it into tracks, tag them and file them in your music
 library.
 
+![A record's Cut page. The pipeline rail on the left, with Check waiting on one
+track. A side's waveform in blue, the same side in 1-3 kHz in orange below it with
+the gap threshold as a dashed line, and each track's start and end as numbered
+markers. Below, the side's tracks: two Checked by ear, one From catalogue · check,
+and one Fitted to gap.](docs/images/cut_panel.png)
+
 ## What it does
 
 - **Records** a side from a turntable attached to the machine, with a live meter
@@ -29,6 +35,10 @@ library.
 
 You drive it from a web page on the machine that holds the library, or from the
 command line.
+
+![The Rip page while a side is recording. The elapsed time, the full-band and
+1-3 kHz bars on one scale with their zones, and the 1-3 kHz level over the last
+30 seconds, with a gap between two tracks showing as a drop.](docs/images/rip_panel.png)
 
 ## Why 1-3 kHz
 
