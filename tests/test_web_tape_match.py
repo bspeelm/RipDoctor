@@ -866,6 +866,7 @@ def test_the_album_flows_search_is_unchanged_and_unpaced(service, catalogue) -> 
         "vinyl",
         "has_durations",
         "describe",
+        "tracklist",
     }
     query = urllib.parse.quote('artist:"A Band" AND release:"A Record"', safe="")
     assert catalogue.calls[0] == f"{MB.BASE}/release?query={query}&limit=10&fmt=json"

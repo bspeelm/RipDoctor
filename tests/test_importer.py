@@ -113,7 +113,7 @@ def beets_runner(*, listed: int = 2, leaves: int = 0, **kw: object) -> FakeRunne
         copy_row(f"/music/A Band/A Record/{i + 1:02d} Track.flac")
         for i in range(listed)
     )
-    return FakeRunner(installed={"beet"}, **kw).expect(  # type: ignore[arg-type]
+    return FakeRunner(installed={"beet", "metaflac"}, **kw).expect(  # type: ignore[arg-type]
         "ls", stdout=rows.encode()
     )
 
@@ -386,13 +386,18 @@ def test_a_record_with_no_release_is_tagged_before_it_is_imported(
     assert any("ALBUM=A Record" in " ".join(c) for c in written)
 
 
-def test_a_record_with_a_release_is_left_to_the_catalogue(tmp_path: Path) -> None:
-    """beets is being asked to match it, and tags written first would be
-    replaced by the ones it fetches."""
+def test_a_record_with_a_release_says_which_track_each_file_is(tmp_path: Path) -> None:
+    """Untagged, the files were paired with the release's tracks by length
+    alone. A cut one track short of its release had its last file filed as the
+    track that was left out, which ran nearer its length. ADR-066."""
     review = Path(a_review(tmp_path))
     fake = moving_beets(review)
     I.Beets().apply(fake, a_plan(), str(review), "/music", mbid="x")
-    assert not [c for c in fake.calls if c[0] == "metaflac"]
+    written = [" ".join(c) for c in fake.calls if c[0] == "metaflac"]
+    assert len(written) == 2
+    assert any("TITLE=One" in w and "TRACKNUMBER=1" in w for w in written)
+    order = [c[0] if c[0] == "metaflac" else c[1] for c in fake.calls]
+    assert order.index("metaflac") < order.index("import"), "tagged after the match"
 
 
 # ---------------------------------------------------------------- stale rows
@@ -517,7 +522,7 @@ def test_a_starved_import_says_that_was_the_cause(tmp_path: Path) -> None:
     """The count left in review is true and is not why it failed. A reader
     should not have to know to look at the bottom of the transcript."""
     review = Path(a_review(tmp_path))
-    fake = FakeRunner(installed={"beet"}).expect(
+    fake = FakeRunner(installed={"beet", "metaflac"}).expect(
         "import", stderr=b"error: stdin stream ended while input required"
     )
     fake.expect("ls", stdout=b"")
@@ -2064,3 +2069,46 @@ def test_the_override_is_never_rewritten_in_place_and_left_alone_when_it_is_righ
     assert where.read_text() == I.OVERRIDE
     assert where.stat().st_ino != held and other.read_text() == "something older"
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".")]
+
+
+def test_beets_pairs_a_short_last_file_by_its_tags_and_not_its_length() -> None:
+    """The reason the plan's tags are written before a pinned import: fourteen
+    files against a fifteen-track release, the last running nearer the length
+    of the track left out than of its own."""
+    from beets.autotag.hooks import TrackInfo
+    from beets.library import Item
+
+    try:
+        from beets.autotag.match import assign_items
+    except ImportError:  # where it lived before the matcher was split out
+        from beets.autotag import assign_items
+
+    lengths = [92, 193, 278, 198, 353, 376, 79, 186, 187, 170, 244, 365, 196, 373, 337]
+    tracks = [
+        TrackInfo(
+            title=f"Song {i + 1}", track_id=f"id{i}", index=i + 1, length=float(n)
+        )
+        for i, n in enumerate(lengths)
+    ]
+    cut = [*lengths[:13], 314]
+
+    def last_file_is(tagged: bool) -> str:
+        items = [
+            Item(
+                title=f"Song {i + 1}" if tagged else "",
+                track=i + 1 if tagged else 0,
+                length=float(n),
+                path=f"/review/{i + 1:02d}.flac".encode(),
+            )
+            for i, n in enumerate(cut)
+        ]
+        pairs = assign_items(items, tracks)[0]
+        pairs = pairs.items() if hasattr(pairs, "items") else pairs
+        return next(
+            t.title
+            for item, t in pairs
+            if item.track in (0, 14) and item.length == 314.0
+        )
+
+    assert last_file_is(tagged=False) == "Song 15", "the fault this guards is gone"
+    assert last_file_is(tagged=True) == "Song 14"

@@ -53,6 +53,7 @@ def _release(r: MB.Release) -> dict[str, Any]:
         "vinyl": r.format.lower() in VINYL,
         "has_durations": r.has_durations,
         "describe": r.describe(),
+        "tracklist": [{"number": t.number, "title": t.title} for t in r.tracks],
     }
 
 
@@ -85,6 +86,22 @@ def spec_from(slug: str, release: MB.Release, sides: list[tuple[str, float, floa
         mbid=release.mbid,
         sides=tuple(out),
     )
+
+
+def leaving_out(release: MB.Release, without: set[int]) -> list[MB.Track]:
+    """Take the named tracks off a release, and return them. ADR-066.
+
+    The rest keep the numbers the release gave them: a record missing its sixth
+    track still has a seventh, and that is what its tags should say.
+    """
+    unknown = sorted(without - {t.number for t in release.tracks})
+    if unknown:
+        raise ValueError(f"that release has no track {unknown[0]} to leave out")
+    gone = [t for t in release.tracks if t.number in without]
+    release.tracks = [t for t in release.tracks if t.number not in without]
+    if not release.tracks:
+        raise ValueError("every track was left out, so there is nothing to fit")
+    return gone
 
 
 def _spec_mbid(service: Service, slug: str) -> str:
@@ -122,6 +139,10 @@ def add(app: App, service: Service) -> None:
             raise H.HttpError(400, "a release is needed; search first")
         force = bool(r.json().get("force", False))
         start_over = bool(r.json().get("start_over", False))
+        try:
+            without = {int(n) for n in r.json().get("without") or ()}
+        except (TypeError, ValueError) as e:
+            raise H.HttpError(400, "tracks to leave out are named by number") from e
         letters = layout.sides_on_disk(slug)
         if not letters:
             raise H.HttpError(404, f"no side files for {slug}")
@@ -136,6 +157,7 @@ def add(app: App, service: Service) -> None:
                 # Fitting against zeros produces a plausible-looking plan that
                 # is wrong everywhere.
                 raise ValueError("that release has no track durations")
+            left_out = leaving_out(release, without)
             job.finished += 1
 
             spans, lanes = [], {}
@@ -184,6 +206,7 @@ def add(app: App, service: Service) -> None:
                 "artist": plan.artist,
                 "tracks": sum(len(s.tracks) for s in plan.sides),
                 "forced": [k for k, f in working.items() if was_forced(f)],
+                "left_out": [{"number": t.number, "title": t.title} for t in left_out],
                 "kept": sum(bool(t.settled) for s in plan.sides for t in s.tracks),
                 "report": "\n".join(
                     f"=== side {letter}\n{report(fitted)}"

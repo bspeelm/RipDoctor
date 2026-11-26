@@ -525,6 +525,9 @@ dialog .err:empty{display:none}
 .dlg-pre{margin:0;overflow:auto;background:#0f1114;padding:10px;border-radius:6px;
   font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);
   white-space:pre-wrap;overflow-wrap:anywhere}
+#fp-without summary{cursor:pointer;color:var(--dim);font-size:12.5px}
+#fp-without-go{margin-top:8px}
+#fp-without-list{display:flex;flex-direction:column;gap:4px;max-height:12rem;overflow:auto}
 .releases{display:flex;flex-direction:column;gap:4px;max-height:16rem;overflow:auto}
 .releases:empty{display:none}
 .releases button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;flex:none;width:100%;

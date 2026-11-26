@@ -1419,6 +1419,8 @@ function openFirstPass() {
   $("#fp-cancel").hidden = false;
   $("#fp-force-row").hidden = true;
   $("#fp-force").checked = false;
+  $("#fp-without").hidden = true;
+  fpWithout = { id: "", numbers: new Set() };
   $("#fpdlg").showModal();
 }
 
@@ -1449,6 +1451,42 @@ async function searchReleases(artist, album, box, onPick, opts) {
   const { releases } = await api(`/api/mb/search?${qs}`);
   renderReleaseList(box, releases, onPick, opts);
   return releases;
+}
+
+// The tracks ticked to leave out, and the release they were ticked on: a number
+// names a different song on another release, so it is never carried across.
+let fpWithout = { id: "", numbers: new Set() };
+
+function offerWithout(rel) {
+  if (fpWithout.id !== rel.id) fpWithout = { id: rel.id, numbers: new Set() };
+  const rows = (rel.tracklist || []).map((t) => {
+    const row = el("label", "inline"), tick = el("input");
+    tick.type = "checkbox";
+    tick.checked = fpWithout.numbers.has(t.number);
+    tick.onchange = () => { fpWithout.numbers[tick.checked ? "add" : "delete"](t.number); withoutReady(); };
+    row.append(tick, el("span", null, `${t.number}. ${t.title}`));
+    return row;
+  });
+  $("#fp-without-list").replaceChildren(...rows);
+  $("#fp-without").hidden = !rows.length;
+  $("#fp-without-go").onclick = () => fpRun(rel);
+  fpWithout.titles = new Map((rel.tracklist || []).map((t) => [t.number, t.title]));
+  withoutReady();
+}
+
+// The button says which tracks go, so a tick on the wrong row is read before it is acted on.
+function withoutReady() {
+  const gone = [...fpWithout.numbers].sort((a, b) => a - b);
+  $("#fp-without-go").disabled = !gone.length;
+  blue("#fp-without-go", !!gone.length);
+  $("#fp-without-go").textContent = !gone.length ? "Fit without the ticked tracks"
+    : `Fit without ${namedList(gone.map((n) => `${n}. ${fpWithout.titles.get(n)}`))}`;
+}
+
+function leftOut(gone = []) {
+  if (!gone.length) return "";
+  const lines = gone.map((x) => `  ${x.number} \u201c${x.title}\u201d`);
+  return `Left out, as you asked, and not in this plan:\n${lines.join("\n")}\n\n`;
 }
 
 function renderReleases() { renderReleaseList($("#fp-results"), fpReleases, fpRun); }
@@ -1486,12 +1524,13 @@ async function fpRun(rel) {
   $("#fp-results").innerHTML = "<p class=\"dim\">fitting…</p>";
   try {
     const r = await runJob(S.slug, `/api/firstpass/${S.slug}`,
-                           { mbid: rel.id, force: $("#fp-force").checked, start_over: $("#fp-over").checked },
+                           { mbid: rel.id, force: $("#fp-force").checked, start_over: $("#fp-over").checked,
+                             without: fpWithout.id === rel.id ? [...fpWithout.numbers] : [] },
                            "fitting");
     $("#fp-results").innerHTML = "";
     $("#fp-report").hidden = false;
     const kept = r.kept ? `${counted(r.kept, "track", "tracks")} you set or checked left where ${r.kept === 1 ? "it was" : "they were"}` : "";
-    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + notHeld(r.released) + startedOver(r.replaced) + (kept ? `${kept}.\n\n` : "") + r.report;
+    $("#fp-report").textContent = (r.warning ? `WARNING: ${r.warning}\n\n` : "") + leftOut(r.left_out) + notHeld(r.released) + startedOver(r.replaced) + (kept ? `${kept}.\n\n` : "") + r.report;
     $("#fp-done").hidden = false;
     $("#fp-cancel").hidden = true;
     S.sideData = {};
@@ -1506,6 +1545,7 @@ async function fpRun(rel) {
     $("#fp-err").textContent = e.message;
     // Offered only after a refusal: a side that fits is never placed this way.
     $("#fp-force-row").hidden = false;
+    offerWithout(rel);
   }
 }
 

@@ -255,7 +255,9 @@ def test_the_release_chosen_in_the_dialog_is_the_one_imported(
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
     rows = every_row("/music/A Band/A Record/01 One.flac")
-    service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
+    service.runner = FakeRunner(installed={"beet", "metaflac"}).expect(
+        "ls", stdout=rows.encode()
+    )
     F.remember(service.layout, "album", album="A Record", artist="A Band")
 
     # The importer moves nothing here, so review is still full and the run
@@ -1179,6 +1181,86 @@ def test_forcing_places_that_side_from_the_catalogue_and_says_which(
     plan = F.read_plan(service.layout.plan_file("album"))
     starts = [t.start for t in plan.sides[0].tracks]
     assert starts == [0.0, 11.0, 22.0, 35.0]
+
+
+# 60s of catalogue into 40s of music, and 45s once one track is gone.
+ONE_TOO_MANY = [15000, 15000, 15000, 15000]
+
+
+def test_a_recording_missing_a_track_is_refused_and_told_it_can_leave_one_out(
+    tmp_path: Path,
+) -> None:
+    service = drifting_service(tmp_path, release(ONE_TOO_MANY))
+    body = post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"}).json()
+    assert "leave out any track this recording does not have" in body["error"]
+
+
+def test_a_track_left_out_is_not_fitted_and_the_rest_keep_their_numbers(
+    tmp_path: Path,
+) -> None:
+    service = drifting_service(tmp_path, release(ONE_TOO_MANY))
+    body = post(
+        build(service),
+        "/api/firstpass/album",
+        service,
+        {"mbid": "aaa", "without": [2], "force": True},
+    ).json()
+    assert not body["error"], body["error"]
+    assert body["result"]["left_out"] == [{"number": 2, "title": "Track 2"}]
+    assert body["result"]["tracks"] == 3
+
+    plan = F.read_plan(service.layout.plan_file("album"))
+    assert [t.number for t in plan.sides[0].tracks] == [1, 3, 4]
+    spec = F.read_spec(service.layout.spec_file("album"))
+    assert [t.title for t in spec.sides[0].tracks] == ["Track 1", "Track 3", "Track 4"]
+
+
+def test_nothing_is_left_out_unless_it_is_asked_for(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    body = post(build(service), "/api/firstpass/album", service, {"mbid": "aaa"}).json()
+    assert body["result"]["left_out"] == []
+    assert body["result"]["tracks"] == 4
+
+
+def test_leaving_out_a_track_the_release_does_not_have_is_refused(
+    tmp_path: Path,
+) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000, 2000, 2000]))
+    body = post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", "without": [9]}
+    ).json()
+    assert "no track 9" in body["error"]
+    assert not service.layout.plan_file("album").exists()
+
+
+def test_leaving_out_every_track_is_refused(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000]))
+    body = post(
+        build(service),
+        "/api/firstpass/album",
+        service,
+        {"mbid": "aaa", "without": [1, 2]},
+    ).json()
+    assert "nothing to fit" in body["error"]
+
+
+def test_tracks_to_leave_out_are_numbers(tmp_path: Path) -> None:
+    service = prepared_service(tmp_path, release([2000, 2000]))
+    r = post(
+        build(service), "/api/firstpass/album", service, {"mbid": "aaa", "without": "x"}
+    )
+    assert r.status == 400
+
+
+def test_a_search_sends_each_tracklist_so_the_page_can_offer_what_to_leave_out(
+    tmp_path: Path,
+) -> None:
+    service = a_catalogue_service(tmp_path, SEARCH, release([2000, 3000]))
+    body = get(build(service), "/api/mb/search?artist=A&album=B", service).json()
+    assert body["releases"][0]["tracklist"] == [
+        {"number": 1, "title": "Track 1"},
+        {"number": 2, "title": "Track 2"},
+    ]
 
 
 def a_second_pass(service, body=None):  # type: ignore[no-untyped-def]

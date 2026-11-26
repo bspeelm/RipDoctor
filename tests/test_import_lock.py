@@ -176,7 +176,9 @@ def test_a_records_import_holds_the_same_lock(tmp_path: Path) -> None:
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
     rows = f"A Record{I_SEP}/music/A Band/A Record/01 One.flac"
-    inner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
+    inner = FakeRunner(installed={"beet", "metaflac"}).expect(
+        "ls", stdout=rows.encode()
+    )
     noticing = Noticing(inner)
     service.runner = noticing  # type: ignore[assignment]
     post(build(service), "/api/import/album", service, {"mbid": "chosen"})

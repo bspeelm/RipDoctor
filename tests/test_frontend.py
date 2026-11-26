@@ -1929,3 +1929,41 @@ def test_a_configured_device_that_is_missing_is_named_above_the_others() -> None
     assert "configured, not found" in body
     assert 'o.value = ""; o.disabled = true;' in body and "sel.prepend(o);" in body
     assert 'sel.value = "";' in body, "a missing device must not be swapped for another"
+
+
+def test_leaving_tracks_out_is_offered_only_after_a_refusal() -> None:
+    """ADR-066: nothing about a first pass that fits says this exists."""
+    assert re.search(r'<details id="fp-without" hidden>', markup())
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert run.index("} catch (e) {") < run.index("offerWithout(rel);")
+    assert run.count("offerWithout") == 1
+    opened = js[js.index("fpReleases = [];") : js.index('$("#fpdlg").showModal();')]
+    assert '$("#fp-without").hidden = true;' in opened
+
+
+def test_tracks_ticked_on_one_release_are_not_left_out_of_another() -> None:
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "without: fpWithout.id === rel.id ? [...fpWithout.numbers] : []" in run
+
+
+def test_ticking_a_track_to_leave_out_arms_a_button_that_fits_again() -> None:
+    """The ticks did nothing until the release was pressed a second time, and
+    nothing on the page said so."""
+    assert 'id="fp-without-go" disabled' in markup()
+    js = (STATIC / "app.js").read_text()
+    offer = re.search(r"function offerWithout\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-without-go").onclick = () => fpRun(rel);' in offer
+    assert "withoutReady(); };" in offer, "a tick does not arm the button"
+    ready = re.search(r"function withoutReady\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-without-go").disabled = !gone.length;' in ready
+
+
+def test_the_button_that_leaves_tracks_out_names_them() -> None:
+    """A track was left out that nobody meant to tick, and the first sign of it
+    was the wrong title on the last track of the plan."""
+    js = (STATIC / "app.js").read_text()
+    ready = re.search(r"function withoutReady\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "`Fit without ${namedList(gone.map(" in ready
+    assert "fpWithout.titles.get(n)" in ready

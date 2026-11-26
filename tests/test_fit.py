@@ -638,3 +638,39 @@ def test_a_side_the_gaps_misled_does_not_blame_the_catalogues_total() -> None:
     assert "last one" not in said
     assert "another release" in said and "by ear" in said
     assert "gaps it found" in said
+
+
+def test_a_refusal_ends_in_whole_sentences() -> None:
+    """It read "do not match this pressing. Use. Try another release"."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    side = spec_side(n=3, cat=200.0, start=10.0, end=200.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    said = str(caught.value)
+    assert said.endswith(
+        "do not match this pressing. Try another release, leave out any track "
+        "this recording does not have, or place this side by ear."
+    )
+
+
+def test_a_side_refused_after_being_forced_says_the_forcing_was_tried() -> None:
+    """Ticking the box and fitting again gave the same words back, offering to
+    place the side by ear, so the box looked as though it had been ignored."""
+    env, _gapset = side_with_gaps(n_tracks=3, track=60.0)
+    side = spec_side(n=3, cat=200.0, start=10.0, end=200.0)
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW, force=True)
+    said = str(caught.value)
+    assert "Placed from the catalogue alone it still does not fit" in said
+    assert "by ear" not in said
+    assert "another release" in said and "whole side was captured" in said
+
+
+def test_only_a_side_too_short_for_its_tracks_is_told_to_leave_one_out() -> None:
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    assert "leave out" not in str(caught.value)
