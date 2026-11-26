@@ -1957,4 +1957,13 @@ def test_ticking_a_track_to_leave_out_arms_a_button_that_fits_again() -> None:
     assert '$("#fp-without-go").onclick = () => fpRun(rel);' in offer
     assert "withoutReady(); };" in offer, "a tick does not arm the button"
     ready = re.search(r"function withoutReady\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
-    assert '$("#fp-without-go").disabled = !any;' in ready
+    assert '$("#fp-without-go").disabled = !gone.length;' in ready
+
+
+def test_the_button_that_leaves_tracks_out_names_them() -> None:
+    """A track was left out that nobody meant to tick, and the first sign of it
+    was the wrong title on the last track of the plan."""
+    js = (STATIC / "app.js").read_text()
+    ready = re.search(r"function withoutReady\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "`Fit without ${namedList(gone.map(" in ready
+    assert "fpWithout.titles.get(n)" in ready

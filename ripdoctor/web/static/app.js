@@ -1470,13 +1470,17 @@ function offerWithout(rel) {
   $("#fp-without-list").replaceChildren(...rows);
   $("#fp-without").hidden = !rows.length;
   $("#fp-without-go").onclick = () => fpRun(rel);
+  fpWithout.titles = new Map((rel.tracklist || []).map((t) => [t.number, t.title]));
   withoutReady();
 }
 
+// The button says which tracks go, so a tick on the wrong row is read before it is acted on.
 function withoutReady() {
-  const any = fpWithout.numbers.size > 0;
-  $("#fp-without-go").disabled = !any;
-  blue("#fp-without-go", any);
+  const gone = [...fpWithout.numbers].sort((a, b) => a - b);
+  $("#fp-without-go").disabled = !gone.length;
+  blue("#fp-without-go", !!gone.length);
+  $("#fp-without-go").textContent = !gone.length ? "Fit without the ticked tracks"
+    : `Fit without ${namedList(gone.map((n) => `${n}. ${fpWithout.titles.get(n)}`))}`;
 }
 
 function leftOut(gone = []) {
