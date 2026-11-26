@@ -649,7 +649,8 @@ def test_a_refusal_ends_in_whole_sentences() -> None:
         FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
     said = str(caught.value)
     assert said.endswith(
-        "do not match this pressing. Try another release, or place this side by ear."
+        "do not match this pressing. Try another release, leave out any track "
+        "this recording does not have, or place this side by ear."
     )
 
 
@@ -665,3 +666,11 @@ def test_a_side_refused_after_being_forced_says_the_forcing_was_tried() -> None:
     assert "Placed from the catalogue alone it still does not fit" in said
     assert "by ear" not in said
     assert "another release" in said and "whole side was captured" in said
+
+
+def test_only_a_side_too_short_for_its_tracks_is_told_to_leave_one_out() -> None:
+    env, side = drifting_side()
+    spec = P.Spec(slug="album", album="A", artist="B", sides=(side,))
+    with pytest.raises(FIT.OutOfSide) as caught:
+        FIT.fit_plan(spec, {"a": env}, below=G.BELOW)
+    assert "leave out" not in str(caught.value)

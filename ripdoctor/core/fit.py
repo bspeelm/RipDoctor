@@ -42,6 +42,7 @@ class OutOfSide(ValueError):
         want = sum(t.cat for t in side.tracks)
         span = side.end - side.start
         held = [f"track {t.number}" for t in side.tracks if t.has_ear_edges]
+        short = not held and want > span
         where = (
             f'track {bad.number} "{bad.title}" would start at {bad.start:.0f}s and '
             f"end at {bad.end:.0f}s"
@@ -52,7 +53,7 @@ class OutOfSide(ValueError):
         )
         if held:
             why = f"with the boundaries set on {' and '.join(held)} held where they are"
-        elif want > span:
+        elif short:
             why = "so the release's durations do not match this pressing"
         else:
             why = "so its durations do not line up with the gaps it found"
@@ -61,6 +62,7 @@ class OutOfSide(ValueError):
         ways = [
             *(["move those boundaries"] if held else []),
             "try another release",
+            *(["leave out any track this recording does not have"] if short else []),
             "check that the whole side was captured"
             if forced
             else "place this side by ear",

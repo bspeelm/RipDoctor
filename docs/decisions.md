@@ -2979,3 +2979,36 @@ in the File job. An archived tape stays as it is, so the chance to change anythi
 
 A merge holds more rows than its plan, which is expected, so the proof says it was one and the gate
 lets that through.
+
+## ADR-066 — a first pass can leave out tracks the recording does not have
+
+**Status:** accepted. Set by the author, 2026-11-26.
+
+A recording can hold less than its release: an edition without the closing track, a damaged side,
+a capture that stopped. Every release the catalogue offers is then longer than the music, the fit
+refuses, and placing from the catalogue alone (ADR-061) refuses too, because the tracks laid end to
+end run past the side. What was left was placing every boundary by hand against a blank timeline.
+
+**The argument against: this is a way to make a wrong release fit.** A side five minutes short is
+far more often the wrong pressing or a bad capture than a missing song, and dropping a track until
+the arithmetic closes hides that. A plan that silently holds thirteen of fourteen also reads, three
+steps later, as a whole album.
+
+What survives it:
+
+- **It appears only after a refusal,** in the same place as ADR-061's tick and closed until it is
+  opened. A first pass that fits never shows it
+  (`test_leaving_tracks_out_is_offered_only_after_a_refusal`).
+- **A person names each track.** Nothing is dropped by duration or by guess; the refusal says it
+  can be done only where the catalogue runs longer than the music
+  (`test_only_a_side_too_short_for_its_tracks_is_told_to_leave_one_out`).
+- **The rest keep the release's numbers.** A record missing its sixth track still has a seventh, so
+  the gap stays visible in the plan, the file names and the tags
+  (`test_a_track_left_out_is_not_fitted_and_the_rest_keep_their_numbers`).
+- **The report names what was left out,** above the table, each time.
+- **A tick belongs to the release it was made on.** The same number is another song elsewhere
+  (`test_tracks_ticked_on_one_release_are_not_left_out_of_another`).
+
+**What is not done here.** The choice is not saved: a second first pass asks again. The spec keeps
+the release's id, so re-labelling against it refuses on the count, and an import pinned to it hands
+beets fewer files than the release has tracks, which ADR-054 already records as unchecked.

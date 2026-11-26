@@ -1929,3 +1929,20 @@ def test_a_configured_device_that_is_missing_is_named_above_the_others() -> None
     assert "configured, not found" in body
     assert 'o.value = ""; o.disabled = true;' in body and "sel.prepend(o);" in body
     assert 'sel.value = "";' in body, "a missing device must not be swapped for another"
+
+
+def test_leaving_tracks_out_is_offered_only_after_a_refusal() -> None:
+    """ADR-066: nothing about a first pass that fits says this exists."""
+    assert re.search(r'<details id="fp-without" hidden>', markup())
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert run.index("} catch (e) {") < run.index("offerWithout(rel);")
+    assert run.count("offerWithout") == 1
+    opened = js[js.index("fpReleases = [];") : js.index('$("#fpdlg").showModal();')]
+    assert '$("#fp-without").hidden = true;' in opened
+
+
+def test_tracks_ticked_on_one_release_are_not_left_out_of_another() -> None:
+    js = (STATIC / "app.js").read_text()
+    run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert "without: fpWithout.id === rel.id ? [...fpWithout.numbers] : []" in run
