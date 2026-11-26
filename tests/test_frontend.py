@@ -1946,3 +1946,15 @@ def test_tracks_ticked_on_one_release_are_not_left_out_of_another() -> None:
     js = (STATIC / "app.js").read_text()
     run = re.search(r"async function fpRun\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
     assert "without: fpWithout.id === rel.id ? [...fpWithout.numbers] : []" in run
+
+
+def test_ticking_a_track_to_leave_out_arms_a_button_that_fits_again() -> None:
+    """The ticks did nothing until the release was pressed a second time, and
+    nothing on the page said so."""
+    assert 'id="fp-without-go" disabled' in markup()
+    js = (STATIC / "app.js").read_text()
+    offer = re.search(r"function offerWithout\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-without-go").onclick = () => fpRun(rel);' in offer
+    assert "withoutReady(); };" in offer, "a tick does not arm the button"
+    ready = re.search(r"function withoutReady\(.*?\n\}", js, re.S).group(0)  # type: ignore[union-attr]
+    assert '$("#fp-without-go").disabled = !any;' in ready

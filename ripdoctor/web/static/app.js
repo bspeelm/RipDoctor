@@ -1463,12 +1463,20 @@ function offerWithout(rel) {
     const row = el("label", "inline"), tick = el("input");
     tick.type = "checkbox";
     tick.checked = fpWithout.numbers.has(t.number);
-    tick.onchange = () => fpWithout.numbers[tick.checked ? "add" : "delete"](t.number);
+    tick.onchange = () => { fpWithout.numbers[tick.checked ? "add" : "delete"](t.number); withoutReady(); };
     row.append(tick, el("span", null, `${t.number}. ${t.title}`));
     return row;
   });
   $("#fp-without-list").replaceChildren(...rows);
   $("#fp-without").hidden = !rows.length;
+  $("#fp-without-go").onclick = () => fpRun(rel);
+  withoutReady();
+}
+
+function withoutReady() {
+  const any = fpWithout.numbers.size > 0;
+  $("#fp-without-go").disabled = !any;
+  blue("#fp-without-go", any);
 }
 
 function leftOut(gone = []) {
