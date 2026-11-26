@@ -38,7 +38,7 @@ REACH = 0.5
 class OutOfSide(ValueError):
     """The tracks a side was given need more of it than the side has. ADR-045."""
 
-    def __init__(self, side: SpecSide, bad: PlanTrack) -> None:
+    def __init__(self, side: SpecSide, bad: PlanTrack, forced: bool = False) -> None:
         want = sum(t.cat for t in side.tracks)
         span = side.end - side.start
         held = [f"track {t.number}" for t in side.tracks if t.has_ear_edges]
@@ -51,17 +51,26 @@ class OutOfSide(ValueError):
             f"against {span:.0f}s of music"
         )
         if held:
-            why = (
-                f"with the boundaries set on {' and '.join(held)} held where they "
-                "are. Move those"
-            )
+            why = f"with the boundaries set on {' and '.join(held)} held where they are"
         elif want > span:
-            why = "so the release's durations do not match this pressing. Use"
+            why = "so the release's durations do not match this pressing"
         else:
-            why = "so its durations do not line up with the gaps it found. Use"
+            why = "so its durations do not line up with the gaps it found"
+        # Placing by ear is the way out that was just tried, so it is not
+        # offered again as though it had not been.
+        ways = [
+            *(["move those boundaries"] if held else []),
+            "try another release",
+            "check that the whole side was captured"
+            if forced
+            else "place this side by ear",
+        ]
+        advice = ", ".join(ways[:-1]) + f", or {ways[-1]}."
+        tried = "Placed from the catalogue alone it still does not fit. " * forced
         super().__init__(
-            f"side {side.letter}: {total}, and {where}, {why}. Try another "
-            "release, or place this side by ear."
+            f"side {side.letter}: {total}, and {where}, {why}. {tried}"
+            + advice[0].upper()
+            + advice[1:]
         )
 
 
@@ -277,7 +286,7 @@ def fit_plan(
             )
             bad = next((f for f in fitted if f.track.end <= f.track.start), None)
         if bad is not None:
-            raise OutOfSide(side, bad.track)
+            raise OutOfSide(side, bad.track, forced=force)
         working[side.letter] = fitted
         sides.append(to_side(side.letter, fitted))
     plan = Plan(
