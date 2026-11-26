@@ -3012,3 +3012,13 @@ What survives it:
 **What is not done here.** The choice is not saved: a second first pass asks again. The spec keeps
 the release's id, so re-labelling against it refuses on the count, and an import pinned to it hands
 beets fewer files than the release has tracks, which ADR-054 already records as unchecked.
+
+### An import pinned to a release tags the files first
+
+ADR-049 wrote the plan's tags only when no release was pinned, since beets replaces them with the
+ones it fetches. That left the matcher nothing but length to pair files with tracks. A cut one
+track short of its release had its last file filed under the title and number of the track left
+out, which ran nearer its length than its own did. The plan's titles and numbers are now written
+before every beets import, so the match has them to go on; what beets fetches still replaces them
+(`test_a_record_with_a_release_says_which_track_each_file_is`). beets' own matcher is asked both
+ways in `test_beets_pairs_a_short_last_file_by_its_tags_and_not_its_length`.

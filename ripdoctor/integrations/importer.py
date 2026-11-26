@@ -538,10 +538,11 @@ class Beets:
             else None
         )
         try:
-            if not mbid:
-                # Nothing to match against, and a cut file carries no tags at
-                # all. The plan is what is known, so it is written first. ADR-049.
-                T.write_plan_tags(runner, plan, review)
+            # A cut file carries no tags at all. With no release the plan is
+            # all that is known; with one, its titles and numbers are what
+            # tell the matcher which track each file is, where length alone
+            # pairs a file with the wrong one. ADR-049, ADR-066.
+            T.write_plan_tags(runner, plan, review)
             result = runner.run(
                 self._argv(self._import(review, mbid), self._config_for(how)),
                 stdin=_merge_answers(how) or answers(duplicates, matching=bool(mbid)),

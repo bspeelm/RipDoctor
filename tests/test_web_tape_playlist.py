@@ -723,7 +723,7 @@ def an_album_service(tmp_path: Path) -> tuple[Service, Taking]:
     filed_at = library / "A Band" / "A Record" / "01 One.flac"
     filed_at.parent.mkdir(parents=True)
     filed_at.write_bytes(b"a")
-    runner = Taking(service.layout.review_dir("album"), installed={"beet"})
+    runner = Taking(service.layout.review_dir("album"), installed={"beet", "metaflac"})
     runner.expect("ls", stdout=every_row(filed_at, "m").encode())
     service.runner = runner
     return service, runner
@@ -807,7 +807,7 @@ def test_a_failed_album_import_rebuilds_nothing(
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
     service.state_dir = str(tmp_path / "state")
-    service.runner = FakeRunner(installed={"beet"})
+    service.runner = FakeRunner(installed={"beet", "metaflac"})
     a_tape_with_a_playlist(service)
     called: list[int] = []
     monkeypatch.setattr(TX, "rebuild_all", lambda *a, **k: called.append(1) or [])

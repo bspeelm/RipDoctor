@@ -255,7 +255,9 @@ def test_the_release_chosen_in_the_dialog_is_the_one_imported(
     service, _library = ready_to_import(tmp_path)
     service.settings = replace(service.settings, importer="beets")
     rows = every_row("/music/A Band/A Record/01 One.flac")
-    service.runner = FakeRunner(installed={"beet"}).expect("ls", stdout=rows.encode())
+    service.runner = FakeRunner(installed={"beet", "metaflac"}).expect(
+        "ls", stdout=rows.encode()
+    )
     F.remember(service.layout, "album", album="A Record", artist="A Band")
 
     # The importer moves nothing here, so review is still full and the run
